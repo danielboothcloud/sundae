@@ -3,6 +3,7 @@ package common_test
 import (
 	"testing"
 
+	"github.com/charmbracelet/soft-serve/pkg/proto"
 	"github.com/charmbracelet/soft-serve/pkg/ui/common"
 )
 
@@ -26,5 +27,19 @@ func TestIsFileMarkdown(t *testing.T) {
 				t.Errorf("IsFileMarkdown(%q, %q) = %v, want %v", c.content, c.filename, got, c.isMkd)
 			}
 		})
+	}
+}
+
+func TestCloneCmd(t *testing.T) {
+	c := &common.Common{}
+	if got, want := c.CloneCmd("ssh://h", "r", proto.VCSJJ), "jj git clone git@h:r.git"; got != want {
+		t.Errorf("jj: got %q, want %q", got, want)
+	}
+	if got, want := c.CloneCmd("ssh://h", "r", proto.VCSGit), "git clone git@h:r.git"; got != want {
+		t.Errorf("git: got %q, want %q", got, want)
+	}
+	c.HideCloneCmd = true
+	if got := c.CloneCmd("ssh://h", "r", proto.VCSJJ); got != "" {
+		t.Errorf("hidden: got %q", got)
 	}
 }

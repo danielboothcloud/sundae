@@ -256,6 +256,11 @@ func (repository) IsHidden() bool {
 	return false
 }
 
+// Vcs implements proto.Repository.
+func (repository) Vcs() proto.VCS {
+	return proto.VCSGit
+}
+
 // IsMirror implements proto.Repository.
 func (repository) IsMirror() bool {
 	return false

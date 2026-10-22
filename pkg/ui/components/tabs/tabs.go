@@ -44,6 +44,14 @@ func (t *Tabs) SetSize(width, height int) {
 	t.common.SetSize(width, height)
 }
 
+// SetTabs replaces the tab names, keeping the active tab when still valid.
+func (t *Tabs) SetTabs(tabs []string) {
+	t.tabs = tabs
+	if t.activeTab >= len(tabs) {
+		t.activeTab = 0
+	}
+}
+
 // Init implements tea.Model.
 func (t *Tabs) Init() tea.Cmd {
 	t.activeTab = 0

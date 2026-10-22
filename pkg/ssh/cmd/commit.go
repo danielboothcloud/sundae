@@ -8,6 +8,7 @@ import (
 	gansi "charm.land/glamour/v2/ansi"
 	"github.com/charmbracelet/soft-serve/git"
 	"github.com/charmbracelet/soft-serve/pkg/backend"
+	"github.com/charmbracelet/soft-serve/pkg/proto"
 	"github.com/charmbracelet/soft-serve/pkg/ui/common"
 	"github.com/charmbracelet/soft-serve/pkg/ui/styles"
 	"github.com/charmbracelet/soft-serve/pkg/utils"
@@ -60,6 +61,11 @@ func commitCommand() *cobra.Command {
 
 			s := strings.Builder{}
 			commitLine := "commit " + commitSHA
+			if rr.Vcs() == proto.VCSJJ {
+				if cid := r.ChangeID(commit); cid != "" {
+					commitLine = "change " + cid + "\n" + commitLine
+				}
+			}
 			authorLine := "Author: " + utils.Sanitize(commit.Author.Name)
 			dateLine := "Date:   " + commit.Committer.When.UTC().Format(time.UnixDate)
 			msgLine := strings.ReplaceAll(utils.Sanitize(commit.Message), "\r\n", "\n")

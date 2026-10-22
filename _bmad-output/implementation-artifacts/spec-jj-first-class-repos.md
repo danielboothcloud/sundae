@@ -2,7 +2,8 @@
 title: 'First-class Jujutsu (jj) repos alongside git'
 type: 'feature'
 created: '2026-10-22'
-status: 'draft'
+status: 'done'
+baseline_commit: '14250567539d5d4945e7f54c43761ac959f58df9'
 route: 'dispatch'
 review_loop_iteration: 0
 context: []
@@ -18,23 +19,20 @@ context: []
 
 ## Boundaries & Constraints
 
-**Always:** Existing repos migrate to `vcs=git` with unchanged behavior. `vcs` is set at create/import and immutable afterwards. Server needs no `jj` binary: change IDs come from the `change-id` header jj writes into pushed git commits; commits without it show the short hash.
+**Always:** New and imported repos default to `vcs=jj` when `--vcs` is omitted (decision). Existing repos migrate to `vcs=git` with unchanged behavior. `vcs` is set at create/import and immutable afterwards. Server needs no `jj` binary: change IDs come from the `change-id` header jj writes into pushed git commits; commits without it show the short hash.
 
 **Never:** Do not rename `pkg/git`, remove git support, or change wire protocols/auth. Do not shell out to `jj` on the server.
 
 ## I/O & Edge-Case Matrix
 
 | Scenario | Input / State | Expected Output / Behavior | Error Handling |
+| Create repo, no flag | `repo create foo` | Row `vcs=jj`; prints `jj git clone <url>` | N/A |
 | Create jj repo | `repo create foo --vcs jj` | Row `vcs=jj`; prints `jj git clone <url>` | invalid `--vcs` value → error |
 | jj commit with change-id | pushed commit with header | log/commit show change ID + short commit id | N/A |
 | Commit lacking change-id | plain git commit in jj repo | falls back to short hash | N/A |
 | Legacy repo | pre-migration row | `vcs=git`, git UI unchanged | N/A |
 
 </frozen-after-approval>
-
-## Open Questions
-
-1. Default `vcs` for newly created/imported repos when `--vcs` is omitted — options: `git` (existing scripts and mirrors keep working; jj is opt-in) / `jj` (matches "it's all jj now"; mirrors of non-jj remotes still work since storage is git).
 
 ## Code Map
 
@@ -69,6 +67,22 @@ context: []
 ## Spec Change Log
 
 ## Review Triage Log
+
+| Finding | Verdict | Route | Evidence |
+| --- | --- | --- | --- |
+| change-id header unsanitized (escape injection) | medium | patch | header is pusher-controlled; now validated `^[A-Za-z0-9]{1,64}$` + tests |
+| ShortChangeID slices bytes | false | - | moot: ParseChangeID only returns ASCII |
+| per-commit `git cat-file` spawn (TUI log, ChangeID) | low | defer | page-sized lists only; batching is a perf follow-up |
+| default jj is breaking for scripts / info wording | false | - | explicit human decision in frozen intent |
+| auto-created repos (push-to-create, config repo) become jj | false | - | follows decided default |
+| no path to change vcs of existing repo | false | - | spec: vcs immutable |
+| README says `repo commit` shows short ID | low | patch | README reworded |
+| CloneCmd vs proto.CloneCommand duplication/doc | low | patch | doc comment fixed; unit test added for CloneCmd |
+| go-get ignores HideCloneCmd | low | defer | fix adds config plumbing; cosmetic |
+| X-Soft-Serve-VCS header / go-get git case untested | medium | defer | needs curl testscript (skipped on windows); header is set post-auth |
+| TUI tab/log rendering untested | low | defer | no TUI harness exists |
+| no CHECK constraint / unknown Vcs() fallback; PG migration untested | low | defer | only reachable via manual DB edit |
+| bookmark alias test lacks stdout assertion | low | defer | cosmetic |
 
 ## Verification
 

@@ -61,7 +61,7 @@ func NewItem(c common.Common, repo proto.Repository) (Item, error) {
 	}
 	var cmd string
 	if cfg := c.Config(); cfg != nil {
-		cmd = c.CloneCmd(cfg.SSH.PublicURL, repo.Name())
+		cmd = c.CloneCmd(cfg.SSH.PublicURL, repo.Name(), repo.Vcs())
 	}
 	return Item{
 		repo:       repo,

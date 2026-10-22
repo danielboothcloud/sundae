@@ -31,10 +31,11 @@ cmp stdout repo3.txt
 Project Name: repo33
 Repository: repo3
 Description: descriptive
+VCS: jj
 Private: false
 Hidden: false
 Mirror: false
 Owner: admin
-Default Branch: main
-Branches:
+Default Bookmark: main
+Bookmarks:
   - main

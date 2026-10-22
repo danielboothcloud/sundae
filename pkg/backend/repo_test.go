@@ -89,3 +89,37 @@ func TestValidateImportRemote(t *testing.T) {
 		})
 	}
 }
+
+// TestRepositoryVcs covers the vcs kind: default, explicit values, invalid
+// values, and legacy rows.
+func TestRepositoryVcs(t *testing.T) {
+	is := is.New(t)
+	be, _ := newTestBackend(t)
+	ctx := context.Background()
+
+	r, err := be.CreateRepository(ctx, "default-vcs", nil, proto.RepositoryOptions{})
+	is.NoErr(err)
+	is.Equal(r.Vcs(), proto.VCSJJ)
+
+	r, err = be.CreateRepository(ctx, "git-vcs", nil, proto.RepositoryOptions{Vcs: proto.VCSGit})
+	is.NoErr(err)
+	is.Equal(r.Vcs(), proto.VCSGit)
+
+	r, err = be.CreateRepository(ctx, "jj-vcs", nil, proto.RepositoryOptions{Vcs: proto.VCSJJ})
+	is.NoErr(err)
+	is.Equal(r.Vcs(), proto.VCSJJ)
+
+	// The kind survives a reload.
+	r, err = be.Repository(ctx, "jj-vcs")
+	is.NoErr(err)
+	is.Equal(r.Vcs(), proto.VCSJJ)
+
+	_, err = be.CreateRepository(ctx, "bad-vcs", nil, proto.RepositoryOptions{Vcs: "hg"})
+	is.True(err != nil)
+	_, err = be.Repository(ctx, "bad-vcs")
+	is.True(errors.Is(err, proto.ErrRepoNotFound))
+
+	// An invalid kind is rejected before any clone is attempted.
+	_, err = be.ImportRepository(ctx, "bad-import", nil, "https://example.com/x.git", proto.RepositoryOptions{Vcs: "hg"})
+	is.True(err != nil)
+}

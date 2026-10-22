@@ -56,6 +56,11 @@ func (d *Backend) CreateRepository(ctx context.Context, name string, user proto.
 
 	rp := filepath.Join(d.repoPath(name))
 
+	vcs, err := proto.ParseVCS(string(opts.Vcs))
+	if err != nil {
+		return nil, err
+	}
+
 	var userID int64
 	if user != nil {
 		userID = user.ID()
@@ -86,6 +91,7 @@ func (d *Backend) CreateRepository(ctx context.Context, name string, user proto.
 			opts.Private,
 			opts.Hidden,
 			opts.Mirror,
+			vcs.String(),
 		); err != nil {
 			return err
 		}
@@ -152,6 +158,11 @@ func (d *Backend) defaultAdminUserID(ctx context.Context, tx *db.Tx) (int64, err
 func (d *Backend) ImportRepository(_ context.Context, name string, user proto.User, remote string, opts proto.RepositoryOptions) (proto.Repository, error) {
 	name = utils.SanitizeRepo(name)
 	if err := utils.ValidateRepo(name); err != nil {
+		return nil, err
+	}
+
+	// Fail before cloning if the VCS kind is invalid.
+	if _, err := proto.ParseVCS(string(opts.Vcs)); err != nil {
 		return nil, err
 	}
 
@@ -802,6 +813,16 @@ func (r *repo) Open() (*git.Repository, error) {
 // It implements backend.Repository.
 func (r *repo) ProjectName() string {
 	return r.repo.ProjectName
+}
+
+// Vcs returns the repository's VCS kind. Rows without a value are git.
+//
+// It implements proto.Repository.
+func (r *repo) Vcs() proto.VCS {
+	if r.repo.Vcs == "" {
+		return proto.VCSGit
+	}
+	return proto.VCS(r.repo.Vcs)
 }
 
 // IsHidden returns whether the repository is hidden.

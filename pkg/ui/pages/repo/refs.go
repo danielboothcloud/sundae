@@ -64,8 +64,21 @@ func (r *Refs) Path() string {
 
 // TabName returns the name of the tab.
 func (r *Refs) TabName() string {
+	var vcs proto.VCS
+	if r.repo != nil {
+		vcs = r.repo.Vcs()
+	}
+	return r.TabNameFor(vcs)
+}
+
+// TabNameFor returns the name of the tab for a repository of the given VCS.
+// jj repositories call branches "Bookmarks".
+func (r *Refs) TabNameFor(vcs proto.VCS) string {
 	switch r.refPrefix {
 	case git.RefsHeads:
+		if vcs == proto.VCSJJ {
+			return "Bookmarks"
+		}
 		return "Branches"
 	case git.RefsTags:
 		return "Tags"

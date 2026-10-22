@@ -16,6 +16,7 @@ func importCommand() *cobra.Command {
 	var projectName string
 	var mirror bool
 	var hidden bool
+	var vcsFlag string
 	var lfs bool
 	var lfsEndpoint string
 
@@ -30,12 +31,17 @@ func importCommand() *cobra.Command {
 			user := proto.UserFromContext(ctx)
 			name := args[0]
 			remote := args[1]
+			vcs, err := proto.ParseVCS(vcsFlag)
+			if err != nil {
+				return err
+			}
 			if _, err := be.ImportRepository(ctx, name, user, remote, proto.RepositoryOptions{
 				Private:     private,
 				Description: description,
 				ProjectName: projectName,
 				Mirror:      mirror,
 				Hidden:      hidden,
+				Vcs:         vcs,
 				LFS:         lfs,
 				LFSEndpoint: lfsEndpoint,
 			}); err != nil {
@@ -57,6 +63,8 @@ func importCommand() *cobra.Command {
 	cmd.Flags().StringVarP(&description, "description", "d", "", "set the repository description")
 	cmd.Flags().StringVarP(&projectName, "name", "n", "", "set the project name")
 	cmd.Flags().BoolVarP(&hidden, "hidden", "H", false, "hide the repository from the UI")
+
+	cmd.Flags().StringVarP(&vcsFlag, "vcs", "", string(proto.DefaultVCS), "set the repository VCS kind (git or jj)")
 
 	return cmd
 }

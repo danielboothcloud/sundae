@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/soft-serve/git"
 	"github.com/charmbracelet/soft-serve/pkg/backend"
 	"github.com/charmbracelet/soft-serve/pkg/config"
+	"github.com/charmbracelet/soft-serve/pkg/proto"
 	"github.com/charmbracelet/soft-serve/pkg/ui/keymap"
 	"github.com/charmbracelet/soft-serve/pkg/ui/styles"
 	zone "github.com/lrstanley/bubblezone/v2"
@@ -97,9 +98,13 @@ func (c *Common) PublicKey() ssh.PublicKey {
 }
 
 // CloneCmd returns the clone command string.
-func (c *Common) CloneCmd(publicURL, name string) string {
+// jj repositories get "jj git clone", everything else "git clone".
+func (c *Common) CloneCmd(publicURL, name string, vcs proto.VCS) string {
 	if c.HideCloneCmd {
 		return ""
+	}
+	if vcs == proto.VCSJJ {
+		return fmt.Sprintf("jj git clone %s", RepoURL(publicURL, name))
 	}
 	return fmt.Sprintf("git clone %s", RepoURL(publicURL, name))
 }

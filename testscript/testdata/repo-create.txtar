@@ -133,12 +133,13 @@ master
 Project Name: repo11
 Repository: repo1
 Description: description
+VCS: jj
 Private: true
 Hidden: true
 Mirror: false
 Owner: admin
-Default Branch: master
-Branches:
+Default Bookmark: master
+Bookmarks:
   - master
 Tags:
   - v0.1.0

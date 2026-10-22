@@ -90,12 +90,13 @@ usoft repo list
 Project Name: proj
 Repository: repo1
 Description: desc
+VCS: jj
 Private: true
 Hidden: false
 Mirror: false
 Owner: admin
-Default Branch: master
-Branches:
+Default Bookmark: master
+Bookmarks:
   - master
 Tags:
   - v1.0.0

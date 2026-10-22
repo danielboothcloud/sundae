@@ -33,6 +33,9 @@ var repoIndexHTMLTpl = template.Must(template.New("index").Parse(`<!DOCTYPE html
 </head>
 <body>
 Redirecting to docs at <a href="https://godoc.org/{{ .ImportRoot }}/{{ .Repo }}">godoc.org/{{ .ImportRoot }}/{{ .Repo }}</a>...
+{{- if .CloneCmd }}
+<p>Clone: <code>{{ .CloneCmd }}</code></p>
+{{- end }}
 </body>
 </html>
 `))
@@ -62,8 +65,10 @@ func GoGetHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Find the closest repository the caller can read; skip the rest.
 		user := proto.UserFromContext(ctx)
+		var found proto.Repository
 		for {
-			if _, err := be.Repository(ctx, repo); err == nil && be.AccessLevelForUser(ctx, repo, user) >= access.ReadOnlyAccess {
+			if rr, err := be.Repository(ctx, repo); err == nil && be.AccessLevelForUser(ctx, repo, user) >= access.ReadOnlyAccess {
+				found = rr
 				break
 			}
 
@@ -75,14 +80,23 @@ func GoGetHandler(w http.ResponseWriter, r *http.Request) {
 			repo = path.Dir(repo)
 		}
 
+		// The go-import tag stays "git": jj repositories are served as bare
+		// git repositories. Only the human-readable clone hint differs.
+		var cloneCmd string
+		if found != nil && found.Vcs() == proto.VCSJJ {
+			cloneCmd = proto.CloneCommand(found.Vcs(), cfg.HTTP.PublicURL+"/"+utils.SanitizeRepo(repo)+".git")
+		}
+
 		if err := repoIndexHTMLTpl.Execute(w, struct {
 			Repo       string
 			Config     *config.Config
 			ImportRoot string
+			CloneCmd   string
 		}{
 			Repo:       utils.SanitizeRepo(repo),
 			Config:     cfg,
 			ImportRoot: importRoot.Host,
+			CloneCmd:   cloneCmd,
 		}); err != nil {
 			logger.Error("failed to render go get template", "err", err)
 			renderInternalServerError(w, r)

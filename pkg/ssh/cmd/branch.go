@@ -14,8 +14,9 @@ import (
 
 func branchCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "branch",
-		Short: "Manage repository branches",
+		Use:     "branch",
+		Aliases: []string{"bookmark"},
+		Short:   "Manage repository branches (bookmarks in jj repositories)",
 	}
 
 	cmd.AddCommand(

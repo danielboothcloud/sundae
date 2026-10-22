@@ -107,23 +107,25 @@ stdout '.*Wizard.*'
 Project Name:
 Repository: charmbracelet/wizard-tutorial
 Description:
+VCS: jj
 Private: false
 Hidden: false
 Mirror: true
 Owner: admin
-Default Branch: main
-Branches:
+Default Bookmark: main
+Bookmarks:
   - main
 -- info2.txt --
 Project Name: wizard-tutorial
 Repository: charmbracelet/test
 Description: testing repo
+VCS: jj
 Private: true
 Hidden: true
 Mirror: true
 Owner: admin
-Default Branch: main
-Branches:
+Default Bookmark: main
+Bookmarks:
   - main
 -- tree.txt --
 -rw-r--r--	10 B	 .gitignore

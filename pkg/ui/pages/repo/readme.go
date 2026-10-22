@@ -108,7 +108,7 @@ func (r *Readme) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 	case EmptyRepoMsg:
 		cmds = append(cmds,
 			r.code.SetContent(defaultEmptyRepoMsg(r.common.Config(),
-				r.repo.Name()), ".md"),
+				r.repo.Name(), r.repo.Vcs()), ".md"),
 		)
 	case ReadmeMsg:
 		r.isLoading = false

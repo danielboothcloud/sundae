@@ -558,7 +558,7 @@ Aliases:
 
 Available Commands:
   blob         Print out the contents of file at path
-  branch       Manage repository branches
+  branch       Manage repository branches (bookmarks in jj repositories)
   collab       Manage collaborators
   create       Create a new repository
   delete       Delete a repository
@@ -700,6 +700,45 @@ repos can only be accessed by admins and collaborators.
 ```sh
 ssh -p 23231 localhost repo private icecream true
 ```
+
+### Jujutsu (jj) Repositories
+
+Repositories have a VCS kind, `jj` or `git`, set with `--vcs` when you create
+or import them. **When `--vcs` is omitted, new and imported repositories are
+`jj`.** Repositories that existed before this option was added are `git`. The
+kind is set once and can't be changed afterwards.
+
+```sh
+# jj is the default
+ssh -p 23231 localhost repo create icecream
+# jj git clone ssh://localhost:23231/icecream.git
+
+# Plain git presentation
+ssh -p 23231 localhost repo create icecream --vcs git
+```
+
+Storage and transport are always a bare Git repository. jj has no wire
+protocol of its own, so you push and fetch with `jj git push` and
+`jj git fetch`, and the server never runs `jj`. The kind only changes how the
+repository is presented:
+
+- the clone hint is `jj git clone <url>` in the CLI, TUI and the `go-get` page;
+- branches are called bookmarks (`repo bookmark` is an alias of `repo branch`,
+  and the TUI tab is "Bookmarks");
+- commits show their jj change ID next to the short commit ID in the TUI log,
+  and `repo commit` prints the full change ID on its own line. The ID is read from the `change-id` header jj writes
+  into pushed commits; commits without it fall back to the short hash.
+
+```sh
+jj git clone ssh://localhost:23231/icecream.git
+cd icecream
+jj describe -m "first commit"
+jj bookmark create main -r @
+jj git push --bookmark main
+```
+
+HTTP responses for repository routes carry an `X-Soft-Serve-VCS` header (`git`
+or `jj`) for callers that are authorized to read the repository.
 
 ### Repository Branches & Tags
 

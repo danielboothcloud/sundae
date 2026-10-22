@@ -222,6 +222,7 @@ stdout '401.*'
 </head>
 <body>
 Redirecting to docs at <a href="https://godoc.org/localhost:$HTTP_PORT/repo2">godoc.org/localhost:$HTTP_PORT/repo2</a>...
+<p>Clone: <code>jj git clone http://localhost:$HTTP_PORT/repo2.git</code></p>
 </body>
 </html>
 -- gitclone.txt --

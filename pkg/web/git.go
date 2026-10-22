@@ -384,6 +384,9 @@ func withAccess(next http.Handler) http.HandlerFunc {
 			return
 		}
 
+		// Only advertise the VCS kind once the caller is authorized.
+		w.Header().Set("X-Soft-Serve-VCS", repo.Vcs().String())
+
 		next.ServeHTTP(w, r)
 	}
 }

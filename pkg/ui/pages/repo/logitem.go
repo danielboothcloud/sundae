@@ -18,6 +18,9 @@ import (
 // LogItem is a item in the log list that displays a git commit.
 type LogItem struct {
 	*git.Commit
+	// ChangeID is the jj change ID of the commit. It is empty for git
+	// repositories and for commits without a change-id header.
+	ChangeID string
 }
 
 // ID implements selector.IdentifiableItem.
@@ -89,13 +92,17 @@ func (d LogItemDelegate) Render(w io.Writer, m list.Model, index int, listItem l
 	horizontalFrameSize := styles.Base.GetHorizontalFrameSize()
 
 	hash := i.Commit.ID.String()[:7]
+	if i.ChangeID != "" {
+		// jj repositories lead with the change ID, followed by the commit id.
+		hash = git.ShortChangeID(i.ChangeID) + " " + hash
+	}
 	title := styles.Title.Render(
 		common.TruncateString(i.Title(),
 			m.Width()-
 				horizontalFrameSize-
-				// 9 is the length of the hash (7) + the left padding (1) + the
-				// title truncation symbol (1)
-				9),
+				// 2 is the left padding (1) + the title truncation symbol (1)
+				lipgloss.Width(hash)-
+				2),
 	)
 	hashStyle := styles.Hash.
 		Align(lipgloss.Right).

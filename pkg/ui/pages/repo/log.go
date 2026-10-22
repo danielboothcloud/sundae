@@ -462,12 +462,17 @@ func (l *Log) updateCommitsCmd() tea.Msg {
 		l.common.Logger.Debugf("ui: error loading commits: %v", err)
 		return common.ErrorMsg(err)
 	}
+	jj := l.repo.Vcs() == proto.VCSJJ
 	for i, c := range cc {
 		idx := i + skip
 		if int64(idx) >= count {
 			break
 		}
-		items[idx] = LogItem{Commit: c}
+		item := LogItem{Commit: c}
+		if jj {
+			item.ChangeID = r.ChangeID(c)
+		}
+		items[idx] = item
 	}
 	return LogItemsMsg(items)
 }
@@ -500,8 +505,16 @@ func (l *Log) renderCommit(c *git.Commit) string {
 	// FIXME: lipgloss prints empty lines when CRLF is used
 	// sanitize commit message from CRLF
 	msg := strings.ReplaceAll(c.Message, "\r\n", "\n")
+	hashLine := "commit " + c.ID.String()
+	if l.repo != nil && l.repo.Vcs() == proto.VCSJJ {
+		if r, err := l.repo.Open(); err == nil {
+			if cid := r.ChangeID(c); cid != "" {
+				hashLine = "change " + cid + "\n" + hashLine
+			}
+		}
+	}
 	s.WriteString(fmt.Sprintf("%s\n%s\n%s\n%s\n",
-		l.common.Styles.Log.CommitHash.Render("commit "+c.ID.String()),
+		l.common.Styles.Log.CommitHash.Render(hashLine),
 		l.common.Styles.Log.CommitAuthor.Render(fmt.Sprintf("Author: %s <%s>", c.Author.Name, c.Author.Email)),
 		l.common.Styles.Log.CommitDate.Render("Date:   "+c.Committer.When.Format(time.UnixDate)),
 		l.common.Styles.Log.CommitBody.Render(msg),

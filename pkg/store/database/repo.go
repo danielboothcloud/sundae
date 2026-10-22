@@ -14,16 +14,16 @@ type repoStore struct{}
 var _ store.RepositoryStore = (*repoStore)(nil)
 
 // CreateRepo implements store.RepositoryStore.
-func (*repoStore) CreateRepo(ctx context.Context, tx db.Handler, name string, userID int64, projectName string, description string, isPrivate bool, isHidden bool, isMirror bool) error {
+func (*repoStore) CreateRepo(ctx context.Context, tx db.Handler, name string, userID int64, projectName string, description string, isPrivate bool, isHidden bool, isMirror bool, vcs string) error {
 	name = utils.SanitizeRepo(name)
 	values := []interface{}{
-		name, projectName, description, isPrivate, isMirror, isHidden,
+		name, projectName, description, isPrivate, isMirror, isHidden, vcs,
 	}
-	query := `INSERT INTO repos (name, project_name, description, private, mirror, hidden, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP);`
+	query := `INSERT INTO repos (name, project_name, description, private, mirror, hidden, vcs, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP);`
 	if userID > 0 {
-		query = `INSERT INTO repos (name, project_name, description, private, mirror, hidden, updated_at, user_id)
-			VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?);`
+		query = `INSERT INTO repos (name, project_name, description, private, mirror, hidden, vcs, updated_at, user_id)
+			VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?);`
 		values = append(values, userID)
 	}
 

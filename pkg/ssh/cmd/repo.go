@@ -78,15 +78,20 @@ func RepoCommand() *cobra.Command {
 				cmd.Println(strings.TrimSpace(fmt.Sprint("Project Name: ", rr.ProjectName())))
 				cmd.Println("Repository:", rr.Name())
 				cmd.Println(strings.TrimSpace(fmt.Sprint("Description: ", rr.Description())))
+				cmd.Println("VCS:", rr.Vcs())
 				cmd.Println("Private:", rr.IsPrivate())
 				cmd.Println("Hidden:", rr.IsHidden())
 				cmd.Println("Mirror:", rr.IsMirror())
 				if owner != nil {
 					cmd.Println(strings.TrimSpace(fmt.Sprint("Owner: ", owner.Username())))
 				}
-				cmd.Println("Default Branch:", head.Name().Short())
+				refLabel, refLabelPlural := "Branch", "Branches"
+				if rr.Vcs() == proto.VCSJJ {
+					refLabel, refLabelPlural = "Bookmark", "Bookmarks"
+				}
+				cmd.Println("Default "+refLabel+":", head.Name().Short())
 				if len(branches) > 0 {
-					cmd.Println("Branches:")
+					cmd.Println(refLabelPlural + ":")
 					for _, b := range branches {
 						cmd.Println("  -", b)
 					}

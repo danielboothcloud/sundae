@@ -15,6 +15,7 @@ func createCommand() *cobra.Command {
 	var description string
 	var projectName string
 	var hidden bool
+	var vcsFlag string
 
 	cmd := &cobra.Command{
 		Use:               "create REPOSITORY",
@@ -27,11 +28,16 @@ func createCommand() *cobra.Command {
 			be := backend.FromContext(ctx)
 			user := proto.UserFromContext(ctx)
 			name := args[0]
+			vcs, err := proto.ParseVCS(vcsFlag)
+			if err != nil {
+				return err
+			}
 			r, err := be.CreateRepository(ctx, name, user, proto.RepositoryOptions{
 				Private:     private,
 				Description: description,
 				ProjectName: projectName,
 				Hidden:      hidden,
+				Vcs:         vcs,
 			})
 			if err != nil {
 				return err
@@ -39,7 +45,7 @@ func createCommand() *cobra.Command {
 
 			cloneurl := fmt.Sprintf("%s/%s.git", cfg.SSH.PublicURL, r.Name())
 			cmd.PrintErrf("Created repository %s\n", r.Name())
-			cmd.Println(cloneurl)
+			cmd.Println(proto.CloneCommand(r.Vcs(), cloneurl))
 
 			return nil
 		},
@@ -49,6 +55,8 @@ func createCommand() *cobra.Command {
 	cmd.Flags().StringVarP(&description, "description", "d", "", "set the repository description")
 	cmd.Flags().StringVarP(&projectName, "name", "n", "", "set the project name")
 	cmd.Flags().BoolVarP(&hidden, "hidden", "H", false, "hide the repository from the UI")
+
+	cmd.Flags().StringVarP(&vcsFlag, "vcs", "", string(proto.DefaultVCS), "set the repository VCS kind (git or jj)")
 
 	return cmd
 }

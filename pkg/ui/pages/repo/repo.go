@@ -84,6 +84,19 @@ func New(c common.Common, comps ...common.TabComponent) *Repo {
 	return r
 }
 
+// tabNames returns the tab names for a repository of the given VCS.
+func (r *Repo) tabNames(vcs proto.VCS) []string {
+	names := make([]string, 0, len(r.panes))
+	for _, p := range r.panes {
+		if n, ok := p.(interface{ TabNameFor(proto.VCS) string }); ok {
+			names = append(names, n.TabNameFor(vcs))
+			continue
+		}
+		names = append(names, p.TabName())
+	}
+	return names
+}
+
 func (r *Repo) getMargins() (int, int) {
 	hh := lipgloss.Height(r.headerView())
 	hm := r.common.Styles.Repo.Body.GetVerticalFrameSize() +
@@ -153,6 +166,7 @@ func (r *Repo) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 	case RepoMsg:
 		// Set the state to loading when we get a new repository.
 		r.selectedRepo = msg
+		r.tabs.SetTabs(r.tabNames(msg.Vcs()))
 		cmds = append(cmds,
 			r.Init(),
 			// This will set the selected repo in each pane's model.
@@ -179,7 +193,7 @@ func (r *Repo) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 		}
 		if r.selectedRepo != nil {
 			urlID := fmt.Sprintf("%s-url", r.selectedRepo.Name())
-			cmd := r.common.CloneCmd(r.common.Config().SSH.PublicURL, r.selectedRepo.Name())
+			cmd := r.common.CloneCmd(r.common.Config().SSH.PublicURL, r.selectedRepo.Name(), r.selectedRepo.Vcs())
 			if msg, ok := msg.(tea.MouseMsg); ok && r.common.Zone.Get(urlID).InBounds(msg) {
 				cmds = append(cmds, copyCmd(cmd, "Command copied to clipboard"))
 			}
@@ -341,7 +355,7 @@ func (r *Repo) headerView() string {
 		Align(lipgloss.Right)
 	var url string
 	if cfg := r.common.Config(); cfg != nil {
-		url = r.common.CloneCmd(cfg.SSH.PublicURL, r.selectedRepo.Name())
+		url = r.common.CloneCmd(cfg.SSH.PublicURL, r.selectedRepo.Name(), r.selectedRepo.Vcs())
 	}
 	url = common.TruncateString(url, r.common.Width-lipgloss.Width(header)-1)
 	url = r.common.Zone.Mark(
