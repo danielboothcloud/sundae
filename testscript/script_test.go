@@ -109,6 +109,7 @@ func TestScript(t *testing.T) {
 			"ensureservernotrunning": cmdEnsureServerNotRunning,
 			"stopserver":             cmdStopserver,
 			"ui":                     cmdUI(admin1.Signer()),
+			"ptysoft":                cmdPtySoft(admin1.Signer()),
 			"uui":                    cmdUI(user1.Signer()),
 		},
 		Setup: func(e *testscript.Env) error {
@@ -258,6 +259,33 @@ func cmdKeylessSoft(ts *testscript.TestScript, neg bool, args []string) {
 	sess.Stderr = ts.Stderr()
 
 	check(ts, sess.Run(strings.Join(args, " ")), neg)
+}
+
+// cmdPtySoft is like cmdSoft, but requests a PTY first (like ssh -t).
+func cmdPtySoft(key ssh.Signer) func(ts *testscript.TestScript, neg bool, args []string) {
+	return func(ts *testscript.TestScript, neg bool, args []string) {
+		cli, err := ssh.Dial(
+			"tcp",
+			net.JoinHostPort("localhost", ts.Getenv("SSH_PORT")),
+			&ssh.ClientConfig{
+				User:            "admin",
+				Auth:            []ssh.AuthMethod{ssh.PublicKeys(key)},
+				HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+			},
+		)
+		ts.Check(err)
+		defer cli.Close()
+
+		sess, err := cli.NewSession()
+		ts.Check(err)
+		defer sess.Close()
+
+		sess.Stdout = ts.Stdout()
+		sess.Stderr = ts.Stderr()
+		ts.Check(sess.RequestPty("dumb", 40, 80, ssh.TerminalModes{}))
+
+		check(ts, sess.Run(strings.Join(args, " ")), neg)
+	}
 }
 
 func cmdUI(key ssh.Signer) func(ts *testscript.TestScript, neg bool, args []string) {

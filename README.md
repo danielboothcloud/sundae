@@ -343,6 +343,116 @@ Use the `lfs` config section to customize your Git LFS server.
 
 > **Note**: The pure-SSH transfer is disabled by default.
 
+#### OpenShell Agent Sessions
+
+Soft Serve can start and resume agent sessions in
+[NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) sandboxes. Each user gets
+one sandbox per repository, named `soft-<user>-<repo>`. The repository is
+cloned into `/sandbox/<repo>` on first start, and your SSH terminal is bridged
+to a shell inside the sandbox:
+
+```sh
+ssh -t -p 23231 localhost session start icecream                 # create or resume, then attach
+ssh -t -p 23231 localhost session start icecream --image my/img  # image used only when the sandbox is first created
+ssh -p 23231 localhost session ls                                # your sessions: repo, sandbox, phase
+ssh -p 23231 localhost session end icecream                      # delete the sandbox and revoke its token
+```
+
+`session start` needs a terminal, so pass `-t`. When you exit the shell, the
+sandbox keeps running, so agents can keep working. Running `session start`
+again re-attaches. Only `session end` deletes the sandbox. You need read access
+to the repository, and anonymous users can't use sessions.
+
+The feature is off by default. When it is disabled, `session` is an unknown
+command. Soft Serve stores no session state: sandbox names are deterministic,
+and the OpenShell gateway is the source of truth. To enable it:
+
+```yaml
+openshell:
+  enabled: true
+  # The OpenShell gateway gRPC address (http:// = plaintext, https:// or no scheme = TLS).
+  gateway_address: "https://openshell-gateway.openshell.svc:8443"
+  workspace: "default"
+  # Default sandbox image. It must provide git and jj.
+  image: "ghcr.io/example/agent-sandbox:latest"
+  # Optional bearer token for the gateway.
+  #token: ""
+  # Client TLS files, e.g. mounted from the openshell-client-tls secret.
+  tls_ca: "/etc/openshell-tls/ca.crt"
+  tls_cert: "/etc/openshell-tls/tls.crt"
+  tls_key: "/etc/openshell-tls/tls.key"
+  insecure: false
+  # Internal HTTP base URL that sandboxes use to clone and push.
+  # Defaults to http.public_url.
+  clone_url: "http://soft-serve.soft-serve.svc.cluster.local:23232"
+  # Lifetime of the access token issued to each sandbox.
+  token_ttl: "24h"
+  # What runs when you attach.
+  command: "bash -l"
+```
+
+Every setting can also be set with a `SOFT_SERVE_OPENSHELL_*` environment
+variable, for example `SOFT_SERVE_OPENSHELL_ENABLED=true` or
+`SOFT_SERVE_OPENSHELL_GATEWAY_ADDRESS=...`. When OpenShell is enabled,
+`gateway_address` and `image` are required.
+
+**Client TLS secret.** In Kubernetes, mount the gateway's client certificate
+secret, typically `openshell-client-tls`, into the Soft Serve pod and point the
+`tls_*` settings at it:
+
+```yaml
+volumes:
+  - name: openshell-tls
+    secret:
+      secretName: openshell-client-tls
+containers:
+  - name: soft-serve
+    volumeMounts:
+      - name: openshell-tls
+        mountPath: /etc/openshell-tls
+        readOnly: true
+```
+
+**Git credentials.** On each `session start`, Soft Serve issues a short-lived
+access token named `openshell:<sandbox>` (see `token_ttl`). Expired tokens with
+that name are pruned at the same time. The token reaches the sandbox only as
+environment variables on the exec call
+(`GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_0`/`GIT_CONFIG_VALUE_0`, an
+`http.<clone_url>/.extraHeader` basic-auth header). It is never written to
+`.git/config` or any other file. It grants your read/write access, so agents
+can push. Processes inside the sandbox can see it. `session end` revokes it.
+
+The token is fixed when you attach, so a shell (and any agent started from it)
+loses git access once `token_ttl` has passed. Run `session start` again to
+re-attach with a fresh token, or raise `token_ttl` for long-running agents.
+
+**Sandbox egress.** The sandbox's network policy must allow git (and jj, which
+runs git) to reach Soft Serve's internal HTTP endpoint. Here is an example
+sandbox policy entry. Adjust the host, port and binary paths to your cluster
+and image, and the field names to your OpenShell version:
+
+```yaml
+network_policies:
+  soft_serve_git:
+    name: soft-serve-git
+    endpoints:
+      - host: soft-serve.soft-serve.svc.cluster.local
+        port: 23232
+        protocol: rest
+        access: read-write
+    binaries:
+      - path: /usr/bin/git
+      - path: /usr/lib/git-core/git-remote-http
+      - path: /usr/bin/jj
+```
+
+**Idle timeout.** A bridged session is an ordinary SSH session, so
+`ssh.idle_timeout` (default 600 seconds) still applies. Terminal traffic in
+either direction counts as activity. A shell that sits completely quiet for
+longer than the timeout is disconnected, but the sandbox keeps running, and
+`session start` re-attaches. To avoid the disconnects, raise `idle_timeout`
+or set `0`, or set `ServerAliveInterval` in your SSH client.
+
 ## Server Access
 
 Soft Serve at its core manages your server authentication and authorization. Authentication verifies the identity of a user, while authorization determines their access rights to a repository.

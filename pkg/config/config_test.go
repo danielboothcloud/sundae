@@ -2,7 +2,10 @@ package config
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/soft-serve/pkg/access"
 	"github.com/matryer/is"
@@ -214,4 +217,130 @@ func TestParseAllowKeylessEnvFalse(t *testing.T) {
 	// "unset" — that's the whole reason this field is a *bool.
 	is.True(cfg.AllowKeyless != nil)
 	is.Equal(*cfg.AllowKeyless, false)
+}
+
+func TestOpenShellDisabledByDefault(t *testing.T) {
+	is := is.New(t)
+	cfg := DefaultConfig()
+	is.Equal(cfg.OpenShell.Enabled, false)
+	is.Equal(cfg.OpenShell.Workspace, "default")
+	is.Equal(cfg.OpenShell.TokenTTL, 24*time.Hour)
+	is.Equal(cfg.OpenShell.Command, "bash -l")
+	// Disabled needs no address or image.
+	cfg.DataPath = t.TempDir()
+	is.NoErr(cfg.Validate())
+}
+
+func TestParseOpenShellEnv(t *testing.T) {
+	is := is.New(t)
+	td := t.TempDir()
+	envs := map[string]string{
+		"SOFT_SERVE_DATA_PATH":                 td,
+		"SOFT_SERVE_OPENSHELL_ENABLED":         "true",
+		"SOFT_SERVE_OPENSHELL_GATEWAY_ADDRESS": "https://openshell.example:8443",
+		"SOFT_SERVE_OPENSHELL_WORKSPACE":       "agents",
+		"SOFT_SERVE_OPENSHELL_IMAGE":           "ghcr.io/example/sandbox:1",
+		"SOFT_SERVE_OPENSHELL_TOKEN":           "gw-secret",
+		"SOFT_SERVE_OPENSHELL_TLS_CA":          "/tls/ca.crt",
+		"SOFT_SERVE_OPENSHELL_TLS_CERT":        "tls/tls.crt",
+		"SOFT_SERVE_OPENSHELL_TLS_KEY":         "tls/tls.key",
+		"SOFT_SERVE_OPENSHELL_INSECURE":        "true",
+		"SOFT_SERVE_OPENSHELL_CLONE_URL":       "http://soft-serve.soft-serve.svc:23232/",
+		"SOFT_SERVE_OPENSHELL_TOKEN_TTL":       "2h",
+		"SOFT_SERVE_OPENSHELL_COMMAND":         "claude",
+	}
+	for k, v := range envs {
+		t.Setenv(k, v)
+	}
+	cfg := DefaultConfig()
+	is.NoErr(cfg.ParseEnv())
+	oc := cfg.OpenShell
+	is.True(oc.Enabled)
+	is.Equal(oc.GatewayAddress, "https://openshell.example:8443")
+	is.Equal(oc.Workspace, "agents")
+	is.Equal(oc.Image, "ghcr.io/example/sandbox:1")
+	is.Equal(oc.Token, "gw-secret")
+	is.Equal(oc.TLSCA, "/tls/ca.crt")
+	is.Equal(oc.TLSCert, filepath.Join(td, "tls/tls.crt"))
+	is.Equal(oc.TLSKey, filepath.Join(td, "tls/tls.key"))
+	is.True(oc.Insecure)
+	is.Equal(oc.CloneURL, "http://soft-serve.soft-serve.svc:23232")
+	is.Equal(cfg.OpenShellCloneURL(), "http://soft-serve.soft-serve.svc:23232")
+	is.Equal(oc.TokenTTL, 2*time.Hour)
+	is.Equal(oc.Command, "claude")
+
+	// The gateway token never leaks into subprocess environments.
+	for _, e := range cfg.Environ() {
+		is.True(!strings.HasPrefix(e, "SOFT_SERVE_OPENSHELL_TOKEN="))
+	}
+}
+
+func TestOpenShellCloneURLDefaultsToPublicURL(t *testing.T) {
+	is := is.New(t)
+	cfg := DefaultConfig()
+	cfg.HTTP.PublicURL = "https://git.example.com/"
+	is.Equal(cfg.OpenShellCloneURL(), "https://git.example.com")
+}
+
+func TestValidateOpenShell(t *testing.T) {
+	valid := func() *Config {
+		cfg := DefaultConfig()
+		cfg.DataPath = t.TempDir()
+		cfg.OpenShell.Enabled = true
+		cfg.OpenShell.GatewayAddress = "openshell:8443"
+		cfg.OpenShell.Image = "sandbox:latest"
+		return cfg
+	}
+	cases := map[string]struct {
+		mutate func(*Config)
+		err    string
+	}{
+		"valid":            {mutate: func(*Config) {}},
+		"missing address":  {mutate: func(c *Config) { c.OpenShell.GatewayAddress = "" }, err: "gateway_address"},
+		"missing image":    {mutate: func(c *Config) { c.OpenShell.Image = "" }, err: "image"},
+		"cert without key": {mutate: func(c *Config) { c.OpenShell.TLSCert = "c.crt" }, err: "tls_cert and tls_key"},
+		"zero ttl":         {mutate: func(c *Config) { c.OpenShell.TokenTTL = 0 }, err: "token_ttl"},
+		"empty command":    {mutate: func(c *Config) { c.OpenShell.Command = " " }, err: "command"},
+		"blank workspace":  {mutate: func(c *Config) { c.OpenShell.Workspace = " " }, err: "workspace"},
+		"disabled ignores missing fields": {mutate: func(c *Config) {
+			c.OpenShell.Enabled = false
+			c.OpenShell.GatewayAddress = ""
+			c.OpenShell.Image = ""
+		}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			is := is.New(t)
+			cfg := valid()
+			tc.mutate(cfg)
+			err := cfg.Validate()
+			if tc.err == "" {
+				is.NoErr(err)
+				return
+			}
+			is.True(err != nil)
+			is.True(strings.Contains(err.Error(), tc.err))
+		})
+	}
+}
+
+func TestOpenShellConfigFileRoundTrip(t *testing.T) {
+	is := is.New(t)
+	cfg := DefaultConfig()
+	cfg.DataPath = t.TempDir()
+	cfg.OpenShell.Enabled = true
+	cfg.OpenShell.GatewayAddress = "openshell:8443"
+	cfg.OpenShell.Image = "sandbox:latest"
+	cfg.OpenShell.TokenTTL = 90 * time.Minute
+	cfg.OpenShell.Command = `bash -lc "echo hi"`
+	is.NoErr(cfg.WriteConfig())
+
+	got := &Config{DataPath: cfg.DataPath}
+	is.NoErr(parseFile(got, cfg.ConfigPath()))
+	is.True(got.OpenShell.Enabled)
+	is.Equal(got.OpenShell.GatewayAddress, "openshell:8443")
+	is.Equal(got.OpenShell.Image, "sandbox:latest")
+	is.Equal(got.OpenShell.Workspace, "default")
+	is.Equal(got.OpenShell.TokenTTL, 90*time.Minute)
+	is.Equal(got.OpenShell.Command, `bash -lc "echo hi"`)
 }

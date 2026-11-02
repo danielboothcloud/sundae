@@ -100,8 +100,12 @@ var cliCommandCounter = promauto.NewCounterVec(prometheus.CounterOpts{
 // This middleware must be run after the ContextMiddleware.
 func CommandMiddleware(sh ssh.Handler) ssh.Handler {
 	return func(s ssh.Session) {
+		args := s.Command()
+
+		// PTY sessions go to the TUI, except `session`, which needs the
+		// terminal to bridge an interactive shell in an OpenShell sandbox.
 		_, _, ptyReq := s.Pty()
-		if ptyReq {
+		if ptyReq && cmd.CommandName(args) != "session" {
 			sh(s)
 			return
 		}
@@ -109,7 +113,6 @@ func CommandMiddleware(sh ssh.Handler) ssh.Handler {
 		ctx := s.Context()
 		cfg := config.FromContext(ctx)
 
-		args := s.Command()
 		cliCommandCounter.WithLabelValues(cmd.CommandName(args)).Inc()
 		rootCmd := &cobra.Command{
 			Short:        "Soft Serve is a self-hostable Git server for the command line.",
@@ -143,6 +146,12 @@ func CommandMiddleware(sh ssh.Handler) ssh.Handler {
 					cmd.GitLFSTransfer(),
 				)
 			}
+		}
+
+		if cfg.OpenShell.Enabled {
+			rootCmd.AddCommand(
+				cmd.SessionCommand(),
+			)
 		}
 
 		rootCmd.SetArgs(args)

@@ -144,6 +144,35 @@ lfs:
 jobs:
   mirror_pull: "{{ .Jobs.MirrorPull }}"
 
+# OpenShell agent sessions (ssh -t <server> session start <repo>).
+# Each (user, repository) gets its own OpenShell sandbox with the repository
+# cloned into /sandbox/<repo>.
+openshell:
+  # Enable the "session" SSH command.
+  enabled: {{ .OpenShell.Enabled }}
+  # The OpenShell gateway gRPC address. Use http:// for plaintext; https://
+  # or no scheme uses TLS.
+  gateway_address: "{{ .OpenShell.GatewayAddress }}"
+  # The OpenShell workspace sandboxes are created in.
+  workspace: "{{ .OpenShell.Workspace }}"
+  # The default sandbox base image. It must provide git and jj.
+  image: "{{ .OpenShell.Image }}"
+  # Optional bearer token used to authenticate to the gateway.
+  #token: ""
+  # Client TLS files, e.g. mounted from the openshell-client-tls secret.
+  tls_ca: "{{ .OpenShell.TLSCA }}"
+  tls_cert: "{{ .OpenShell.TLSCert }}"
+  tls_key: "{{ .OpenShell.TLSKey }}"
+  # Skip verification of the gateway's TLS certificate.
+  insecure: {{ .OpenShell.Insecure }}
+  # The internal HTTP base URL sandboxes use to clone and push.
+  # Defaults to http.public_url when empty.
+  clone_url: "{{ .OpenShell.CloneURL }}"
+  # Lifetime of the access token issued to each sandbox.
+  token_ttl: "{{ .OpenShell.TokenTTL }}"
+  # The command run in the sandbox when a user attaches.
+  command: {{ printf "%q" .OpenShell.Command }}
+
 # Additional admin keys.
 #initial_admin_keys:
 #  - "ssh-rsa AAAAB3NzaC1yc2..."

@@ -140,6 +140,50 @@ type JobsConfig struct {
 	MirrorPull string `env:"MIRROR_PULL" yaml:"mirror_pull"`
 }
 
+// OpenShellConfig is the configuration for OpenShell agent sessions.
+//
+// When enabled, the SSH `session` command starts and resumes one OpenShell
+// sandbox per (user, repository) through an OpenShell gateway.
+type OpenShellConfig struct {
+	// Enabled toggles OpenShell sessions on/off.
+	Enabled bool `env:"ENABLED" yaml:"enabled"`
+
+	// GatewayAddress is the OpenShell gateway gRPC address. An http:// scheme
+	// selects plaintext; https:// or no scheme selects TLS.
+	GatewayAddress string `env:"GATEWAY_ADDRESS" yaml:"gateway_address"`
+
+	// Workspace is the OpenShell workspace sandboxes are created in.
+	Workspace string `env:"WORKSPACE" yaml:"workspace"`
+
+	// Image is the default sandbox base image.
+	Image string `env:"IMAGE" yaml:"image"`
+
+	// Token is an optional bearer token used to authenticate to the gateway.
+	Token string `env:"TOKEN" yaml:"token"`
+
+	// TLSCA is the path to the CA certificate used to verify the gateway.
+	TLSCA string `env:"TLS_CA" yaml:"tls_ca"`
+
+	// TLSCert is the path to the client certificate (mTLS).
+	TLSCert string `env:"TLS_CERT" yaml:"tls_cert"`
+
+	// TLSKey is the path to the client private key (mTLS).
+	TLSKey string `env:"TLS_KEY" yaml:"tls_key"`
+
+	// Insecure skips verification of the gateway's TLS certificate.
+	Insecure bool `env:"INSECURE" yaml:"insecure"`
+
+	// CloneURL is the internal HTTP base URL sandboxes use to clone and push.
+	// Defaults to http.public_url when empty.
+	CloneURL string `env:"CLONE_URL" yaml:"clone_url"`
+
+	// TokenTTL is the lifetime of the access token issued to a sandbox.
+	TokenTTL time.Duration `env:"TOKEN_TTL" yaml:"token_ttl"`
+
+	// Command is what runs in the sandbox when a user attaches.
+	Command string `env:"COMMAND" yaml:"command"`
+}
+
 // Config is the configuration for Soft Serve.
 type Config struct {
 	// Name is the name of the server.
@@ -168,6 +212,9 @@ type Config struct {
 
 	// Jobs is the configuration for cron jobs
 	Jobs JobsConfig `envPrefix:"JOBS_" yaml:"jobs"`
+
+	// OpenShell is the configuration for OpenShell agent sessions.
+	OpenShell OpenShellConfig `envPrefix:"OPENSHELL_" yaml:"openshell"`
 
 	// InitialAdminKeys is a list of public keys that will be added to the list of admins.
 	InitialAdminKeys []string `env:"INITIAL_ADMIN_KEYS" envSeparator:"\n" yaml:"initial_admin_keys"`
@@ -245,6 +292,20 @@ func (c *Config) Environ() []string {
 		fmt.Sprintf("SOFT_SERVE_LFS_ENABLED=%t", c.LFS.Enabled),
 		fmt.Sprintf("SOFT_SERVE_LFS_SSH_ENABLED=%t", c.LFS.SSHEnabled),
 		fmt.Sprintf("SOFT_SERVE_JOBS_MIRROR_PULL=%s", c.Jobs.MirrorPull),
+		fmt.Sprintf("SOFT_SERVE_OPENSHELL_ENABLED=%t", c.OpenShell.Enabled),
+		fmt.Sprintf("SOFT_SERVE_OPENSHELL_GATEWAY_ADDRESS=%s", c.OpenShell.GatewayAddress),
+		fmt.Sprintf("SOFT_SERVE_OPENSHELL_WORKSPACE=%s", c.OpenShell.Workspace),
+		fmt.Sprintf("SOFT_SERVE_OPENSHELL_IMAGE=%s", c.OpenShell.Image),
+		fmt.Sprintf("SOFT_SERVE_OPENSHELL_TLS_CA=%s", c.OpenShell.TLSCA),
+		fmt.Sprintf("SOFT_SERVE_OPENSHELL_TLS_CERT=%s", c.OpenShell.TLSCert),
+		fmt.Sprintf("SOFT_SERVE_OPENSHELL_TLS_KEY=%s", c.OpenShell.TLSKey),
+		fmt.Sprintf("SOFT_SERVE_OPENSHELL_INSECURE=%t", c.OpenShell.Insecure),
+		fmt.Sprintf("SOFT_SERVE_OPENSHELL_CLONE_URL=%s", c.OpenShell.CloneURL),
+		fmt.Sprintf("SOFT_SERVE_OPENSHELL_TOKEN_TTL=%s", c.OpenShell.TokenTTL),
+		fmt.Sprintf("SOFT_SERVE_OPENSHELL_COMMAND=%s", c.OpenShell.Command),
+		// SOFT_SERVE_OPENSHELL_TOKEN is deliberately omitted: these envs are
+		// handed to hook and git subprocesses, which never need the gateway
+		// credential.
 	}...)
 
 	// AnonAccess and AllowKeyless are tri-state overrides: only emit them
@@ -433,6 +494,12 @@ func DefaultConfig() *Config {
 		Jobs: JobsConfig{
 			MirrorPull: "@every 10m",
 		},
+		OpenShell: OpenShellConfig{
+			Enabled:   false,
+			Workspace: "default",
+			TokenTTL:  24 * time.Hour,
+			Command:   "bash -l",
+		},
 	}
 }
 
@@ -482,7 +549,53 @@ func (c *Config) Validate() error {
 
 	c.HTTP.CORS.AllowedOrigins = append([]string{c.HTTP.PublicURL}, c.HTTP.CORS.AllowedOrigins...)
 
+	return c.validateOpenShell()
+}
+
+// validateOpenShell validates the OpenShell configuration and resolves its
+// relative paths. It is a no-op beyond path cleanup when OpenShell is disabled.
+func (c *Config) validateOpenShell() error {
+	oc := &c.OpenShell
+	oc.CloneURL = strings.TrimSuffix(oc.CloneURL, "/")
+	for _, p := range []*string{&oc.TLSCA, &oc.TLSCert, &oc.TLSKey} {
+		if *p != "" && !filepath.IsAbs(*p) {
+			*p = filepath.Join(c.DataPath, *p)
+		}
+	}
+
+	if !oc.Enabled {
+		return nil
+	}
+
+	if oc.GatewayAddress == "" {
+		return fmt.Errorf("openshell: gateway_address is required when openshell is enabled")
+	}
+	if oc.Image == "" {
+		return fmt.Errorf("openshell: image is required when openshell is enabled")
+	}
+	if (oc.TLSCert == "") != (oc.TLSKey == "") {
+		return fmt.Errorf("openshell: tls_cert and tls_key must be set together")
+	}
+	if oc.TokenTTL <= 0 {
+		return fmt.Errorf("openshell: token_ttl must be positive")
+	}
+	if strings.TrimSpace(oc.Command) == "" {
+		return fmt.Errorf("openshell: command must not be empty")
+	}
+	if strings.TrimSpace(oc.Workspace) == "" {
+		return fmt.Errorf("openshell: workspace must not be empty")
+	}
+
 	return nil
+}
+
+// OpenShellCloneURL returns the base HTTP URL sandboxes use to reach this
+// server's git endpoint: openshell.clone_url, or http.public_url when unset.
+func (c *Config) OpenShellCloneURL() string {
+	if c.OpenShell.CloneURL != "" {
+		return strings.TrimSuffix(c.OpenShell.CloneURL, "/")
+	}
+	return strings.TrimSuffix(c.HTTP.PublicURL, "/")
 }
 
 // parseAuthKeys parses authorized keys from either file paths or string authorized_keys.
