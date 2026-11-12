@@ -59,7 +59,7 @@ func TestStartPublishesLifecycle(t *testing.T) {
 	if steps(got) != "created,ready" {
 		t.Fatalf("first start = %s", steps(got))
 	}
-	want := events.Session{User: "alice", Repo: "infra", Sandbox: "soft-alice-infra"}
+	want := events.Session{User: "alice", Repo: "infra", Name: "main", Sandbox: "soft-alice-infra"}
 	for _, l := range got {
 		if l.Session != want || l.Op != "" || l.Reason != "" {
 			t.Fatalf("lifecycle = %+v", l)
@@ -83,7 +83,7 @@ func TestStartPublishesResumeOfStoppedSandbox(t *testing.T) {
 		Labels: ownerLabels(alice),
 		Status: types.SandboxStatus{Phase: types.SandboxStopped},
 	})
-	h.exec.dirs["soft-alice-r:/sandbox/r"] = true
+	h.exec.box("soft-alice-r").dirs["/sandbox/r"] = true
 	if _, err := h.mgr.Start(context.Background(), StartOptions{User: alice, Repo: "r"}); err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestStartPublishesFailure(t *testing.T) {
 	t.Run("sandbox never ready", func(t *testing.T) {
 		h := newHarness(t)
 		sub := withBus(t, h)
-		h.mgr.client = newSDKClient("default", failingWait{h.fc.Sandboxes()}, h.exec, nil)
+		h.mgr.client = newSDKClient("default", failingWait{h.fc.Sandboxes()}, h.exec, h.fc.Files(), nil)
 		if _, err := h.mgr.Start(ctx, StartOptions{User: alice, Repo: "r"}); err == nil {
 			t.Fatal("expected error")
 		}
@@ -158,7 +158,7 @@ func TestEndPublishesLifecycle(t *testing.T) {
 	}
 	drain(t, sub)
 
-	if _, err := h.mgr.End(ctx, alice, "r"); err != nil {
+	if _, err := h.mgr.End(ctx, alice, "r", ""); err != nil {
 		t.Fatal(err)
 	}
 	got := drain(t, sub)
@@ -167,7 +167,7 @@ func TestEndPublishesLifecycle(t *testing.T) {
 	}
 
 	// Ending an absent session publishes nothing.
-	if _, err := h.mgr.End(ctx, alice, "r"); err != nil {
+	if _, err := h.mgr.End(ctx, alice, "r", ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := drain(t, sub); len(got) != 0 {
@@ -176,7 +176,7 @@ func TestEndPublishesLifecycle(t *testing.T) {
 
 	// A sandbox that is not alice's fails.
 	h.fc.AddSandbox("default", &types.Sandbox{Name: "soft-alice-x", Labels: map[string]string{LabelUserID: "99"}})
-	if _, err := h.mgr.End(ctx, alice, "x"); !errors.Is(err, ErrNotOwned) {
+	if _, err := h.mgr.End(ctx, alice, "x", ""); !errors.Is(err, ErrNotOwned) {
 		t.Fatalf("err = %v", err)
 	}
 	if got := drain(t, sub); steps(got) != "failed" || got[0].Op != "end" {
@@ -194,12 +194,56 @@ func TestManagerWithoutBus(t *testing.T) {
 	if _, err := h.mgr.Start(context.Background(), StartOptions{User: alice, Repo: "r"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.mgr.End(context.Background(), alice, "r"); err != nil {
+	if _, err := h.mgr.End(context.Background(), alice, "r", ""); err != nil {
 		t.Fatal(err)
 	}
 	// WithEvents(nil) is the same.
 	m := NewManager(h.mgr.client, h.tokens, newHarnessConfig(), WithEvents(nil))
 	if _, err := m.Start(context.Background(), StartOptions{User: alice, Repo: "r"}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestResumeAndNamedSessionLifecycle(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	sub := withBus(t, h)
+
+	// Input errors publish nothing: an unknown profile, a bad name, and
+	// attaching to a session that does not exist.
+	_, _ = h.mgr.Start(ctx, StartOptions{User: alice, Repo: "r", Profile: "nope"})
+	_, _ = h.mgr.Start(ctx, StartOptions{User: alice, Repo: "r", Name: "Bad"})
+	if _, err := h.mgr.Resume(ctx, StartOptions{User: alice, Repo: "r", Name: "two"}); !errors.Is(err, ErrNoSession) {
+		t.Fatalf("err = %v", err)
+	}
+	if got := drain(t, sub); len(got) != 0 {
+		t.Fatalf("lifecycle = %+v", got)
+	}
+
+	if _, err := h.mgr.Start(ctx, StartOptions{User: alice, Repo: "r", Name: "two"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.mgr.Resume(ctx, StartOptions{User: alice, Repo: "r", Name: "two"}); err != nil {
+		t.Fatal(err)
+	}
+	got := drain(t, sub)
+	if steps(got) != "created,ready,resumed,ready" {
+		t.Fatalf("steps = %s", steps(got))
+	}
+	want := events.Session{User: "alice", Repo: "r", Name: "two", Sandbox: SessionSandboxName("alice", "r", "two")}
+	for _, l := range got {
+		if l.Session != want {
+			t.Fatalf("session = %+v, want %+v", l.Session, want)
+		}
+	}
+
+	// A failed attach says so.
+	h.exec.probeExit = 1
+	if _, err := h.mgr.Resume(ctx, StartOptions{User: alice, Repo: "r", Name: "two"}); err == nil {
+		t.Fatal("expected error")
+	}
+	got = drain(t, sub)
+	if steps(got) != "resumed,failed" || got[1].Op != "attach" || got[1].Session.Name != "two" {
+		t.Fatalf("lifecycle = %+v", got)
 	}
 }

@@ -1,9 +1,12 @@
 // Package openshell launches and resumes OpenShell agent sessions for Soft
 // Serve repositories.
 //
-// Soft Serve keeps no session state: sandbox names are derived from the user
-// and repository (see SandboxName) and the OpenShell gateway is the source of
-// truth for which sessions exist.
+// Soft Serve keeps no session state: sandbox names are derived from the user,
+// repository and session name (see SessionSandboxName), the OpenShell gateway
+// is the source of truth for which sessions exist, and each sandbox carries
+// its user, repository, session name and profile as annotations. Inside the
+// sandbox, an osewa session holds the session's program, so it outlives the
+// SSH connection that started it.
 package openshell
 
 import (
@@ -13,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -42,6 +46,17 @@ const (
 	AnnotationUser = "soft-serve.user"
 	// AnnotationRepo holds the repository name the sandbox was created for.
 	AnnotationRepo = "soft-serve.repo"
+	// AnnotationSession holds the session name. Sandboxes created before
+	// named sessions have none; they are the DefaultSessionName session.
+	AnnotationSession = "soft-serve.session"
+	// AnnotationProfile holds the profile the session was created from;
+	// empty when none applied.
+	AnnotationProfile = "soft-serve.profile"
+
+	// DefaultSessionName is the session name used when none is given. Its
+	// sandbox keeps the name SandboxName gives, so sandboxes created before
+	// named sessions are its sessions.
+	DefaultSessionName = "main"
 
 	// readyTimeout bounds how long Ensure waits for a sandbox to become ready.
 	readyTimeout = 5 * time.Minute
@@ -78,9 +93,17 @@ type Client interface {
 	GetSandbox(ctx context.Context, name string) (*Sandbox, error)
 	// ListSandboxes returns sandboxes carrying all the given labels.
 	ListSandboxes(ctx context.Context, labels map[string]string) ([]*Sandbox, error)
+	// ResumeSandbox returns the existing sandbox named name, ready, starting
+	// it when stopped. It never creates one: absence is reported with an
+	// error for which IsNotFound returns true. labels[LabelUserID], when set,
+	// must match the sandbox's, or ErrNotOwned is returned.
+	ResumeSandbox(ctx context.Context, name string, labels map[string]string) (*Sandbox, error)
 	// DeleteSandbox deletes the named sandbox. An absent sandbox is not an
 	// error.
 	DeleteSandbox(ctx context.Context, name string) error
+	// Upload copies the local file at localPath to remotePath in the
+	// sandbox, replacing it. Missing parent directories are created.
+	Upload(ctx context.Context, name, localPath, remotePath string) error
 	// Run runs a command to completion in the sandbox.
 	Run(ctx context.Context, name string, command []string, opts ExecOptions) (*ExecResult, error)
 	// Interactive starts an interactive command with a PTY of cols x rows.
@@ -118,7 +141,7 @@ func New(cfg config.OpenShellConfig) (Client, error) {
 		return nil, fmt.Errorf("openshell: create client: %w", err)
 	}
 
-	return newSDKClient(cfg.Workspace, c.Sandboxes(), c.Exec(), c), nil
+	return newSDKClient(cfg.Workspace, c.Sandboxes(), c.Exec(), c.Files(), c), nil
 }
 
 // sdkClient implements Client on top of the SDK sub-clients.
@@ -126,16 +149,17 @@ type sdkClient struct {
 	workspace string
 	sandboxes v1.SandboxInterface
 	exec      v1.ExecInterface
+	files     v1.FileInterface
 	closer    io.Closer
 }
 
 var _ Client = (*sdkClient)(nil)
 
-func newSDKClient(workspace string, sandboxes v1.SandboxInterface, exec v1.ExecInterface, closer io.Closer) *sdkClient {
+func newSDKClient(workspace string, sandboxes v1.SandboxInterface, exec v1.ExecInterface, files v1.FileInterface, closer io.Closer) *sdkClient {
 	if workspace == "" {
 		workspace = "default"
 	}
-	return &sdkClient{workspace: workspace, sandboxes: sandboxes, exec: exec, closer: closer}
+	return &sdkClient{workspace: workspace, sandboxes: sandboxes, exec: exec, files: files, closer: closer}
 }
 
 func (c *sdkClient) EnsureSandbox(ctx context.Context, name string, req SandboxRequest) (*Sandbox, bool, error) {
@@ -249,6 +273,19 @@ func (c *sdkClient) ListSandboxes(ctx context.Context, labels map[string]string)
 	return out, nil
 }
 
+func (c *sdkClient) ResumeSandbox(ctx context.Context, name string, labels map[string]string) (*Sandbox, error) {
+	sb, err := c.sandboxes.Get(ctx, c.workspace, name)
+	switch {
+	case IsNotFound(err):
+		return nil, err //nolint:wrapcheck
+	case err != nil:
+		return nil, fmt.Errorf("openshell: get sandbox %q: %w", name, err)
+	case !owns(sb, labels):
+		return nil, ErrNotOwned
+	}
+	return c.resume(ctx, sb)
+}
+
 func (c *sdkClient) DeleteSandbox(ctx context.Context, name string) error {
 	if _, err := c.sandboxes.Delete(ctx, c.workspace, name, v1.DeleteOptions{AllowMissing: true}); err != nil && !IsNotFound(err) {
 		return fmt.Errorf("openshell: delete sandbox %q: %w", name, err)
@@ -339,6 +376,66 @@ func SandboxName(user, repo string) string {
 		name = strings.TrimRight(name[:max], "-")
 	}
 	return name + hashSep + suffix
+}
+
+// SessionSandboxName returns the deterministic sandbox name for a user's
+// named session on a repository.
+//
+// The DefaultSessionName session (or an empty name) keeps SandboxName(user,
+// repo), so sandboxes created before named sessions stay that session.
+//
+// Any other session is always hashed: "soft-<user>-<repo>-<session>" with the
+// user and repository parts truncated so the session name stays readable,
+// then "--" and the first 8 hex digits of SHA-256 of user, repo and session
+// joined by NUL bytes. It can never equal a plain SandboxName, which never
+// contains "--", nor a hashed one, whose hash covers only user and repo,
+// except by a 32-bit hash collision, the same odds as between two hashed
+// SandboxNames.
+func SessionSandboxName(user, repo, session string) string {
+	if session == "" || session == DefaultSessionName {
+		return SandboxName(user, repo)
+	}
+
+	sum := sha256.Sum256([]byte(user + "\x00" + repo + "\x00" + session))
+	suffix := hashSep + hex.EncodeToString(sum[:])[:8]
+
+	s := dnsClean(session)
+	if max := maxNameLen - len(suffix) - len("soft--x"); len(s) > max {
+		s = strings.TrimRight(s[:max], "-")
+	}
+
+	parts := []string{"soft"}
+	for _, p := range []string{dnsClean(user), dnsClean(repo)} {
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+	prefix := strings.Join(parts, "-")
+	room := maxNameLen - len(suffix)
+	if s != "" {
+		room -= len(s) + 1
+	}
+	if len(prefix) > room {
+		prefix = strings.TrimRight(prefix[:room], "-")
+	}
+	if s != "" {
+		prefix += "-" + s
+	}
+	return prefix + suffix
+}
+
+// sessionNameRe matches a valid session name.
+var sessionNameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`)
+
+// ErrInvalidSessionName is returned for a session name ValidSessionName
+// rejects.
+var ErrInvalidSessionName = errors.New("session name must be 1 to 32 lowercase letters, digits and hyphens, starting and ending with a letter or digit")
+
+// ValidSessionName reports whether name is a valid session name: 1 to 32
+// lowercase letters, digits and hyphens, starting and ending with a letter or
+// digit.
+func ValidSessionName(name string) bool {
+	return sessionNameRe.MatchString(name)
 }
 
 // dnsClean lowercases s, maps characters outside [a-z0-9] to hyphens,

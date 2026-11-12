@@ -147,8 +147,33 @@ config:
     # The HTTP base URL sandboxes use to clone and push. Use this release's
     # in-cluster HTTP Service. Defaults to http.public_url when empty.
     clone_url: ""
+    # Lifetime of the git token in a sandbox. Renewed on every session start
+    # and attach.
     token_ttl: "24h"
+    # The program a session runs when no profile sets one. It runs in an osewa
+    # session in the sandbox, so it outlives the SSH connection.
     command: "bash -l"
+
+  # What runs in the sandboxes: several named sessions per repository
+  # (session start <repo> --name <name>), each from a profile.
+  sessions:
+    osewa:
+      # The pinned osewa builds this image carries, uploaded to sandboxes
+      # whose image lacks osewa (the sandbox image in deploy/sandbox has it).
+      binary_dir: "/usr/local/share/soft-serve/osewa"
+      # Loopback port of the osewa server inside each sandbox.
+      port: 7322
+    # Named presets for `session start --profile <name>`. Empty fields fall
+    # back to openshell.image and openshell.command.
+    profiles: {}
+    #  claude:
+    #    image: ghcr.io/me/agent-claude:latest
+    #    command: claude
+    # The profile for sessions started without --profile, by repository name
+    # glob ("*" does not cross "/", "**" does; the most specific match wins).
+    repos: {}
+    #  "infra/*":
+    #    profile: claude
 
   # GitHub and GitLab accounts whose repositories Soft Serve discovers,
   # imports and keeps in sync (ssh <server> forge --help). Tokens are only

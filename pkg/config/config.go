@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/anmitsu/go-shlex"
 	"github.com/caarlos0/env/v11"
 	"github.com/charmbracelet/soft-serve/pkg/access"
 	"github.com/charmbracelet/soft-serve/pkg/sshutils"
@@ -147,7 +148,7 @@ type JobsConfig struct {
 // OpenShellConfig is the configuration for OpenShell agent sessions.
 //
 // When enabled, the SSH `session` command starts and resumes one OpenShell
-// sandbox per (user, repository) through an OpenShell gateway.
+// sandbox per (user, repository, session name) through an OpenShell gateway.
 type OpenShellConfig struct {
 	// Enabled toggles OpenShell sessions on/off.
 	Enabled bool `env:"ENABLED" yaml:"enabled"`
@@ -159,7 +160,7 @@ type OpenShellConfig struct {
 	// Workspace is the OpenShell workspace sandboxes are created in.
 	Workspace string `env:"WORKSPACE" yaml:"workspace"`
 
-	// Image is the default sandbox base image.
+	// Image is the sandbox base image used when no profile sets one.
 	Image string `env:"IMAGE" yaml:"image"`
 
 	// Token is an optional bearer token used to authenticate to the gateway.
@@ -192,7 +193,9 @@ type OpenShellConfig struct {
 	// TokenTTL is the lifetime of the access token issued to a sandbox.
 	TokenTTL time.Duration `env:"TOKEN_TTL" yaml:"token_ttl"`
 
-	// Command is what runs in the sandbox when a user attaches.
+	// Command is the program a session runs when no profile sets one. It
+	// runs inside an osewa session, so it keeps running after the SSH client
+	// disconnects.
 	Command string `env:"COMMAND" yaml:"command"`
 }
 
@@ -227,6 +230,10 @@ type Config struct {
 
 	// OpenShell is the configuration for OpenShell agent sessions.
 	OpenShell OpenShellConfig `envPrefix:"OPENSHELL_" yaml:"openshell"`
+
+	// Sessions configures agent sessions: osewa in the sandboxes, named
+	// profiles and per-repository defaults.
+	Sessions SessionsConfig `envPrefix:"SESSIONS_" yaml:"sessions"`
 
 	// Forges are the GitHub and GitLab accounts whose repositories are
 	// discovered, imported and kept in sync. The environment form is
@@ -329,6 +336,8 @@ func (c *Config) Environ() []string {
 		// handed to hook and git subprocesses, which never need the gateway
 		// credential.
 	}...)
+
+	envs = append(envs, c.sessionsEnviron()...)
 
 	// Forge tokens only ever live in their token_file; only the paths are
 	// passed on.
@@ -460,11 +469,17 @@ var configSections = func() map[string]string {
 				continue
 			}
 			ft := f.Type
-			if ft.Kind() == reflect.Slice && ft.Elem().Kind() == reflect.Struct {
+			switch {
+			case ft.Kind() == reflect.Slice && ft.Elem().Kind() == reflect.Struct:
 				// A list of sections, such as forges: its entries are
 				// reported as "forges[].key".
 				ft = ft.Elem()
 				name += "[]"
+			case ft.Kind() == reflect.Map && ft.Elem().Kind() == reflect.Struct:
+				// A map of sections, such as sessions.profiles: its
+				// entries are reported as "sessions.profiles.<name>.key".
+				ft = ft.Elem()
+				name += ".<name>"
 			}
 			if ft.Kind() != reflect.Struct {
 				continue
@@ -662,6 +677,12 @@ func DefaultConfig() *Config {
 			TokenTTL:  24 * time.Hour,
 			Command:   "bash -l",
 		},
+		Sessions: SessionsConfig{
+			Osewa: OsewaConfig{
+				BinaryDir: DefaultOsewaBinaryDir,
+				Port:      DefaultOsewaPort,
+			},
+		},
 		Notifications: NotificationsConfig{
 			On:       append([]string(nil), DefaultTriggers...),
 			Debounce: DefaultNotificationDebounce,
@@ -715,7 +736,7 @@ func (c *Config) Validate() error {
 
 	c.HTTP.CORS.AllowedOrigins = append([]string{c.HTTP.PublicURL}, c.HTTP.CORS.AllowedOrigins...)
 
-	return errors.Join(c.validateOpenShell(), c.validateForges(), c.validateNotifications())
+	return errors.Join(c.validateOpenShell(), c.validateSessions(), c.validateForges(), c.validateNotifications())
 }
 
 // validateOpenShell validates the OpenShell configuration and resolves its
@@ -755,6 +776,8 @@ func (c *Config) validateOpenShell() error {
 	}
 	if strings.TrimSpace(oc.Command) == "" {
 		errs = append(errs, errors.New("openshell: command must not be empty"))
+	} else if args, err := shlex.Split(oc.Command, true); err != nil || len(args) == 0 {
+		errs = append(errs, fmt.Errorf("openshell: command %q is not a valid command line", oc.Command))
 	}
 	if strings.TrimSpace(oc.Workspace) == "" {
 		errs = append(errs, errors.New("openshell: workspace must not be empty"))

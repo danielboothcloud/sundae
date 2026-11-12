@@ -173,10 +173,54 @@ openshell:
   # The internal HTTP base URL sandboxes use to clone and push.
   # Defaults to http.public_url when empty.
   clone_url: "{{ .OpenShell.CloneURL }}"
-  # Lifetime of the access token issued to each sandbox.
+  # Lifetime of the git access token written into a sandbox. It is renewed
+  # on every "session start" and "session attach"; an agent left running
+  # longer than this without anyone attaching loses git access until then.
   token_ttl: "{{ .OpenShell.TokenTTL }}"
-  # The command run in the sandbox when a user attaches.
+  # The program a session runs when no profile sets one, in
+  # /sandbox/<repo>. It runs inside an osewa session, so it keeps running
+  # after the SSH client disconnects.
   command: {{ printf "%q" .OpenShell.Command }}
+
+# Sessions: what runs in the OpenShell sandboxes. Each user can have several
+# named sessions per repository (session start REPO --name NAME), one sandbox
+# each. Changes take effect on restart, and only for sandboxes created after.
+sessions:
+  osewa:
+    # Pinned osewa Linux builds (osewa-linux-amd64.gz, osewa-linux-arm64.gz)
+    # uploaded to sandboxes whose image lacks the pinned osewa.
+    binary_dir: {{ printf "%q" .Sessions.Osewa.BinaryDir }}
+    # Loopback port of the osewa server inside each sandbox.
+    port: {{ .Sessions.Osewa.Port }}
+  # Named presets for "session start --profile NAME". Empty fields fall back
+  # to openshell.image and openshell.command.
+{{- if .Sessions.Profiles }}
+  profiles:
+{{- range $name, $p := .Sessions.Profiles }}
+    {{ printf "%q" $name }}:
+      image: {{ printf "%q" $p.Image }}
+      command: {{ printf "%q" $p.Command }}
+{{- end }}
+{{- else }}
+  #profiles:
+  #  claude:
+  #    image: ghcr.io/me/agent-claude:latest
+  #    command: claude
+{{- end }}
+  # Profiles for sessions started without --profile, by repository name
+  # glob. "*" does not cross "/", "**" does; case-insensitive. The most
+  # specific matching pattern wins.
+{{- if .Sessions.Repos }}
+  repos:
+{{- range $pattern, $d := .Sessions.Repos }}
+    {{ printf "%q" $pattern }}:
+      profile: {{ printf "%q" $d.Profile }}
+{{- end }}
+{{- else }}
+  #repos:
+  #  "infra/*":
+  #    profile: claude
+{{- end }}
 
 # Forges: GitHub and GitLab accounts whose repositories Soft Serve discovers,
 # imports and keeps in sync (ssh <server> forge --help). Sync never rewrites or

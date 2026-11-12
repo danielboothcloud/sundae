@@ -67,8 +67,9 @@ type Session struct {
 	User string `json:"user"`
 	// Repo is the repository the session works on.
 	Repo string `json:"repo"`
-	// Name is the session's own name. Empty while there is one unnamed
-	// session per (user, repository).
+	// Name is the session's name within the repository ("main" unless the
+	// user named it). Empty only from publishers that predate named
+	// sessions.
 	Name string `json:"name,omitempty"`
 	// Sandbox is the OpenShell sandbox name.
 	Sandbox string `json:"sandbox"`

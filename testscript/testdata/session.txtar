@@ -25,12 +25,21 @@ ensureserverrunning SSH_PORT
 # the command is registered
 soft session --help
 stdout 'start'
+stdout 'attach'
 stdout 'ls'
 stdout 'end'
 
-# start needs a terminal (ssh -t)
+# start and attach need a terminal (ssh -t); start --detach does not
 ! soft session start repo1
 stderr 'requires a terminal \(ssh -t\)'
+! soft session attach repo1
+stderr 'requires a terminal \(ssh -t\)'
+! soft session start repo1 --detach
+stderr 'Starting sandbox soft-admin-repo1'
+
+# session names are checked
+! soft session end repo1 --name Bad
+stderr 'invalid session name'
 
 # with a terminal, `session` bypasses the TUI and reaches the command;
 # repository access is checked before the gateway is contacted

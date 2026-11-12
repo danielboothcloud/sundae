@@ -111,4 +111,18 @@ softServe:
   #           enabled: true
   #           url: https://ntfy.sh
   #           topic: my-unguessable-topic
+  #
+  # Session profiles: named presets for `session start <repo> --profile
+  # <name>`, and per-repository defaults by glob. Empty fields fall back to
+  # openshell.sandboxImage and `bash -l`:
+  #   chartValues:
+  #     config:
+  #       sessions:
+  #         profiles:
+  #           claude:
+  #             image: ghcr.io/you/agent-claude:1.0
+  #             command: claude
+  #         repos:
+  #           "infra/*":
+  #             profile: claude
   chartValues: {}

@@ -52,7 +52,7 @@ Listed in `deferred-work.md`: the EmulatePty line-feed rewrite garbling raw-mode
 - **The protocol is a draft.** "Breaking changes are allowed until v1." Anything that speaks it directly must be pinned to an osewa version. `osewa local ls` and `osewa ls` are the stable-looking surfaces.
 - **Sessions are reaped.** A running session ends after 24 hours with nobody attached and no output. An agent blocked on me over a long weekend is killed.
 - **Clean environment.** Sessions do not inherit the server's environment. Git credentials, which today travel as `GIT_CONFIG_*` env on the exec, must be passed in the session-create `env`.
-- **Tags fit named sessions.** A tagged create from the same client returns the existing session of that tag. Several clients can attach to one session: one owner, the rest read-only viewers.
+- **Tags fit named sessions** (correction 2026-11-12: the osewa 0.1.4 CLI cannot set a tag; Soft Serve records the session id in the sandbox instead). A tagged create from the same client returns the existing session of that tag. Several clients can attach to one session: one owner, the rest read-only viewers.
 - **Phone client exists.** Moshi (iOS and Android) has osewa as an experimental transport.
 
 **F8. OSC 7501 lifetimes decide what a notification means.**
@@ -75,7 +75,7 @@ A phone notification matters most when I am away, so status cannot come from par
 | Pod lifecycle from any image | `Sandboxes()` create, start, delete, wait, list by label | Used today |
 | Exec, one-shot and interactive PTY | `Exec()` | Used today: clone, attach. Would also run `osewa enroll` and `osewa local ls` |
 | TCP tunnel into a sandbox port | `TCP().Forward` / `Listen`, `SSH().Tunnel` | Reach osewa's 7322 through the gateway. TCP only: nothing for UDP, so no QUIC |
-| File upload and download | `Files()` | Inject the osewa binary without an init container |
+| File upload and download | `Files()` | Not usable: the Go SDK (v0.1.6 and v0.1.8) reports its transport unavailable. osewa is baked into the sandbox image; other images get it by chunked exec upload |
 | Suspend and resume with memory kept | `SandboxSuspendResume()` | Park idle sessions. Explicit calls only: the SDK has no idle policy, so Soft Serve decides when. Needs a compute driver and isolation backend that retain memory. Where the state is kept is not stated. Reduces workstream F but does not replace it, see F1 there |
 | HTTP service exposure | `Services().Expose` | The "web server" idea: publish a dev server from a session |
 | Egress policy with a review flow | `Policy()` drafts, approve, reject | Agent asks for network access, I approve. Could surface as `blocked` in the menu |

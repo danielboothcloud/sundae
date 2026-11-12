@@ -2,7 +2,6 @@ package openshell
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -21,11 +20,15 @@ import (
 	"github.com/charmbracelet/soft-serve/pkg/proto"
 )
 
-// SandboxRoot is the directory repositories are cloned into.
+// SandboxRoot is the directory repositories are cloned into. It is also the
+// sandbox user's home.
 const SandboxRoot = "/sandbox"
 
 // tokenPrefix prefixes the name of access tokens issued to sandboxes.
 const tokenPrefix = "openshell:"
+
+// ErrNoSession is returned when attaching to a session that does not exist.
+var ErrNoSession = errors.New("no such session")
 
 // TokenStore issues and revokes Soft Serve access tokens. It is satisfied by
 // *backend.Backend.
@@ -36,15 +39,22 @@ type TokenStore interface {
 }
 
 // Manager drives the session lifecycle. It holds no session state; the
-// gateway is the source of truth.
+// gateway and the sandboxes are the source of truth.
 type Manager struct {
 	client   Client
 	tokens   TokenStore
 	image    string
-	cloneURL string
 	command  string
+	sessions config.SessionsConfig
+	cloneURL string
 	tokenTTL time.Duration
 	now      func() time.Time
+	// osewaBinaryDir holds the osewa release builds to upload.
+	osewaBinaryDir string
+	// osewaPort is the loopback port of the sandbox's osewa server.
+	osewaPort int
+	// osewaSHA256 maps an architecture to the checksum of its osewa build.
+	osewaSHA256 map[string]string
 	// bus receives lifecycle events. nil drops them.
 	bus *events.Bus
 }
@@ -63,13 +73,23 @@ func WithEvents(bus *events.Bus) ManagerOption {
 // credentials, configured from cfg.
 func NewManager(client Client, tokens TokenStore, cfg *config.Config, opts ...ManagerOption) *Manager {
 	m := &Manager{
-		client:   client,
-		tokens:   tokens,
-		image:    cfg.OpenShell.Image,
-		cloneURL: cfg.OpenShellCloneURL(),
-		command:  cfg.OpenShell.Command,
-		tokenTTL: cfg.OpenShell.TokenTTL,
-		now:      time.Now,
+		client:         client,
+		tokens:         tokens,
+		image:          cfg.OpenShell.Image,
+		command:        cfg.OpenShell.Command,
+		sessions:       cfg.Sessions,
+		cloneURL:       cfg.OpenShellCloneURL(),
+		tokenTTL:       cfg.OpenShell.TokenTTL,
+		now:            time.Now,
+		osewaBinaryDir: cfg.Sessions.Osewa.BinaryDir,
+		osewaPort:      cfg.Sessions.Osewa.Port,
+		osewaSHA256:    osewaSHA256,
+	}
+	if m.osewaBinaryDir == "" {
+		m.osewaBinaryDir = config.DefaultOsewaBinaryDir
+	}
+	if m.osewaPort == 0 {
+		m.osewaPort = config.DefaultOsewaPort
 	}
 	for _, o := range opts {
 		o(m)
@@ -77,13 +97,13 @@ func NewManager(client Client, tokens TokenStore, cfg *config.Config, opts ...Ma
 	return m
 }
 
-// lifecycle publishes a lifecycle step of the user's session for repo.
-func (m *Manager) lifecycle(user proto.User, repo, sandbox string, step events.Lifecycle, op string, err error) {
+// lifecycle publishes a lifecycle step of one of the user's sessions.
+func (m *Manager) lifecycle(user proto.User, repo, name, sandbox string, step events.Lifecycle, op string, err error) {
 	if m.bus == nil {
 		return
 	}
 	l := events.SessionLifecycle{
-		Session: events.Session{User: user.Username(), Repo: repo, Sandbox: sandbox},
+		Session: events.Session{User: user.Username(), Repo: repo, Name: name, Sandbox: sandbox},
 		Step:    step,
 		Op:      op,
 	}
@@ -93,7 +113,7 @@ func (m *Manager) lifecycle(user proto.User, repo, sandbox string, step events.L
 	m.bus.Publish(events.SessionLifecycleEvent(user.ID(), l))
 }
 
-// StartOptions configures Start.
+// StartOptions configures Start and Resume.
 type StartOptions struct {
 	// User is the authenticated caller. Required.
 	User proto.User
@@ -101,9 +121,16 @@ type StartOptions struct {
 	Repo string
 	// VCS selects the clone tool.
 	VCS proto.VCS
-	// Image overrides the configured image when the sandbox is created.
+	// Name is the session name. Empty is DefaultSessionName.
+	Name string
+	// Profile names the sessions.profiles entry to create the session from.
+	// Empty uses the sessions.repos match for Repo, if any. Start only; it
+	// is ignored, with a warning, for a session that already exists.
+	Profile string
+	// Image overrides the image when the sandbox is created. Start only;
+	// ignored, with a warning, for a session that already exists.
 	Image string
-	// Term is the client's TERM, forwarded to the attached command.
+	// Term is the client's TERM, given to the attach client.
 	Term string
 	// Progress receives human-readable progress messages. May be nil.
 	Progress io.Writer
@@ -111,37 +138,90 @@ type StartOptions struct {
 
 // Session is a started session, ready to attach to.
 type Session struct {
-	// Name is the sandbox name.
+	// Name is the session name.
 	Name string
-	// Created reports whether the sandbox was created by Start.
+	// Repo is the repository name.
+	Repo string
+	// Sandbox is the sandbox name.
+	Sandbox string
+	// Profile is the profile the session was created from; empty for none.
+	Profile string
+	// Created reports whether the sandbox was created by this call.
 	Created bool
-	// Cloned reports whether Start cloned the repository.
+	// Cloned reports whether this call cloned the repository.
 	Cloned bool
 	// WorkDir is the repository checkout inside the sandbox.
 	WorkDir string
-	// Command is what runs on attach.
+	// Command is the session's program, running in an osewa session.
 	Command []string
-	// Env is passed to the attached command. It carries the git credentials,
-	// which are never written to disk in the sandbox.
+	// Started reports whether this call started the program, rather than
+	// finding it running.
+	Started bool
+	// Osewa is the path of the osewa binary in the sandbox.
+	Osewa string
+	// OsewaID is the id of the osewa session holding the program.
+	OsewaID string
+	// Env is the environment of the attach client. It holds no
+	// credentials.
 	Env map[string]string
+}
+
+// AttachCommand is the command Attach runs in the sandbox.
+func (s *Session) AttachCommand() []string {
+	return OsewaAttachCommand(s.Osewa, s.OsewaID)
 }
 
 // Info describes one of a user's sessions.
 type Info struct {
-	Repo  string
-	Name  string
+	// Repo is the repository name.
+	Repo string
+	// Name is the session name.
+	Name string
+	// Profile is the profile the session was created from; empty for none.
+	Profile string
+	// Sandbox is the sandbox name.
+	Sandbox string
+	// Phase is the sandbox phase.
 	Phase string
 }
 
 // TokenName returns the access token name used for a sandbox.
 func TokenName(sandbox string) string { return tokenPrefix + sandbox }
 
-// Start ensures the user's sandbox for the repository is running, clones the
-// repository on first use, and returns the attach parameters.
+// sessionName returns name, or DefaultSessionName for "", after checking
+// it.
+func sessionName(name string) (string, error) {
+	if name == "" {
+		return DefaultSessionName, nil
+	}
+	if !ValidSessionName(name) {
+		return "", fmt.Errorf("invalid session name %q: %w", name, ErrInvalidSessionName)
+	}
+	return name, nil
+}
+
+// Start ensures the user's named session for the repository is running:
+// it creates the sandbox (from the session's profile) or resumes it, clones
+// the repository on first use, renews the sandbox's git credentials, makes
+// sure osewa is installed, serving and enrolled, and starts the session's
+// program in an osewa session unless it is running already. The returned
+// Session is ready to Attach to.
 //
 // It publishes created or resumed once the sandbox is running, ready when
 // the session can be attached to, and failed when it returns an error.
-func (m *Manager) Start(ctx context.Context, opts StartOptions) (_ *Session, err error) {
+func (m *Manager) Start(ctx context.Context, opts StartOptions) (*Session, error) {
+	return m.prepare(ctx, opts, true)
+}
+
+// Resume is Start for a session that must already exist: it never creates a
+// sandbox, and returns an error wrapping ErrNoSession when there is none.
+// Profile and Image are ignored.
+func (m *Manager) Resume(ctx context.Context, opts StartOptions) (*Session, error) {
+	opts.Profile, opts.Image = "", ""
+	return m.prepare(ctx, opts, false)
+}
+
+func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (_ *Session, err error) {
 	if opts.User == nil {
 		return nil, proto.ErrUnauthorized
 	}
@@ -149,138 +229,266 @@ func (m *Manager) Start(ctx context.Context, opts StartOptions) (_ *Session, err
 	if progress == nil {
 		progress = io.Discard
 	}
-
-	name := SandboxName(opts.User.Username(), opts.Repo)
-	defer func() {
-		if err != nil {
-			m.lifecycle(opts.User, opts.Repo, name, events.LifecycleFailed, "start", err)
-		}
-	}()
-
-	command, serr := shlex.Split(m.command, true)
-	if serr != nil || len(command) == 0 {
-		return nil, fmt.Errorf("openshell: invalid command %q", m.command)
-	}
-
-	image := opts.Image
-	if image == "" {
-		image = m.image
-	}
-
-	fmt.Fprintf(progress, "Starting sandbox %s...\n", name) //nolint:errcheck
-	sb, created, err := m.client.EnsureSandbox(ctx, name, SandboxRequest{
-		Image:  image,
-		Labels: ownerLabels(opts.User),
-		Annotations: map[string]string{
-			AnnotationUser: opts.User.Username(),
-			AnnotationRepo: opts.Repo,
-		},
-	})
+	name, err := sessionName(opts.Name)
 	if err != nil {
 		return nil, err
 	}
-	if created {
-		m.lifecycle(opts.User, opts.Repo, name, events.LifecycleCreated, "", nil)
+
+	// Input errors are returned before anything is published.
+	var (
+		profile string
+		p       config.SessionProfile
+	)
+	if create {
+		profile, p, err = m.resolveProfile(opts.Repo, opts.Profile)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	sandbox := SessionSandboxName(opts.User.Username(), opts.Repo, name)
+	op := "start"
+	if !create {
+		op = "attach"
+	}
+	defer func() {
+		// Attaching to a session that does not exist is not a failure of
+		// the session.
+		if err != nil && !errors.Is(err, ErrNoSession) {
+			m.lifecycle(opts.User, opts.Repo, name, sandbox, events.LifecycleFailed, op, err)
+		}
+	}()
+
+	var (
+		sb      *Sandbox
+		created bool
+	)
+	if create {
+		image := opts.Image
+		if image == "" {
+			image = p.Image
+		}
+		if image == "" {
+			image = m.image
+		}
+
+		fmt.Fprintf(progress, "Starting sandbox %s...\n", sandbox) //nolint:errcheck
+		sb, created, err = m.client.EnsureSandbox(ctx, sandbox, SandboxRequest{
+			Image:       image,
+			Labels:      ownerLabels(opts.User),
+			Annotations: sessionAnnotations(opts.User.Username(), opts.Repo, name, profile),
+		})
+		if err != nil {
+			return nil, err
+		}
 	} else {
-		m.lifecycle(opts.User, opts.Repo, name, events.LifecycleResumed, "", nil)
+		fmt.Fprintf(progress, "Resuming sandbox %s...\n", sandbox) //nolint:errcheck
+		sb, err = m.client.ResumeSandbox(ctx, sandbox, ownerLabels(opts.User))
+		if IsNotFound(err) {
+			return nil, fmt.Errorf("%w: %q for %s; start it with \"session start %s%s\"", ErrNoSession, name, opts.Repo, opts.Repo, nameFlag(name))
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
-	if !created && opts.Image != "" {
-		fmt.Fprintf(progress, "Warning: --image ignored, sandbox %s already exists\n", sb.Name) //nolint:errcheck
+	if created {
+		m.lifecycle(opts.User, opts.Repo, name, sandbox, events.LifecycleCreated, "", nil)
+	} else {
+		m.lifecycle(opts.User, opts.Repo, name, sandbox, events.LifecycleResumed, "", nil)
+		// The sandbox records the profile it was created from.
+		profile = sb.Annotations[AnnotationProfile]
+		if opts.Image != "" {
+			fmt.Fprintf(progress, "Warning: --image ignored, sandbox %s already exists\n", sandbox) //nolint:errcheck
+		}
+		if opts.Profile != "" && opts.Profile != profile {
+			fmt.Fprintf(progress, "Warning: --profile ignored, session %s already exists\n", name) //nolint:errcheck
+		}
 	}
 
-	// Seam: restoring a /sandbox snapshot belongs here, before the clone
-	// check, so a restored checkout is resumed rather than re-cloned.
-
-	token, err := m.issueToken(ctx, opts.User, name)
+	command, err := m.profileCommand(profile, progress)
 	if err != nil {
 		return nil, err
 	}
 
 	s := &Session{
 		Name:    name,
+		Repo:    opts.Repo,
+		Sandbox: sandbox,
+		Profile: profile,
 		Created: created,
 		WorkDir: path.Join(SandboxRoot, opts.Repo),
 		Command: command,
-		Env:     gitAuthEnv(m.cloneURL, opts.User.Username(), token),
 	}
 
-	exists, err := m.dirExists(ctx, name, s.WorkDir)
+	// Seam: restoring a /sandbox snapshot belongs here, before the clone
+	// check, so a restored checkout is resumed rather than re-cloned.
+
+	// Renew the git credentials first: the clone uses them too.
+	token, err := m.issueToken(ctx, opts.User, sandbox)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.writeGitCredentials(ctx, sandbox, opts.User.Username(), token); err != nil {
+		return nil, err
+	}
+
+	exists, err := m.dirExists(ctx, sandbox, s.WorkDir)
 	if err != nil {
 		return nil, err
 	}
 	if !exists {
 		fmt.Fprintf(progress, "Cloning %s into %s...\n", opts.Repo, s.WorkDir) //nolint:errcheck
-		if err := m.clone(ctx, name, opts, s); err != nil {
+		if err := m.clone(ctx, sandbox, opts.VCS, opts.Repo, s.WorkDir); err != nil {
 			return nil, err
 		}
 		s.Cloned = true
 	}
 
+	bin, enrolled, err := m.osewaBinary(ctx, sandbox, progress)
+	if err != nil {
+		return nil, err
+	}
+	s.Osewa = bin
+	if err := m.startOsewaServer(ctx, sandbox, bin); err != nil {
+		return nil, err
+	}
+	if !enrolled {
+		if err := m.enrollBridge(ctx, sandbox, bin); err != nil {
+			return nil, err
+		}
+	}
+	s.OsewaID, s.Started, err = m.ensureOsewaSession(ctx, sandbox, bin, s.WorkDir, command)
+	if err != nil {
+		return nil, err
+	}
+	if s.Started && !created {
+		fmt.Fprintf(progress, "Started %s again: it was not running\n", strings.Join(command, " ")) //nolint:errcheck
+	}
+
+	s.Env = m.osewaClientEnv()
 	if opts.Term != "" {
 		s.Env["TERM"] = opts.Term
 	}
 
-	m.lifecycle(opts.User, opts.Repo, name, events.LifecycleReady, "", nil)
+	m.lifecycle(opts.User, opts.Repo, name, sandbox, events.LifecycleReady, "", nil)
 	return s, nil
 }
 
-// Attach starts the session command with a cols x rows PTY.
+// nameFlag returns the --name flag selecting session name, or "" for the
+// default session.
+func nameFlag(name string) string {
+	if name == DefaultSessionName {
+		return ""
+	}
+	return " --name " + name
+}
+
+// resolveProfile returns the profile a new session for repo is created from:
+// explicit when set, else the sessions.repos match, else none ("").
+func (m *Manager) resolveProfile(repo, explicit string) (string, config.SessionProfile, error) {
+	name := explicit
+	if name == "" {
+		name = m.sessions.RepoProfile(repo)
+	}
+	if name == "" {
+		return "", config.SessionProfile{}, nil
+	}
+	p, ok := m.sessions.Profiles[name]
+	if !ok {
+		known := slices.Sorted(maps.Keys(m.sessions.Profiles))
+		if len(known) == 0 {
+			return "", config.SessionProfile{}, fmt.Errorf("unknown profile %q: no profiles are configured", name)
+		}
+		return "", config.SessionProfile{}, fmt.Errorf("unknown profile %q: use one of %s", name, strings.Join(known, ", "))
+	}
+	return name, p, nil
+}
+
+// profileCommand returns the program of a session created from profile: the
+// profile's command, else openshell.command. A profile that is no longer
+// configured falls back to openshell.command with a warning.
+func (m *Manager) profileCommand(profile string, progress io.Writer) ([]string, error) {
+	line := m.command
+	if profile != "" {
+		p, ok := m.sessions.Profiles[profile]
+		if !ok {
+			fmt.Fprintf(progress, "Warning: profile %q is no longer configured; running %q\n", profile, m.command) //nolint:errcheck
+		} else if p.Command != "" {
+			line = p.Command
+		}
+	}
+	command, err := shlex.Split(line, true)
+	if err != nil || len(command) == 0 {
+		return nil, fmt.Errorf("openshell: invalid command %q", line)
+	}
+	return command, nil
+}
+
+// Attach runs the osewa attach client for s with a cols x rows PTY. Ending
+// it, by detaching (~.), closing the SSH connection or cancelling ctx, ends
+// only the client: the session's program keeps running.
 func (m *Manager) Attach(ctx context.Context, s *Session, cols, rows uint32) (InteractiveSession, error) {
-	is, err := m.client.Interactive(ctx, s.Name, s.Command, cols, rows, ExecOptions{
-		Env:     maps.Clone(s.Env),
-		WorkDir: s.WorkDir,
+	is, err := m.client.Interactive(ctx, s.Sandbox, s.AttachCommand(), cols, rows, ExecOptions{
+		Env:          maps.Clone(s.Env),
+		WorkDir:      s.WorkDir,
+		NoLoginShell: true,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("openshell: attach to sandbox %q: %w", s.Name, err)
+		return nil, fmt.Errorf("openshell: attach to sandbox %q: %w", s.Sandbox, err)
 	}
 	return is, nil
 }
 
-// End deletes the user's sandbox for the repository and revokes its access
-// tokens. It reports whether a sandbox existed; ending an absent session is a
+// End deletes the sandbox of the user's named session for the repository
+// and revokes its access tokens. Other sessions of the repository are left
+// alone. It reports whether a sandbox existed; ending an absent session is a
 // successful no-op.
 //
 // It publishes ended once the sandbox is deleted, and failed when the
 // sandbox could not be looked up or deleted. Ending an absent session
 // publishes nothing.
-func (m *Manager) End(ctx context.Context, user proto.User, repo string) (bool, error) {
+func (m *Manager) End(ctx context.Context, user proto.User, repo, name string) (bool, error) {
 	if user == nil {
 		return false, proto.ErrUnauthorized
 	}
+	name, err := sessionName(name)
+	if err != nil {
+		return false, err
+	}
 
-	name := SandboxName(user.Username(), repo)
+	sandbox := SessionSandboxName(user.Username(), repo, name)
 	failed := func(err error) (bool, error) {
-		m.lifecycle(user, repo, name, events.LifecycleFailed, "end", err)
+		m.lifecycle(user, repo, name, sandbox, events.LifecycleFailed, "end", err)
 		return false, err
 	}
 	existed := true
-	sb, err := m.client.GetSandbox(ctx, name)
+	sb, err := m.client.GetSandbox(ctx, sandbox)
 	switch {
 	case IsNotFound(err):
 		existed = false
 	case err != nil:
-		return failed(fmt.Errorf("openshell: get sandbox %q: %w", name, err))
+		return failed(fmt.Errorf("openshell: get sandbox %q: %w", sandbox, err))
 	case !owns(sb, ownerLabels(user)):
 		return failed(ErrNotOwned)
 	}
 
 	if existed {
 		// Seam: snapshotting /sandbox belongs here, before the delete.
-		if err := m.client.DeleteSandbox(ctx, name); err != nil {
+		if err := m.client.DeleteSandbox(ctx, sandbox); err != nil {
 			return failed(err)
 		}
 		// The session is gone even if revoking its tokens below fails.
-		m.lifecycle(user, repo, name, events.LifecycleEnded, "", nil)
+		m.lifecycle(user, repo, name, sandbox, events.LifecycleEnded, "", nil)
 	}
 
-	if err := m.revokeTokens(ctx, user, TokenName(name), true); err != nil {
+	if err := m.revokeTokens(ctx, user, TokenName(sandbox), true); err != nil {
 		return existed, err
 	}
 
 	return existed, nil
 }
 
-// List returns the user's sessions sorted by repository.
+// List returns the user's sessions sorted by repository and session name.
 func (m *Manager) List(ctx context.Context, user proto.User) ([]Info, error) {
 	if user == nil {
 		return nil, proto.ErrUnauthorized
@@ -293,25 +501,35 @@ func (m *Manager) List(ctx context.Context, user proto.User) ([]Info, error) {
 
 	infos := make([]Info, 0, len(sbs))
 	for _, sb := range sbs {
+		name := sb.Annotations[AnnotationSession]
+		if name == "" {
+			// Created before named sessions.
+			name = DefaultSessionName
+		}
 		infos = append(infos, Info{
-			Repo:  sb.Annotations[AnnotationRepo],
-			Name:  sb.Name,
-			Phase: string(sb.Status.Phase),
+			Repo:    sb.Annotations[AnnotationRepo],
+			Name:    name,
+			Profile: sb.Annotations[AnnotationProfile],
+			Sandbox: sb.Name,
+			Phase:   string(sb.Status.Phase),
 		})
 	}
 	slices.SortFunc(infos, func(a, b Info) int {
 		if c := strings.Compare(a.Repo, b.Repo); c != 0 {
 			return c
 		}
-		return strings.Compare(a.Name, b.Name)
+		if c := strings.Compare(a.Name, b.Name); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Sandbox, b.Sandbox)
 	})
 	return infos, nil
 }
 
 // issueToken creates a fresh short-lived access token for the sandbox after
-// pruning its expired predecessors. Unexpired tokens are kept so concurrent
-// attachments to the same sandbox keep working until they expire or the
-// session ends.
+// pruning its expired predecessors. Unexpired tokens are kept until they
+// expire or the session ends: a git command that read the credential file
+// just before it was replaced may still be using one.
 func (m *Manager) issueToken(ctx context.Context, user proto.User, sandbox string) (string, error) {
 	name := TokenName(sandbox)
 	if err := m.revokeTokens(ctx, user, name, false); err != nil {
@@ -368,21 +586,22 @@ func (m *Manager) dirExists(ctx context.Context, sandbox, dir string) (bool, err
 	}
 }
 
-// clone clones the repository into s.WorkDir. The credentials travel only in
-// the exec environment; the clone URL carries none.
-func (m *Manager) clone(ctx context.Context, sandbox string, opts StartOptions, s *Session) error {
-	if parent := path.Dir(s.WorkDir); parent != SandboxRoot {
-		if err := m.run(ctx, sandbox, []string{"mkdir", "-p", parent}, nil); err != nil {
+// clone clones the repository into workDir. The credentials come from the
+// credential file writeGitCredentials wrote; neither the URL nor the
+// environment carries any.
+func (m *Manager) clone(ctx context.Context, sandbox string, vcs proto.VCS, repo, workDir string) error {
+	if parent := path.Dir(workDir); parent != SandboxRoot {
+		if err := m.run(ctx, sandbox, []string{"mkdir", "-p", parent}); err != nil {
 			return err
 		}
 	}
 
-	return m.run(ctx, sandbox, CloneCommand(opts.VCS, m.repoURL(opts.Repo), s.WorkDir), s.Env)
+	return m.run(ctx, sandbox, CloneCommand(vcs, m.repoURL(repo), workDir))
 }
 
-func (m *Manager) run(ctx context.Context, sandbox string, command []string, env map[string]string) error {
+func (m *Manager) run(ctx context.Context, sandbox string, command []string) error {
 	res, err := m.client.Run(ctx, sandbox, command, ExecOptions{
-		Env:          maps.Clone(env),
+		Env:          map[string]string{"HOME": SandboxRoot},
 		WorkDir:      SandboxRoot,
 		NoLoginShell: true,
 	})
@@ -409,23 +628,23 @@ func CloneCommand(vcs proto.VCS, url, dir string) []string {
 	return []string{"git", "clone", url, dir}
 }
 
-// gitAuthEnv returns environment variables that make git send the token as
-// basic-auth credentials to cloneURL only. Using GIT_CONFIG_* keeps the token
-// out of .git/config and every other file in the sandbox.
-func gitAuthEnv(cloneURL, username, token string) map[string]string {
-	cred := base64.StdEncoding.EncodeToString([]byte(username + ":" + token))
-	return map[string]string{
-		"GIT_CONFIG_COUNT":   "1",
-		"GIT_CONFIG_KEY_0":   "http." + cloneURL + "/.extraHeader",
-		"GIT_CONFIG_VALUE_0": "Authorization: Basic " + cred,
-	}
-}
-
 func ownerLabels(user proto.User) map[string]string {
 	return map[string]string{
 		LabelManaged: "true",
 		LabelUserID:  strconv.FormatInt(user.ID(), 10),
 	}
+}
+
+func sessionAnnotations(user, repo, name, profile string) map[string]string {
+	a := map[string]string{
+		AnnotationUser:    user,
+		AnnotationRepo:    repo,
+		AnnotationSession: name,
+	}
+	if profile != "" {
+		a[AnnotationProfile] = profile
+	}
+	return a
 }
 
 func trimOutput(b []byte) string {

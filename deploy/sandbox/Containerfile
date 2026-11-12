@@ -26,12 +26,28 @@
 # - /sandbox is the workspace and HOME. On Kubernetes it is a volume that
 #   OpenShell seeds from this image's /sandbox on first start (fsGroup makes
 #   it writable); Soft Serve clones each repository into /sandbox/<repo>.
-# - Soft Serve runs `bash -l` in the checkout. OpenShell starts exec'd
-#   commands with HOME=/sandbox and a cleared environment: image ENV values
-#   other than PATH do not reach them, so login-shell settings go in
-#   /etc/profile.d instead.
+# - Soft Serve runs each session's program (openshell.command, `bash -l` by
+#   default, or a profile's command) in the checkout, inside an osewa session
+#   (https://github.com/rjyo/osewa), so it keeps running after the SSH client
+#   disconnects. OpenShell starts exec'd commands with HOME=/sandbox and a
+#   cleared environment: image ENV values other than PATH do not reach them.
+#   osewa sessions start with a clean environment too and run the program
+#   through `/bin/sh -l`, so login-shell settings go in /etc/profile.d.
+# - osewa is installed here as /usr/local/bin/osewa, the release Soft Serve
+#   pins. Soft Serve uses it when `osewa version` matches its pin; otherwise
+#   it uploads the pinned build to /sandbox/.local/lib/soft-serve. It starts
+#   `osewa server` on 127.0.0.1:7322 (loopback only, QUIC and port forwarding
+#   off) and keeps osewa's state under /sandbox: ~/.config/osewa (server key,
+#   enrolled devices), ~/.local/state/osewa (log, holder sockets) and
+#   ~/.config/soft-serve (the bridge's client identity and session id).
+# - Soft Serve writes the sandbox's short-lived git token to
+#   /tmp/soft-serve/gitconfig (mode 0600) on every session start and attach,
+#   and ~/.gitconfig includes that file; the token never lands in /sandbox.
+#   The bootstrap uses sh, git, grep, gzip, sha256sum and base64, and flock
+#   when present; all are in this image.
 # - The default filesystem policy grants read-only access to /usr, /bin, /lib
-#   and /etc but not /opt, so every tool is installed under /usr.
+#   and /etc but not /opt, so every tool is installed under /usr; /sandbox and
+#   /tmp are writable.
 
 # Pinned by tag and by digest: NVIDIA rebuilds this tag with security updates.
 ARG BASE_IMAGE=nvcr.io/nvidia/base/ubuntu:noble-20261024.1@sha256:fef8f2708dbb85fbfcba6503d805397d89d9210f375362ff3b9f7888eb297ca5
@@ -42,6 +58,17 @@ ARG BASE_IMAGE=nvcr.io/nvidia/base/ubuntu:noble-20261024.1@sha256:fef8f2708dbb85
 ARG JJ_VERSION=0.47.1
 ARG JJ_SHA256_AMD64=d4b657f622ee50929c8916466dfa3d6a6c17a0a32b50e7b2c793707ec9ebcad7
 ARG JJ_SHA256_ARM64=0f300e1576de8dabe0a9dedf0b87ae44f8accea5cf54d9a342a51061c1fb1bcd
+
+# osewa release and the SHA-256 of its gzipped static musl build per
+# architecture, from SHA256SUMS of
+# https://github.com/rjyo/osewa/releases/tag/v0.1.4. Change all three
+# together, and with them OsewaVersion and the checksums in
+# pkg/openshell/osewa.go and the OSEWA_* arguments of the root Containerfile
+# (TestOsewaPinMatchesContainerfiles checks they agree): the osewa protocol is
+# a draft and Soft Serve drives this exact release.
+ARG OSEWA_VERSION=0.1.4
+ARG OSEWA_SHA256_AMD64=160667bfd60e999b4059b30dfad74fd38c8ab0da413668ec176678a4a0d4bb58
+ARG OSEWA_SHA256_ARM64=5a08537f6ebd2b2b6870a54c2c6a78cb26a16d1426e261ab5b8b896d24967325
 
 # The sandbox identity. Match the OpenShell chart's server.sandboxUid and
 # server.sandboxGid when you set those; both default to 10001.
@@ -76,11 +103,35 @@ RUN set -eu; \
     install -m 0755 /tmp/jj/jj /out-jj; \
     /out-jj --version
 
+# --- osewa ---------------------------------------------------------------------
+# Download and verify the osewa binary for the target architecture. Reuses the
+# jj stage, which has curl.
+FROM jj AS osewa
+
+ARG TARGETARCH
+ARG OSEWA_VERSION
+ARG OSEWA_SHA256_AMD64
+ARG OSEWA_SHA256_ARM64
+
+RUN set -eu; \
+    case "${TARGETARCH}" in \
+      amd64) sum="${OSEWA_SHA256_AMD64}" ;; \
+      arm64) sum="${OSEWA_SHA256_ARM64}" ;; \
+      *) echo "unsupported TARGETARCH '${TARGETARCH}' (want amd64 or arm64)" >&2; exit 1 ;; \
+    esac; \
+    gz="osewa-linux-${TARGETARCH}.gz"; \
+    curl -fsSL --proto '=https' --tlsv1.2 -o "/tmp/${gz}" \
+      "https://github.com/rjyo/osewa/releases/download/v${OSEWA_VERSION}/${gz}"; \
+    echo "${sum}  /tmp/${gz}" | sha256sum -c -; \
+    gzip -dc "/tmp/${gz}" > /out-osewa; \
+    chmod 0755 /out-osewa; \
+    /out-osewa version
+
 # --- sandbox -------------------------------------------------------------------
 FROM ${BASE_IMAGE}
 
 # git, bash:       Soft Serve clones with git (or jj, which runs git) and
-#                  attaches with `bash -l`.
+#                  runs `bash -l` unless a profile names another program.
 # ca-certificates: TLS for git, jj and curl.
 # curl, openssh-client, less, nano, vim-tiny: everyday tools. less is the
 #                  pager jj and git use; nano is jj's default editor and the
@@ -101,9 +152,10 @@ RUN apt-get update \
 # policy.
 COPY --from=jj /out-jj /usr/bin/jj
 
-# Room for the osewa binary, later. Install it under /usr (not /opt, which the
-# default sandbox filesystem policy does not expose), e.g.:
-#   COPY --chmod=0755 osewa /usr/local/bin/osewa
+# The pinned osewa, under /usr (not /opt, which the default sandbox
+# filesystem policy does not expose) and on PATH, where Soft Serve looks for
+# it.
+COPY --from=osewa /out-osewa /usr/local/bin/osewa
 
 ARG SANDBOX_UID
 ARG SANDBOX_GID
@@ -116,7 +168,8 @@ RUN groupadd --gid "${SANDBOX_GID}" sandbox \
       --create-home --shell /bin/bash sandbox \
  && chmod 0755 /sandbox
 
-# Read by `bash -l`. Only fills in what the caller did not set.
+# Read by login shells (`bash -l`, and the `/bin/sh -l` osewa sessions start
+# the program with). Only fills in what the caller did not set.
 RUN printf '%s\n' \
       '# Soft Serve sandbox defaults.' \
       ': "${LANG:=C.UTF-8}"; export LANG' \

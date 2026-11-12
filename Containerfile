@@ -15,6 +15,14 @@
 ARG GO_IMAGE=docker.io/library/golang:1.26.11-alpine3.24
 ARG RUNTIME_IMAGE=docker.io/library/alpine:3.24.4
 
+# osewa release and the SHA-256 of its gzipped Linux builds, from SHA256SUMS of
+# https://github.com/rjyo/osewa/releases/tag/v0.1.4. Must match OsewaVersion
+# and the checksums in pkg/openshell/osewa.go and the OSEWA_* arguments of
+# deploy/sandbox/Containerfile (TestOsewaPinMatchesContainerfiles checks).
+ARG OSEWA_VERSION=0.1.4
+ARG OSEWA_SHA256_AMD64=160667bfd60e999b4059b30dfad74fd38c8ab0da413668ec176678a4a0d4bb58
+ARG OSEWA_SHA256_ARM64=5a08537f6ebd2b2b6870a54c2c6a78cb26a16d1426e261ab5b8b896d24967325
+
 # --- build -------------------------------------------------------------------
 # The build stage runs on the build host's architecture and cross-compiles.
 # That is possible because the binary is pure Go (SQLite is modernc.org/sqlite).
@@ -40,6 +48,32 @@ RUN CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" \
       -ldflags "-s -w -X main.Version=${VERSION} -X main.CommitSHA=${COMMIT_SHA} -X main.CommitDate=${COMMIT_DATE}" \
       -o /out/soft ./cmd/soft
 
+# --- osewa -------------------------------------------------------------------
+# Both Linux builds of the pinned osewa, whatever the target: Soft Serve
+# uploads the one matching a sandbox's architecture when the sandbox image
+# lacks osewa (sessions.osewa.binary_dir). Kept gzipped as released, so Soft
+# Serve and the sandbox can check them against the published checksums.
+FROM --platform=$BUILDPLATFORM ${RUNTIME_IMAGE} AS osewa
+
+ARG OSEWA_VERSION
+ARG OSEWA_SHA256_AMD64
+ARG OSEWA_SHA256_ARM64
+
+RUN apk add --no-cache curl
+
+RUN set -eu; \
+    mkdir -p /out/osewa; \
+    for arch in amd64 arm64; do \
+      case "${arch}" in \
+        amd64) sum="${OSEWA_SHA256_AMD64}" ;; \
+        arm64) sum="${OSEWA_SHA256_ARM64}" ;; \
+      esac; \
+      gz="osewa-linux-${arch}.gz"; \
+      curl -fsSL --proto '=https' --tlsv1.2 -o "/out/osewa/${gz}" \
+        "https://github.com/rjyo/osewa/releases/download/v${OSEWA_VERSION}/${gz}"; \
+      echo "${sum}  /out/osewa/${gz}" | sha256sum -c -; \
+    done
+
 # --- runtime -----------------------------------------------------------------
 FROM ${RUNTIME_IMAGE}
 
@@ -59,6 +93,9 @@ RUN addgroup -g 10001 -S soft \
 # The hooks call the binary through SOFT_SERVE_BIN_PATH, which Soft Serve sets
 # to its own path. Keep it here so existing repositories keep working.
 COPY --from=build /out/soft /usr/local/bin/soft
+
+# The osewa builds Soft Serve uploads to sandboxes (sessions.osewa.binary_dir).
+COPY --from=osewa /out/osewa/ /usr/local/share/soft-serve/osewa/
 
 # All state lives here: repositories, the SQLite database, SSH host keys.
 ENV SOFT_SERVE_DATA_PATH="/soft-serve"

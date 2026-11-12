@@ -277,6 +277,16 @@ jobs:
 #    include: ["me/*"]
 #    sync: 10m
 
+# Agent session profiles. See "OpenShell Agent Sessions".
+#sessions:
+#  profiles:
+#    claude:
+#      image: ghcr.io/example/agent-claude:latest
+#      command: claude
+#  repos:
+#    "infra/*":
+#      profile: claude
+
 # Notifications about agent sessions, through ntfy. See "Notifications".
 #notifications:
 #  "on": [blocked, done, error]
@@ -364,26 +374,46 @@ Use the `lfs` config section to customize your Git LFS server.
 #### OpenShell Agent Sessions
 
 Soft Serve can start and resume agent sessions in
-[NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) sandboxes. Each user gets
-one sandbox per repository, named `soft-<user>-<repo>`. The repository is
-cloned into `/sandbox/<repo>` on first start, and your SSH terminal is bridged
-to a shell inside the sandbox:
+[NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) sandboxes. Each
+session has its own sandbox, with the repository cloned into
+`/sandbox/<repo>`. The session's program (a shell by default, or an agent)
+runs there inside an [osewa](https://github.com/rjyo/osewa) session, so it
+keeps running after your SSH connection closes. Your SSH terminal is bridged
+to it:
 
 ```sh
-ssh -t -p 23231 localhost session start icecream                 # create or resume, then attach
-ssh -t -p 23231 localhost session start icecream --image my/img  # image used only when the sandbox is first created
-ssh -p 23231 localhost session ls                                # your sessions: repo, sandbox, phase
-ssh -p 23231 localhost session end icecream                      # delete the sandbox and revoke its token
+ssh -t -p 23231 localhost session start icecream                  # create or resume the "main" session, then attach
+ssh -t -p 23231 localhost session start icecream --name review    # a second session of the same repository
+ssh -t -p 23231 localhost session start icecream --profile claude # create from a profile (see below)
+ssh -t -p 23231 localhost session start icecream --image my/img   # image used only when the sandbox is first created
+ssh    -p 23231 localhost session start icecream -n bg --detach   # create or resume without attaching (no -t needed)
+ssh -t -p 23231 localhost session attach icecream --name review   # attach to an existing session
+ssh    -p 23231 localhost session ls                              # your sessions: repo, name, profile, sandbox, phase
+ssh    -p 23231 localhost session end icecream --name review      # delete that session's sandbox and revoke its token
 ```
 
-`session start` needs a terminal, so pass `-t`. When you exit the shell, the
-sandbox keeps running, so agents can keep working. Running `session start`
-again re-attaches. Only `session end` deletes the sandbox. You need read access
-to the repository, and anonymous users can't use sessions.
+**Named sessions.** A user can have several sessions per repository, told
+apart by `--name` (1 to 32 lowercase letters, digits and hyphens; `main` when
+omitted). Each is its own sandbox: `main` keeps the name `soft-<user>-<repo>`
+sessions had before names existed, so existing sandboxes are its `main`
+session, and other names get `soft-<user>-<repo>-<name>--<hash>` (cut to 63
+characters). The sandbox records the user, repository, session name and
+profile as annotations; Soft Serve stores no session state of its own.
+`session end` deletes one session and leaves the others.
+
+**Detach and re-attach.** `session start` and `session attach` need a
+terminal, so pass `-t`. Detach with `~.` after a newline (osewa's escape), or
+just close the connection: either ends only the bridge, and the program keeps
+running. `session start` or `session attach` re-attaches to the same program,
+starting it again only if it has exited or the sandbox was restarted. The
+attach exits with the program's exit status when the program ends. A new
+attach takes over from an earlier one, which stays connected as a read-only
+viewer (`Ctrl-T` takes control back). You need read access to the repository,
+and anonymous users can't use sessions. `session attach` never creates a
+sandbox.
 
 The feature is off by default. When it is disabled, `session` is an unknown
-command. Soft Serve stores no session state: sandbox names are deterministic,
-and the OpenShell gateway is the source of truth. To enable it:
+command. To enable it:
 
 ```yaml
 openshell:
@@ -391,7 +421,8 @@ openshell:
   # The OpenShell gateway gRPC address (http:// = plaintext, https:// or no scheme = TLS).
   gateway_address: "https://openshell.openshell.svc.cluster.local:8080"
   workspace: "default"
-  # Default sandbox image. It must provide git and jj.
+  # Sandbox image when no profile sets one. It must provide git and jj
+  # (deploy/sandbox/Containerfile builds one, with osewa).
   image: "ghcr.io/example/agent-sandbox:latest"
   # Optional bearer token for the gateway. Prefer token_file, which keeps the
   # token out of this file. Set at most one of the two.
@@ -408,18 +439,69 @@ openshell:
   # Internal HTTP base URL that sandboxes use to clone and push.
   # Defaults to http.public_url.
   clone_url: "http://soft-serve-http.openshell.svc.cluster.local:23232"
-  # Lifetime of the access token issued to each sandbox.
+  # Lifetime of the git token in a sandbox; renewed on every start and attach.
   token_ttl: "24h"
-  # What runs when you attach.
+  # The program a session runs when no profile sets one, in /sandbox/<repo>.
   command: "bash -l"
+
+sessions:
+  osewa:
+    # Pinned osewa builds uploaded to sandboxes whose image lacks osewa.
+    binary_dir: "/usr/local/share/soft-serve/osewa"
+    # Loopback port of the osewa server inside each sandbox.
+    port: 7322
+  # Named presets for `session start --profile NAME`.
+  profiles:
+    claude:
+      image: ghcr.io/example/agent-claude:latest  # empty: openshell.image
+      command: claude                             # empty: openshell.command
+  # The profile for sessions started without --profile, by repository glob.
+  repos:
+    "infra/*":
+      profile: claude
 ```
 
-Every setting can also be set with a `SOFT_SERVE_OPENSHELL_*` environment
-variable, for example `SOFT_SERVE_OPENSHELL_ENABLED=true` or
-`SOFT_SERVE_OPENSHELL_GATEWAY_ADDRESS=...`. When OpenShell is enabled,
-`gateway_address` and `image` are required, and a `token_file`, if set, must be
-readable and not empty. Setting both `token` and `token_file`
-(`SOFT_SERVE_OPENSHELL_TOKEN_FILE`) is an error.
+The `openshell` settings and `sessions.osewa` can also be set with
+`SOFT_SERVE_OPENSHELL_*` and `SOFT_SERVE_SESSIONS_OSEWA_*` environment
+variables, for example `SOFT_SERVE_OPENSHELL_ENABLED=true`;
+`sessions.profiles` and `sessions.repos` only in the file. When OpenShell is
+enabled, `gateway_address` and `image` are required, and a `token_file`, if
+set, must be readable and not empty. Setting both `token` and `token_file` is
+an error. `soft config check` reports every problem, naming the key.
+
+**Profiles.** A new session is created from `--profile`, else from the
+`sessions.repos` entry matching the repository (`*` does not cross `/`, `**`
+does, case-insensitive; when several match, the one with the most
+non-wildcard characters wins), else from `openshell.image` and
+`openshell.command`. `--image` overrides the image. A session keeps the
+profile it was created from: `--profile` and `--image` are ignored, with a
+warning, when it already exists. Profile names are DNS labels; every
+`repos` entry must name a defined profile.
+
+**osewa in the sandbox.** Soft Serve pins one osewa release (its protocol is a
+draft). On every start and attach it:
+
+1. uses `osewa` from the image's `PATH` if it is the pinned version, else
+   uploads the pinned Linux build from `sessions.osewa.binary_dir` (checked
+   against the release's SHA-256 here and again in the sandbox) to
+   `/sandbox/.local/lib/soft-serve/`. The Soft Serve image built from
+   `Containerfile` carries both builds; the sandbox image from
+   `deploy/sandbox/Containerfile` has osewa already. The OpenShell Go SDK has
+   no file transport yet, so the upload goes through exec calls, about 55 of
+   them; it happens once per sandbox.
+2. starts `osewa server` on `127.0.0.1:<port>`, loopback only, with QUIC and
+   port forwarding off, unless it is running. It runs detached from the exec
+   that started it, until the sandbox stops.
+3. once per sandbox, gives the bridge an osewa client identity
+   (`~/.config/soft-serve/osewa-client`) and enrols it with that server.
+4. starts the session's program in an osewa session in `/sandbox/<repo>`
+   through `/bin/sh -l`, unless the one recorded in
+   `~/.config/soft-serve/osewa-session` is running.
+
+The bridge is `osewa attach` against that loopback server. Sandbox images
+other than the one in `deploy/sandbox` need `sh`, `git`, `gzip`, `base64`
+and `sha256sum` (and `flock`, used when present). osewa ends a session that
+has had nobody attached and no output for 24 hours.
 
 **Client TLS secret.** In Kubernetes, mount the gateway's client certificate
 secret, typically `openshell-client-tls`, into the Soft Serve pod and point the
@@ -438,18 +520,23 @@ containers:
         readOnly: true
 ```
 
-**Git credentials.** On each `session start`, Soft Serve issues a short-lived
-access token named `openshell:<sandbox>` (see `token_ttl`). Expired tokens with
-that name are pruned at the same time. The token reaches the sandbox only as
-environment variables on the exec call
-(`GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_0`/`GIT_CONFIG_VALUE_0`, an
-`http.<clone_url>/.extraHeader` basic-auth header). It is never written to
-`.git/config` or any other file. It grants your read/write access, so agents
-can push. Processes inside the sandbox can see it. `session end` revokes it.
+**Git credentials.** On each `session start` and `session attach`, Soft Serve
+issues a short-lived access token named `openshell:<sandbox>` (see
+`token_ttl`) and prunes expired ones of that name. It writes the token, as an
+`http.<clone_url>/.extraHeader` basic-auth header, to
+`/tmp/soft-serve/gitconfig` in the sandbox (mode 0600, in a 0700 directory),
+and adds that file to the sandbox user's `~/.gitconfig` as an
+`include.path`. So every git process in the sandbox, including agents in osewa
+sessions, which start with a clean environment, uses the newest token. The
+token is never in `.git/config`, `~/.gitconfig`, anything under `/sandbox`
+(so never in a snapshot of it), a command line Soft Serve builds, or the
+sandbox's spec; it reaches the sandbox in the environment of the exec that
+writes the file. It grants your read/write access, so agents can push.
+Processes inside the sandbox can read it. `session end` revokes it.
 
-The token is fixed when you attach, so a shell (and any agent started from it)
-loses git access once `token_ttl` has passed. Run `session start` again to
-re-attach with a fresh token, or raise `token_ttl` for long-running agents.
+A program left running longer than `token_ttl` after the last start or
+attach loses git access until the next one renews the file. Attach again, or
+raise `token_ttl` for long-running agents.
 
 **Sandbox egress.** The sandbox's network policy must allow git (and jj, which
 runs git) to reach Soft Serve's internal HTTP endpoint. Here is an example
@@ -471,11 +558,14 @@ network_policies:
       - path: /usr/bin/jj
 ```
 
+osewa needs no egress: the bridge reaches its server over loopback, and Soft
+Serve turns its update checks off.
+
 **Idle timeout.** A bridged session is an ordinary SSH session, so
 `ssh.idle_timeout` (default 600 seconds) still applies. Terminal traffic in
-either direction counts as activity. A shell that sits completely quiet for
-longer than the timeout is disconnected, but the sandbox keeps running, and
-`session start` re-attaches. To avoid the disconnects, raise `idle_timeout`
+either direction counts as activity. A connection that sits completely quiet
+for longer than the timeout is disconnected; the program keeps running, and
+`session attach` re-attaches. To avoid the disconnects, raise `idle_timeout`
 or set `0`, or set `ServerAliveInterval` in your SSH client.
 
 #### Notifications
@@ -576,7 +666,8 @@ example `SOFT_SERVE_NOTIFICATIONS_ON=blocked,done` or
 
 **Event bus.** Notifications are one subscriber of an in-process event bus
 that carries session status changes, session lifecycle steps (created,
-resumed, ready, parked, ended, failed) and forge outcomes. Each subscriber
+resumed, ready, parked, ended, failed, each naming the repository, session
+name and sandbox) and forge outcomes. Each subscriber
 has a bounded buffer; one that falls behind loses events rather than slowing
 anything down, counted in `soft_serve_events_dropped_total{subscriber}`.
 `soft_serve_events_published_total{kind}` counts what was published.

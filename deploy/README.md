@@ -48,15 +48,21 @@ podman push "$IMAGE:$TAG"
 ```
 
 `docker build` takes the same arguments. The repository's `Dockerfile` is the
-goreleaser one and is not used here.
+goreleaser one and is not used here. The image also carries the pinned osewa
+release's Linux builds (amd64 and arm64, checksum-verified at build time) in
+`/usr/local/share/soft-serve/osewa`, which Soft Serve uploads to sandboxes
+whose image has no osewa (`sessions.osewa.binary_dir`).
 
 ### Sandbox
 
 The image the OpenShell sandboxes run, built from
 [`sandbox/Containerfile`](sandbox/Containerfile): Ubuntu 24.04 (the base
 OpenShell uses for its own default sandbox image) with `git`, `jj` 0.47.1,
-`bash`, `ca-certificates`, `curl`, `openssh-client`, `less`, `nano` and
-`vi`. Its comments list what OpenShell expects of a sandbox image.
+[osewa](https://github.com/rjyo/osewa) 0.1.4 (which keeps each session's
+program running after the SSH client disconnects), `bash`,
+`ca-certificates`, `curl`, `openssh-client`, `less`, `nano` and `vi`. Its
+comments list what OpenShell expects of a sandbox image and what Soft Serve
+keeps in it.
 
 ```sh
 SANDBOX_IMAGE=ghcr.io/danielboothcloud/soft-serve-sandbox   # placeholder: confirm the registry path
@@ -238,7 +244,14 @@ Not checked, because it needs an image build or a live cluster:
   digest (amd64 and arm64) were checked against nvcr.io, the `apt` package
   names against the Ubuntu 24.04 (noble) `main` indexes for amd64 and arm64,
   and the jj 0.47.1 release tarballs were downloaded and their SHA-256
-  checksums compared with the ones in the Containerfile.
+  checksums compared with the ones in the Containerfile. The osewa 0.1.4
+  Linux builds both Containerfiles download were fetched the same way and
+  checked against the release's `SHA256SUMS`.
+- That `osewa server`, started by an exec, keeps running in a sandbox after
+  the exec ends, and that the bridge's `osewa attach` over loopback works
+  there. Both follow from the OpenShell 0.1.8 and osewa 0.1.4 sources, and
+  the bootstrap sequence was run against a native osewa build outside a
+  sandbox; neither has run under OpenShell.
 - Whether a sandbox started from the sandbox image comes up under OpenShell:
   the workspace seeding, the UID 10001 identity, and the binary paths in the
   sandbox network policy.
