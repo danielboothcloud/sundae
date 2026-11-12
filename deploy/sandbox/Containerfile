@@ -1,0 +1,130 @@
+# The image the OpenShell sandboxes started by Soft Serve run
+# (openshell.image in Soft Serve's config, openshell.sandboxImage in
+# deploy/environment.yaml).
+#
+# Build it from the repository root. Nothing is copied from the build context.
+# See deploy/README.md for the full build and push commands:
+#
+#   podman build -f deploy/sandbox/Containerfile --platform linux/amd64 \
+#     -t ghcr.io/danielboothcloud/soft-serve-sandbox:<tag> deploy/sandbox
+#
+# What OpenShell 0.1.8 expects of a sandbox image, and what follows from it:
+#
+# - A standard glibc Linux userland; distroless and scratch images are not
+#   supported. The base is the image OpenShell itself defaults to for
+#   sandboxes (nvcr.io/nvidia/base/ubuntu, Ubuntu 24.04).
+# - The image's ENTRYPOINT and CMD never run: OpenShell replaces the container
+#   command with its own sandbox runtime, which it stages into /.openshell.
+#   Nothing here lives under /.openshell or /run, which OpenShell mounts over.
+#   There is deliberately no /etc/openshell/policy.yaml: a policy there would
+#   become the policy of every sandbox started from this image.
+# - On Kubernetes the pod runs as the driver's sandbox UID/GID, 10001:10001
+#   unless server.sandboxUid/sandboxGid are set in the OpenShell chart. The
+#   image's USER is ignored there; Docker and Podman gateways use it. Either
+#   way the image declares the same identity with a passwd entry, because ssh
+#   and git look the current user up by UID (SANDBOX_UID/SANDBOX_GID below).
+# - /sandbox is the workspace and HOME. On Kubernetes it is a volume that
+#   OpenShell seeds from this image's /sandbox on first start (fsGroup makes
+#   it writable); Soft Serve clones each repository into /sandbox/<repo>.
+# - Soft Serve runs `bash -l` in the checkout. OpenShell starts exec'd
+#   commands with HOME=/sandbox and a cleared environment: image ENV values
+#   other than PATH do not reach them, so login-shell settings go in
+#   /etc/profile.d instead.
+# - The default filesystem policy grants read-only access to /usr, /bin, /lib
+#   and /etc but not /opt, so every tool is installed under /usr.
+
+# Pinned by tag and by digest: NVIDIA rebuilds this tag with security updates.
+ARG BASE_IMAGE=nvcr.io/nvidia/base/ubuntu:noble-20261024.1@sha256:fef8f2708dbb85fbfcba6503d805397d89d9210f375362ff3b9f7888eb297ca5
+
+# Jujutsu release and the SHA-256 of its static musl tarball per architecture,
+# from https://github.com/jj-vcs/jj/releases/tag/v0.47.1. Change all three
+# together.
+ARG JJ_VERSION=0.47.1
+ARG JJ_SHA256_AMD64=d4b657f622ee50929c8916466dfa3d6a6c17a0a32b50e7b2c793707ec9ebcad7
+ARG JJ_SHA256_ARM64=0f300e1576de8dabe0a9dedf0b87ae44f8accea5cf54d9a342a51061c1fb1bcd
+
+# The sandbox identity. Match the OpenShell chart's server.sandboxUid and
+# server.sandboxGid when you set those; both default to 10001.
+ARG SANDBOX_UID=10001
+ARG SANDBOX_GID=10001
+
+# --- jj ------------------------------------------------------------------------
+# Download and verify the jj binary for the target architecture.
+FROM ${BASE_IMAGE} AS jj
+
+ARG TARGETARCH
+ARG JJ_VERSION
+ARG JJ_SHA256_AMD64
+ARG JJ_SHA256_ARM64
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN set -eu; \
+    case "${TARGETARCH}" in \
+      amd64) triple=x86_64-unknown-linux-musl;  sum="${JJ_SHA256_AMD64}" ;; \
+      arm64) triple=aarch64-unknown-linux-musl; sum="${JJ_SHA256_ARM64}" ;; \
+      *) echo "unsupported TARGETARCH '${TARGETARCH}' (want amd64 or arm64)" >&2; exit 1 ;; \
+    esac; \
+    tarball="jj-v${JJ_VERSION}-${triple}.tar.gz"; \
+    curl -fsSL --proto '=https' --tlsv1.2 -o "/tmp/${tarball}" \
+      "https://github.com/jj-vcs/jj/releases/download/v${JJ_VERSION}/${tarball}"; \
+    echo "${sum}  /tmp/${tarball}" | sha256sum -c -; \
+    mkdir /tmp/jj; \
+    tar -xzf "/tmp/${tarball}" -C /tmp/jj ./jj; \
+    install -m 0755 /tmp/jj/jj /out-jj; \
+    /out-jj --version
+
+# --- sandbox -------------------------------------------------------------------
+FROM ${BASE_IMAGE}
+
+# git, bash:       Soft Serve clones with git (or jj, which runs git) and
+#                  attaches with `bash -l`.
+# ca-certificates: TLS for git, jj and curl.
+# curl, openssh-client, less, nano, vim-tiny: everyday tools. less is the
+#                  pager jj and git use; nano is jj's default editor and the
+#                  EDITOR set below; vim-tiny provides vi.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      bash \
+      ca-certificates \
+      curl \
+      git \
+      less \
+      nano \
+      openssh-client \
+      vim-tiny \
+ && rm -rf /var/lib/apt/lists/*
+
+# /usr/bin/jj matches the binary path in the README's example sandbox network
+# policy.
+COPY --from=jj /out-jj /usr/bin/jj
+
+# Room for the osewa binary, later. Install it under /usr (not /opt, which the
+# default sandbox filesystem policy does not expose), e.g.:
+#   COPY --chmod=0755 osewa /usr/local/bin/osewa
+
+ARG SANDBOX_UID
+ARG SANDBOX_GID
+
+# The sandbox identity, named "sandbox" (OpenShell's default session USER),
+# with /sandbox as its home. useradd creates /sandbox, owned by that UID/GID,
+# and copies the /etc/skel shell start-up files into it.
+RUN groupadd --gid "${SANDBOX_GID}" sandbox \
+ && useradd --uid "${SANDBOX_UID}" --gid "${SANDBOX_GID}" --home-dir /sandbox \
+      --create-home --shell /bin/bash sandbox \
+ && chmod 0755 /sandbox
+
+# Read by `bash -l`. Only fills in what the caller did not set.
+RUN printf '%s\n' \
+      '# Soft Serve sandbox defaults.' \
+      ': "${LANG:=C.UTF-8}"; export LANG' \
+      ': "${EDITOR:=nano}"; export EDITOR' \
+      > /etc/profile.d/soft-serve-sandbox.sh
+
+WORKDIR /sandbox
+USER ${SANDBOX_UID}:${SANDBOX_GID}
+
+# Not run by OpenShell (see above); useful for `podman run -it <image>`.
+CMD ["/bin/bash", "-l"]
