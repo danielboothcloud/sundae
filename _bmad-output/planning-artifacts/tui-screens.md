@@ -240,6 +240,9 @@ The status bar's right end carries the attention summary while in a repo (R7).
 
 ## 11. Open questions
 
+Settled 2026-11-12 for the first build: two-line rows; open on Repositories; Forges as one flat grouped list; Signals in memory; keep 4-line repo rows; Signals as a pane inside Sessions.
+
+
 1. Sessions rows: two lines as drawn, or a one-line table with the message cut off?
 2. Opening the TUI: always Repositories as today, or Sessions when something is blocked, errored or done?
 3. Forges: flat grouped list as drawn, or a list of forges that drills into each?

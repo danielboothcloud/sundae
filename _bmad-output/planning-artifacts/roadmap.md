@@ -1,6 +1,6 @@
 # Soft Serve: git hub + dev server roadmap
 
-Status: draft, for shaping. Last updated 2026-11-12 (rev 11: deployment files written, J1-J4).
+Status: open decisions settled on their leanings 2026-11-12; build-out in progress (local CLI parked). Last updated 2026-11-12 (rev 12).
 
 This is a working document. Nothing here is frozen. Each workstream becomes its own spec under `_bmad-output/implementation-artifacts/` once its open questions are settled.
 
@@ -125,19 +125,19 @@ The SSH bridge fallback needs an osewa client somewhere. Leaning: exec `osewa at
 | # | Decision | Options | Leaning | Status |
 |---|----------|---------|---------|--------|
 | D1 | Pod runtime | (a) OpenShell sandboxes; (b) plain pods through the Kubernetes API; (c) Agent Substrate actors | **(a) OpenShell.** Chosen for suspend/resume, gateway tunnels, egress approval and file push (F10), and because the integration is already written. Keep the `Client` interface narrow so the choice stays reversible. | **Decided 2026-11-12** |
-| D2 | How I reach a session | (a) osewa through an OpenShell TCP tunnel relayed by Soft Serve (WebSocket carrier, no QUIC); (b) Soft Serve's SSH bridge into an in-pod `osewa attach`; (c) both | (c), (b) first because the bridge exists. Follows from D1: there is no direct laptop-to-pod path, so everything enters through Soft Serve. | Open |
-| D3 | Forge sync semantics | (a) strict mirror as today; (b) upstream refs under a per-forge namespace, local refs never pruned, push to forge is explicit | (b) | Open |
-| D4 | Session identity | (a) one per (user, repo) as today; (b) several named sessions per repo | (b), so two agents can work on one repo | Open |
-| D5 | How session status reaches Soft Serve | (a) Soft Serve execs `osewa local ls` in each pod on an interval; (b) a small watcher in the pod attaches to the holder as a viewer and pushes `status` events to Soft Serve; (c) Soft Serve parses OSC 7501 itself from the bridged stream | (a) first for the status column and ntfy, then (b): the Signals pane wants every report, and polling misses changes between polls and all child records. (b) depends on the draft osewa protocol, so pin the version. (c) only sees status while someone is attached. | Open |
-| D7 | Shape of the pub/sub | (a) in-process event bus in Soft Serve with pluggable subscribers (ntfy, TUI pane, CLI watch, webhooks); (b) an external broker such as NATS; (c) no bus, the status collector calls ntfy directly | (a). One process and one user: a broker is more to run than the problem needs, and (c) leaves the TUI pane and CLI without live updates. | Open |
-| D8 | How ntfy is fed | (a) native ntfy publisher (topic, title, priority, tags, click action); (b) extend the existing webhook system with session events and point it at ntfy | (a) first, (b) later if other consumers appear. Webhooks today are per-repo and send JSON that ntfy would need a template for. | Open |
-| D9 | Which transitions notify | (a) every change; (b) only `blocked`, `done`, `error`; (c) configurable | (b) as the default, (c) as config. `working` and `idle` are noise on a phone. | Open |
-| D10 | Where settings live | (a) everything in the mounted YAML, DB holds only runtime data; (b) YAML for server settings, DB for things changed at runtime (forge connections, per-repo defaults); (c) YAML seeds the DB on start | (a). It suits GitOps and one user. Costs: changing a forge or default means editing the ConfigMap, and secrets must be file references, never inline. | Open |
-| D11 | Applying config changes | (a) restart the pod (Reloader is already in the cluster); (b) watch the file and reload | (a) | Open |
+| D2 | How I reach a session | (a) osewa through an OpenShell TCP tunnel relayed by Soft Serve (WebSocket carrier, no QUIC); (b) Soft Serve's SSH bridge into an in-pod `osewa attach`; (c) both | (c), (b) first because the bridge exists. Follows from D1: there is no direct laptop-to-pod path, so everything enters through Soft Serve. | **Decided 2026-11-12: leaning adopted** |
+| D3 | Forge sync semantics | (a) strict mirror as today; (b) upstream refs under a per-forge namespace, local refs never pruned, push to forge is explicit | (b) | **Decided 2026-11-12: leaning adopted** |
+| D4 | Session identity | (a) one per (user, repo) as today; (b) several named sessions per repo | (b), so two agents can work on one repo | **Decided 2026-11-12: leaning adopted** |
+| D5 | How session status reaches Soft Serve | (a) Soft Serve execs `osewa local ls` in each pod on an interval; (b) a small watcher in the pod attaches to the holder as a viewer and pushes `status` events to Soft Serve; (c) Soft Serve parses OSC 7501 itself from the bridged stream | (a) first for the status column and ntfy, then (b): the Signals pane wants every report, and polling misses changes between polls and all child records. (b) depends on the draft osewa protocol, so pin the version. (c) only sees status while someone is attached. | **Decided 2026-11-12: leaning adopted** |
+| D7 | Shape of the pub/sub | (a) in-process event bus in Soft Serve with pluggable subscribers (ntfy, TUI pane, CLI watch, webhooks); (b) an external broker such as NATS; (c) no bus, the status collector calls ntfy directly | (a). One process and one user: a broker is more to run than the problem needs, and (c) leaves the TUI pane and CLI without live updates. | **Decided 2026-11-12: leaning adopted** |
+| D8 | How ntfy is fed | (a) native ntfy publisher (topic, title, priority, tags, click action); (b) extend the existing webhook system with session events and point it at ntfy | (a) first, (b) later if other consumers appear. Webhooks today are per-repo and send JSON that ntfy would need a template for. | **Decided 2026-11-12: leaning adopted** |
+| D9 | Which transitions notify | (a) every change; (b) only `blocked`, `done`, `error`; (c) configurable | (b) as the default, (c) as config. `working` and `idle` are noise on a phone. | **Decided 2026-11-12: leaning adopted** |
+| D10 | Where settings live | (a) everything in the mounted YAML, DB holds only runtime data; (b) YAML for server settings, DB for things changed at runtime (forge connections, per-repo defaults); (c) YAML seeds the DB on start | (a). It suits GitOps and one user. Costs: changing a forge or default means editing the ConfigMap, and secrets must be file references, never inline. | **Decided 2026-11-12: leaning adopted** |
+| D11 | Applying config changes | (a) restart the pod (Reloader is already in the cluster); (b) watch the file and reload | (a) | **Decided 2026-11-12: leaning adopted** |
 | D12 | S3 snapshots | (a) drop; (b) build, always on; (c) build, switched on in the config file, off by default | **(c).** Suspend is the main way to pause and come back; S3 is the opt-in backup for what suspend cannot cover. | **Decided 2026-11-12** |
 | D13 | Deployment tooling | (a) Helmfile with a local Soft Serve chart and the upstream OpenShell chart; (b) ArgoCD Applications; (c) raw manifests | **(a).** One `helmfile apply` brings up both. ArgoCD can wrap it later. | **Decided 2026-11-12** |
-| D14 | Namespaces | (a) Soft Serve and the gateway in one namespace; (b) separate namespaces with the client TLS secret copied across | (a), so Soft Serve mounts `openshell-client-tls` directly. Namespace name is a helmfile value. | Open |
-| D6 | Session state in the DB | (a) stay stateless, gateway and labels are the truth; (b) add a sessions table | (a) until named sessions or status history force it | Open |
+| D14 | Namespaces | (a) Soft Serve and the gateway in one namespace; (b) separate namespaces with the client TLS secret copied across | (a), so Soft Serve mounts `openshell-client-tls` directly. Namespace name is a helmfile value. | **Decided 2026-11-12: leaning adopted** |
+| D6 | Session state in the DB | (a) stay stateless, gateway and labels are the truth; (b) add a sessions table | (a) until named sessions or status history force it | **Decided 2026-11-12: leaning adopted** |
 
 ## 6. Open questions
 
@@ -214,7 +214,7 @@ Cuts across every workstream: each one adds its section here, none invents its o
 - I4. Validate on start and fail loudly, naming the bad key. Add `soft config check` for use in CI.
 - I5. The Helm chart in J2 mounts the ConfigMap and the secrets.
 
-### D. Local CLI
+### D. Local CLI (parked 2026-11-12, after the build-out)
 - D1. `soft session ls|new|attach|end` on the laptop, talking to Soft Serve over SSH. `--json` on `ls`.
 - D2. `attach` hands off to `osewa attach` when direct access is available, and falls back to the SSH bridge.
 
