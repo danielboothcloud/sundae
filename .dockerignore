@@ -1,0 +1,12 @@
+# Build context for `podman build -f Containerfile .` (podman and docker both
+# read this file). Only things the Go build never needs are listed, so a
+# prebuilt ./soft for the goreleaser Dockerfile is still part of the context.
+.git
+.jj
+.github
+.agents
+_bmad
+_bmad-output
+deploy
+dist
+data

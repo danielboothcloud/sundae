@@ -1,0 +1,13 @@
+Soft Serve is running as StatefulSet {{ include "soft-serve.fullname" . }} in namespace {{ .Release.Namespace }}.
+
+  SSH:   Service {{ include "soft-serve.fullname" . }}-ssh ({{ .Values.service.ssh.type }}, port {{ .Values.service.ssh.port }})
+  HTTP:  http://{{ include "soft-serve.fullname" . }}-http.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.http.port }} (in-cluster)
+
+The configuration is the ConfigMap {{ include "soft-serve.fullname" . }}-config, mounted read-only.
+{{- if .Values.config.openshell.enabled }}
+OpenShell sessions are enabled against {{ .Values.config.openshell.gateway_address }}.
+{{- end }}
+{{- if not (or .Values.initialAdminKeys .Values.config.initial_admin_keys) }}
+
+WARNING: no initialAdminKeys are set, so nobody can administer this server over SSH.
+{{- end }}

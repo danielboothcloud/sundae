@@ -1,0 +1,71 @@
+# Environment-specific values for deploy/helmfile.yaml.
+#
+# Edit this file for your cluster, or leave it alone and override single values
+# on the command line:
+#
+#   helmfile -f deploy/helmfile.yaml \
+#     --state-values-set openshell.sandboxImage=ghcr.io/you/sandbox:1.0 \
+#     --state-values-set softServe.image.tag=abc1234 sync
+#
+# Values marked REQUIRED have no usable default; helmfile stops with a message
+# naming the value when one is empty.
+
+# The one namespace everything application-side goes into: the OpenShell
+# gateway, the sandboxes it creates, and Soft Serve. They share it so Soft
+# Serve can mount the gateway's client TLS secret directly.
+namespace: openshell
+
+agentSandbox:
+  # Install the Kubernetes Agent Sandbox CRDs and controller (pinned to v1.0.10
+  # in helmfile.yaml). Set to false when the cluster already has them.
+  enabled: true
+
+openshell:
+  # REQUIRED. The default image for the sandboxes Soft Serve starts. It must
+  # provide git and jj, and the cluster must be able to pull it.
+  sandboxImage: ""
+
+  # Extra values for the OpenShell chart, merged over what helmfile sets (see
+  # values/openshell.yaml.gotmpl). For example a StorageClass when the cluster
+  # has no default one:
+  #   chartValues:
+  #     server:
+  #       dataStorageClass: longhorn
+  #       workspaceStorageClass: longhorn
+  chartValues: {}
+
+softServe:
+  image:
+    # Placeholder registry path: confirm it, or point it at your own registry.
+    repository: ghcr.io/danielboothcloud/soft-serve
+    # REQUIRED. The tag you built and pushed (see README.md). No image is
+    # published for this fork, so there is no default.
+    tag: ""
+
+  # Public SSH keys of the server administrators, authorized_keys format.
+  # Without at least one, nobody can administer the server.
+  initialAdminKeys: []
+  #  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... you@example.com"
+
+  ssh:
+    # How users reach the SSH server from outside the cluster: ClusterIP (only
+    # reachable through `kubectl port-forward`), NodePort or LoadBalancer.
+    serviceType: ClusterIP
+    # Annotations for the SSH Service, e.g. to request a fixed address from
+    # Cilium LB-IPAM:
+    #   lbipam.cilium.io/ips: "192.0.2.10"
+    serviceAnnotations: {}
+    # The address users put in `ssh` and `git clone` commands. Soft Serve only
+    # shows it in clone URLs; set it once you know the external address.
+    publicURL: "ssh://localhost:23231"
+
+  storage:
+    # Size of the data volume (repositories, SQLite database, SSH host keys).
+    # It cannot be changed through helmfile after the first install.
+    size: 10Gi
+    # Empty uses the cluster's default StorageClass.
+    storageClass: ""
+
+  # Extra values for the Soft Serve chart, merged over what helmfile sets (see
+  # values/soft-serve.yaml.gotmpl and helm/soft-serve/values.yaml).
+  chartValues: {}

@@ -1,0 +1,204 @@
+{{- $cfg := .Values.config }}
+{{- $fullname := include "soft-serve.fullname" . }}
+{{- $openshellTLS := include "soft-serve.openshellTLSMounted" . }}
+{{- $httpScheme := ternary "HTTPS" "HTTP" (and (not (empty $cfg.http.tls_key_path)) (not (empty $cfg.http.tls_cert_path))) }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $fullname }}
+  labels:
+    {{- include "soft-serve.labels" . | nindent 4 }}
+spec:
+  # Always one. SQLite and the bare repositories live on a single
+  # ReadWriteOnce volume. A StatefulSet only creates the replacement pod once
+  # the old one is gone, so two pods never have the volume at the same time
+  # (a Deployment can overlap them, even with the Recreate strategy, when a
+  # pod is deleted by hand).
+  replicas: 1
+  serviceName: {{ $fullname }}-http
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "soft-serve.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        # Soft Serve reads its config once at startup: roll the pod on change.
+        checksum/config: {{ include "soft-serve.config" . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "soft-serve.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "soft-serve.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      # Service links would inject SOFT_SERVE_SSH_PORT, SOFT_SERVE_HTTP_PORT, ...
+      # for this chart's own Services. Soft Serve reads SOFT_SERVE_* variables
+      # as configuration, so keep them out.
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: soft-serve
+          image: {{ include "soft-serve.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            - name: SOFT_SERVE_DATA_PATH
+              value: {{ .Values.dataPath | quote }}
+            # The file must exist at this path: when it does not, Soft Serve
+            # falls back to <data path>/config.yaml and writes defaults there.
+            - name: SOFT_SERVE_CONFIG_LOCATION
+              value: {{ printf "%s/config.yaml" (.Values.configMountPath | trimSuffix "/") | quote }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            {{- if $cfg.ssh.enabled }}
+            - name: ssh
+              containerPort: {{ include "soft-serve.listenPort" (dict "name" "ssh" "addr" $cfg.ssh.listen_addr) }}
+              protocol: TCP
+            {{- end }}
+            {{- if $cfg.http.enabled }}
+            - name: http
+              containerPort: {{ include "soft-serve.listenPort" (dict "name" "http" "addr" $cfg.http.listen_addr) }}
+              protocol: TCP
+            {{- end }}
+            {{- if $cfg.stats.enabled }}
+            - name: stats
+              containerPort: {{ include "soft-serve.listenPort" (dict "name" "stats" "addr" $cfg.stats.listen_addr) }}
+              protocol: TCP
+            {{- end }}
+            {{- if $cfg.git.enabled }}
+            - name: git
+              containerPort: {{ include "soft-serve.listenPort" (dict "name" "git" "addr" $cfg.git.listen_addr) }}
+              protocol: TCP
+            {{- end }}
+          {{- if $cfg.http.enabled }}
+          # /livez always answers 200; /readyz pings the database (pkg/web/health.go).
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: http
+              scheme: {{ $httpScheme }}
+            {{- toYaml .Values.probes.startup | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+              scheme: {{ $httpScheme }}
+            {{- toYaml .Values.probes.liveness | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+              scheme: {{ $httpScheme }}
+            {{- toYaml .Values.probes.readiness | nindent 12 }}
+          {{- else if $cfg.ssh.enabled }}
+          # The health endpoints live on the HTTP server, which is disabled.
+          startupProbe:
+            tcpSocket:
+              port: ssh
+            {{- toYaml .Values.probes.startup | nindent 12 }}
+          livenessProbe:
+            tcpSocket:
+              port: ssh
+            {{- toYaml .Values.probes.liveness | nindent 12 }}
+          readinessProbe:
+            tcpSocket:
+              port: ssh
+            {{- toYaml .Values.probes.readiness | nindent 12 }}
+          {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ .Values.dataPath | quote }}
+            - name: config
+              mountPath: {{ .Values.configMountPath | quote }}
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            {{- if $openshellTLS }}
+            - name: openshell-client-tls
+              mountPath: {{ .Values.openshell.clientTLS.mountPath | quote }}
+              readOnly: true
+            {{- end }}
+            {{- range .Values.secretMounts }}
+            - name: {{ printf "secret-%s" .name | quote }}
+              mountPath: {{ .mountPath | quote }}
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $fullname }}-config
+        - name: tmp
+          emptyDir: {}
+        {{- if $openshellTLS }}
+        - name: openshell-client-tls
+          secret:
+            secretName: {{ .Values.openshell.clientTLS.secretName | quote }}
+            # Readable by the pod's fsGroup only.
+            defaultMode: 0440
+        {{- end }}
+        {{- range .Values.secretMounts }}
+        - name: {{ printf "secret-%s" .name | quote }}
+          secret:
+            secretName: {{ required "secretMounts[].secretName is required" .secretName | quote }}
+            defaultMode: {{ .defaultMode | default 0440 }}
+        {{- end }}
+        {{- if not .Values.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- else if .Values.persistence.existingClaim }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | quote }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- if and .Values.persistence.enabled (not .Values.persistence.existingClaim) }}
+  # Kubernetes keeps this claim when the release is uninstalled.
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "soft-serve.selectorLabels" . | nindent 10 }}
+      spec:
+        accessModes:
+          {{- toYaml .Values.persistence.accessModes | nindent 10 }}
+        {{- with .Values.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size | quote }}
+  {{- end }}

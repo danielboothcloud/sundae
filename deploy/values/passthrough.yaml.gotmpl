@@ -1,0 +1,3 @@
+{{- /* Free-form chart values from environment.yaml: <key>.chartValues, where
+       <key> is the release's "values" label. Listed last, so they win. */ -}}
+{{ .Values | get (printf "%s.chartValues" .Release.Labels.values) (dict) | toYaml }}

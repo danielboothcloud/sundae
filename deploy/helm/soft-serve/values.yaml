@@ -1,0 +1,267 @@
+# Default values for the Soft Serve chart.
+#
+# Soft Serve's whole configuration is the `config` map below. It is rendered
+# into a ConfigMap and mounted read-only; nothing is configured through
+# SOFT_SERVE_* environment variables unless you add them under `extraEnv`.
+
+image:
+  # Placeholder registry path: confirm it, or point it at your own registry.
+  repository: ghcr.io/danielboothcloud/soft-serve
+  # Defaults to the chart appVersion when empty.
+  tag: ""
+  # When set, takes precedence over the tag (repository@digest).
+  digest: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+# There is deliberately no replica count. Soft Serve keeps a SQLite database
+# and bare repositories on one ReadWriteOnce volume, so the chart always runs
+# exactly one pod, as a StatefulSet: a replacement pod is only created after
+# the previous one is gone, so two pods never share the data volume.
+
+# Public SSH keys (authorized_keys format) that are always administrators.
+# Merged with config.initial_admin_keys. Public keys only: this ends up in the
+# ConfigMap.
+initialAdminKeys: []
+#  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... you@example.com"
+
+# Where the data volume is mounted and where the read-only config is mounted.
+# The chart sets SOFT_SERVE_DATA_PATH and SOFT_SERVE_CONFIG_LOCATION to match.
+dataPath: /soft-serve
+configMountPath: /etc/soft-serve
+
+# The Soft Serve configuration file, key for key (see pkg/config/file.go).
+# Relative paths are resolved against the data path.
+#
+# Do NOT put secrets here: this map becomes a ConfigMap. The chart refuses to
+# render when config.openshell.token is set. For secret values, see
+# `secretMounts` (files) and `extraEnv` (environment variables from Secrets).
+#
+# The listen ports are read from the listen_addr values: the container ports,
+# Service target ports and probes all follow them.
+config:
+  name: "Soft Serve"
+
+  log:
+    # "json", "logfmt" or "text".
+    format: "text"
+    time_format: "2006-01-02 15:04:05"
+    # Leave empty to log to stderr, which is what you want in a container.
+    path: ""
+
+  ssh:
+    enabled: true
+    listen_addr: ":23231"
+    # How users reach the SSH server from outside the cluster. Shown in clone
+    # URLs. Set it to match the SSH Service (service.ssh).
+    public_url: "ssh://localhost:23231"
+    # Generated on first start and kept on the data volume.
+    key_path: "ssh/soft_serve_host_ed25519"
+    client_key_path: "ssh/soft_serve_client_ed25519"
+    max_timeout: 0
+    idle_timeout: 600
+
+  # The unauthenticated git:// daemon. Off by default in this chart; a Service
+  # for it is only created when it is enabled.
+  git:
+    enabled: false
+    listen_addr: ":9418"
+    public_url: "git://localhost"
+    max_timeout: 0
+    idle_timeout: 3
+    max_connections: 32
+
+  http:
+    enabled: true
+    listen_addr: ":23232"
+    tls_key_path: ""
+    tls_cert_path: ""
+    # How clients reach the HTTP server. Shown in clone URLs and always allowed
+    # as a CORS origin.
+    public_url: "http://localhost:23232"
+    cors:
+      allowed_headers:
+        - "Accept"
+        - "Accept-Language"
+        - "Content-Language"
+        - "Content-Type"
+        - "Origin"
+        - "X-Requested-With"
+        - "User-Agent"
+        - "Authorization"
+        - "Access-Control-Request-Method"
+        - "Access-Control-Allow-Origin"
+      allowed_origins: []
+      allowed_methods:
+        - "GET"
+        - "HEAD"
+        - "POST"
+        - "PUT"
+        - "OPTIONS"
+
+  stats:
+    enabled: true
+    # Soft Serve's own default is localhost:23233, which a Service cannot
+    # reach. The chart refuses loopback listen addresses for that reason.
+    listen_addr: ":23233"
+
+  db:
+    driver: "sqlite"
+    # For postgres, do not put a password here. Leave the driver set and pass
+    # SOFT_SERVE_DB_DATA_SOURCE from a Secret through `extraEnv`.
+    data_source: "soft-serve.db?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
+
+  lfs:
+    enabled: true
+    ssh_enabled: false
+
+  jobs:
+    mirror_pull: "@every 10m"
+
+  # OpenShell agent sessions (ssh -t <server> session start <repo>).
+  openshell:
+    enabled: false
+    # The gateway's gRPC address. http:// is plaintext; https:// or no scheme
+    # uses TLS. Required when enabled.
+    gateway_address: ""
+    workspace: "default"
+    # The default sandbox image. It must provide git and jj. Required when
+    # enabled.
+    image: ""
+    # Client TLS files. Leave these empty to have the chart point them at the
+    # mounted openshell.clientTLS secret (ca.crt, tls.crt, tls.key).
+    tls_ca: ""
+    tls_cert: ""
+    tls_key: ""
+    insecure: false
+    # The HTTP base URL sandboxes use to clone and push. Use this release's
+    # in-cluster HTTP Service. Defaults to http.public_url when empty.
+    clone_url: ""
+    token_ttl: "24h"
+    command: "bash -l"
+
+  # Leave empty; use the top-level initialAdminKeys instead.
+  initial_admin_keys: []
+
+  # Repository created on boot when it does not exist. Empty disables it.
+  default_repo: ""
+
+# Chart-side wiring for config.openshell. Only used when
+# config.openshell.enabled is true.
+openshell:
+  clientTLS:
+    # An existing Secret in this namespace holding the gateway's client
+    # certificate, with the keys ca.crt, tls.crt and tls.key. The OpenShell
+    # chart creates it as openshell-client-tls. Set to "" to mount nothing
+    # (for a plaintext or token-only gateway).
+    secretName: openshell-client-tls
+    mountPath: /etc/openshell-tls
+
+# Extra existing Secrets mounted read-only as files, for anything the config
+# refers to by path (http.tls_key_path, ssh.key_path, ...).
+secretMounts: []
+#  - name: http-tls
+#    secretName: soft-serve-http-tls
+#    mountPath: /etc/soft-serve-tls
+
+# Extra environment variables. SOFT_SERVE_* variables override the config
+# file, so this is how a secret value gets in without touching the ConfigMap:
+extraEnv: []
+#  - name: SOFT_SERVE_OPENSHELL_TOKEN
+#    valueFrom:
+#      secretKeyRef:
+#        name: openshell-gateway-token
+#        key: token
+
+persistence:
+  # When false the data lives in an emptyDir and is lost with the pod.
+  enabled: true
+  # Use an existing claim instead of the StatefulSet's own claim template.
+  existingClaim: ""
+  # Empty uses the cluster's default StorageClass.
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 10Gi
+
+service:
+  ssh:
+    # ClusterIP, NodePort or LoadBalancer. Users need to reach this from
+    # outside the cluster, so it will usually be LoadBalancer or NodePort.
+    type: ClusterIP
+    port: 23231
+    # Only used for NodePort (and LoadBalancer). Empty lets Kubernetes pick.
+    nodePort: null
+    annotations: {}
+  http:
+    type: ClusterIP
+    port: 23232
+    annotations: {}
+  # Prometheus metrics at /metrics. Always ClusterIP.
+  stats:
+    port: 23233
+    annotations: {}
+  # Only created when config.git.enabled is true.
+  git:
+    type: ClusterIP
+    port: 9418
+    annotations: {}
+
+serviceAccount:
+  create: true
+  # Defaults to the release's full name when create is true.
+  name: ""
+  annotations: {}
+
+podAnnotations: {}
+podLabels: {}
+
+# The image runs as 10001:10001 (see the Containerfile). fsGroup makes the
+# data volume group-writable for that user.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  # Keep this. With "Always" the kubelet re-adds group permissions to every
+  # file on each mount, and the ssh client then rejects the mirror client key
+  # as too open.
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  # The data volume and an emptyDir at /tmp are the only writable paths.
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# Seconds Kubernetes waits for Soft Serve to shut down.
+terminationGracePeriodSeconds: 30
+
+# /livez and /readyz are served by the HTTP server. When config.http.enabled
+# is false the probes fall back to a TCP check on the SSH port.
+probes:
+  startup:
+    periodSeconds: 2
+    timeoutSeconds: 2
+    failureThreshold: 60
+  liveness:
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+  readiness:
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 3
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
