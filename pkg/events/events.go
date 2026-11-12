@@ -29,8 +29,8 @@ const (
 type Event struct {
 	// ID is assigned by the bus when the event is published. IDs are
 	// unique for the life of the process (they start again at 1 after a
-	// restart) and increase with each publish. Events published
-	// concurrently may reach a subscriber slightly out of ID order.
+	// restart) and increase by one with each publish. Every subscriber
+	// receives events in ID order.
 	ID uint64 `json:"id"`
 	// Time is when the event happened. The bus sets it when it is zero.
 	Time time.Time `json:"time"`
@@ -120,6 +120,41 @@ func (s State) Glyph() string {
 	default:
 		return "·"
 	}
+}
+
+// Word is the word shown with the state's glyph: the state itself, or
+// "none" for StateNone.
+func (s State) Word() string {
+	if s == StateNone {
+		return "none"
+	}
+	return string(s)
+}
+
+// Rank is the state's place in the sort order used everywhere sessions or
+// signals are listed by state: blocked, error, done, working, idle, then
+// none (and anything unknown). What needs the user sorts first.
+func (s State) Rank() int {
+	switch s {
+	case StateBlocked:
+		return 0
+	case StateError:
+		return 1
+	case StateDone:
+		return 2
+	case StateWorking:
+		return 3
+	case StateIdle:
+		return 4
+	default:
+		return 5
+	}
+}
+
+// NeedsAttention reports whether the state asks for the user: blocked,
+// error or done.
+func (s State) NeedsAttention() bool {
+	return s == StateBlocked || s == StateError || s == StateDone
 }
 
 // BlockKind says what a blocked program is waiting for (OSC 7501 kind).

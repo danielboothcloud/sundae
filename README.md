@@ -284,6 +284,8 @@ jobs:
 #  suspend:
 #    enabled: true
 #    after: 30m
+#  signals:
+#    keep: 1000
 #  profiles:
 #    claude:
 #      image: ghcr.io/example/agent-claude:latest
@@ -395,6 +397,8 @@ ssh    -p 23231 localhost session start icecream -n bg --detach   # create or re
 ssh -t -p 23231 localhost session attach icecream --name review   # attach to an existing session (resuming it if parked)
 ssh    -p 23231 localhost session ls                              # your sessions, with what each agent is doing
 ssh    -p 23231 localhost session ls --json                       # the same as JSON
+ssh    -p 23231 localhost session signals                         # what your sessions reported, newest first
+ssh    -p 23231 localhost session signals --attention --follow    # keep printing what needs you (Ctrl-C to stop)
 ssh    -p 23231 localhost session park icecream --name review     # suspend that session's sandbox now
 ssh    -p 23231 localhost session resume icecream --name review   # resume it without attaching
 ssh    -p 23231 localhost session end icecream --name review      # delete that session's sandbox and revoke its token
@@ -466,6 +470,9 @@ sessions:
     enabled: true
     # Nobody attached and not working for this long.
     after: 30m
+  signals:
+    # How many signals `session signals` keeps, across all users, in memory.
+    keep: 1000
   # Named presets for `session start --profile NAME`.
   profiles:
     claude:
@@ -477,14 +484,16 @@ sessions:
       profile: claude
 ```
 
-The `openshell` settings and `sessions.osewa`, `sessions.status` and
-`sessions.suspend` can also be set with `SOFT_SERVE_OPENSHELL_*` and
-`SOFT_SERVE_SESSIONS_OSEWA_*`, `SOFT_SERVE_SESSIONS_STATUS_*` and
-`SOFT_SERVE_SESSIONS_SUSPEND_*` environment variables, for example
+The `openshell` settings and `sessions.osewa`, `sessions.status`,
+`sessions.suspend` and `sessions.signals` can also be set with
+`SOFT_SERVE_OPENSHELL_*` and `SOFT_SERVE_SESSIONS_OSEWA_*`,
+`SOFT_SERVE_SESSIONS_STATUS_*`, `SOFT_SERVE_SESSIONS_SUSPEND_*` and
+`SOFT_SERVE_SESSIONS_SIGNALS_*` environment variables, for example
 `SOFT_SERVE_OPENSHELL_ENABLED=true` or
 `SOFT_SERVE_SESSIONS_SUSPEND_AFTER=1h`; `sessions.profiles` and
 `sessions.repos` only in the file. `status.poll_interval` must be at least
-`1s`, and `suspend.after` must not be shorter than it. When OpenShell is
+`1s`, and `suspend.after` must not be shorter than it. `signals.keep` is
+between 1 and 100000 (default 1000). When OpenShell is
 enabled, `gateway_address` and `image` are required, and a `token_file`, if
 set, must be readable and not empty. Setting both `token` and `token_file` is
 an error. `soft config check` reports every problem, naming the key.
@@ -561,6 +570,47 @@ list of objects (`state` is `none` when there is no report); text from the
 agent is sanitised there too, but not cut. Listing never resumes a parked
 session. osewa keeps only the root record, so child records (`id=...`) and
 changes between two polls are not seen.
+
+**Signals.** `session signals` shows the history behind `session ls`: every
+status change and lifecycle step (`created`, `resumed`, `ready`, `parked`,
+`exited`, `ended`, `failed`) of your sessions that went on the event bus,
+newest first. Forge results are not signals.
+
+```
+TIME      STATE                   SESSION                       MESSAGE
+14:02:11  ▲ blocked · permission  infra / claude-1              Apply 3 to add, 1 to change?
+14:02:03  ● working               infra / claude-1              Planning
+13:58:40  ✓ done                  soft-serve / forge-sync       Implemented GitHub discovery
+13:12:00  ○ idle · parked         dotfiles / main               parked while idle
+12:50:19  + created               soft-serve / tui              sandbox created
+```
+
+A status row has the state's glyph and word, its progress and blocked kind,
+and the message as in `session ls` (sanitised; with a PTY, `ssh -t`, each row
+is cut to the terminal's width, otherwise not cut). A child record would show
+its id after the session name (`soft-serve / tui/lint`). A lifecycle row
+shows the session's last known state with the step after it (`○ idle ·
+parked`), except `+ created`, `- ended` and `✗ failed · start`, whose message
+is the reason. Times are the server's; rows older than today show the date.
+
+`--repo R` and `--name N` select sessions, `--attention` only what asks for
+you (blocked, error and done reports, and failures), and `--limit K` the
+newest K (default 50, `0` for all kept). `--json` prints one JSON object per
+line, with the agent's text sanitised but not cut. `--follow` (no `-t`
+needed) first prints the signals kept, oldest first like `tail -f`, then each
+new one as it arrives, until you disconnect (Ctrl-C) or the server shuts
+down. You only ever see your own sessions.
+
+The limits: signals are kept in memory only, the last `sessions.signals.keep`
+(default 1000) across all users, so the feed is empty after a restart and a
+busy user can push out another's older signals. They come from polling, so a
+state that lasts less than `sessions.status.poll_interval` may never show,
+and child records never do; the first poll after a restart records what it
+finds without a signal. A complete feed needs an in-pod watcher that pushes
+every report (roadmap item C4), which is not built yet. If Soft Serve falls
+behind the event bus, a `! missed` row (JSON `"type": "gap"`) marks where
+events were lost, rather than leaving a silent hole; so does a `--follow`
+reader that fell further behind than the feed keeps.
 
 **Parking idle sessions.** A session nobody uses is parked: its sandbox is
 suspended through OpenShell, keeping its memory where the compute driver can,

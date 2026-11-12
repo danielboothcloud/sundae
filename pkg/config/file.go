@@ -204,6 +204,12 @@ sessions:
     # "session start" and "session attach" resume a parked session.
     enabled: {{ .Sessions.Suspend.Enabled }}
     after: "{{ .Sessions.Suspend.After }}"
+  signals:
+    # How many signals (every session status change and lifecycle event,
+    # shown by "session signals" and the TUI) to keep, across all users.
+    # They are kept in memory only, so the feed is empty after a restart.
+    # At most 100000.
+    keep: {{ .Sessions.Signals.Keep }}
   # Named presets for "session start --profile NAME". Empty fields fall back
   # to openshell.image and openshell.command.
 {{- if .Sessions.Profiles }}

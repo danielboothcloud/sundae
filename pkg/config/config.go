@@ -689,6 +689,9 @@ func DefaultConfig() *Config {
 				Enabled: true,
 				After:   DefaultSuspendAfter,
 			},
+			Signals: SessionSignalsConfig{
+				Keep: DefaultSignalsKeep,
+			},
 		},
 		Notifications: NotificationsConfig{
 			On:       append([]string(nil), DefaultTriggers...),

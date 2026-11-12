@@ -136,6 +136,23 @@ func TestCheck(t *testing.T) {
 		}
 	})
 
+	t.Run("sessions signals", func(t *testing.T) {
+		is := is.New(t)
+		p := filepath.Join(td, "signals.yaml")
+		writeFile(t, p, "sessions:\n  signals:\n    keep: 5000\n")
+		is.NoErr(check(p))
+
+		writeFile(t, p, "sessions:\n  signals:\n    keep: 0\n    max: 3\n")
+		err := check(p)
+		is.True(err != nil)
+		is.True(strings.Contains(err.Error(), "line 4: unknown key sessions.signals.max"))
+
+		writeFile(t, p, "sessions:\n  signals:\n    keep: 1000000\n")
+		err = check(p)
+		is.True(err != nil)
+		is.True(strings.Contains(err.Error(), "sessions.signals.keep 1000000 must be between 1 and 100000"))
+	})
+
 	t.Run("missing file is not written", func(t *testing.T) {
 		is := is.New(t)
 		p := filepath.Join(td, "missing", "config.yaml")

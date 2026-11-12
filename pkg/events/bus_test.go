@@ -328,3 +328,51 @@ func scrape(t *testing.T, series string) float64 {
 	}
 	return v
 }
+
+// Concurrent publishes reach every subscriber in ID order, with no hole in
+// the IDs for a subscriber that keeps up.
+func TestConcurrentPublishesArriveInIDOrder(t *testing.T) {
+	b := newTestBus()
+	defer b.Close()
+	const publishers, each = 8, 200
+	subs := []*Subscription{
+		b.Subscribe(Named("a"), Buffer(publishers*each)),
+		b.Subscribe(Named("b"), Buffer(publishers*each)),
+	}
+	var wg sync.WaitGroup
+	for p := range publishers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range each {
+				b.Publish(statusEvent(int64(p+1), StateWorking))
+			}
+		}()
+	}
+	wg.Wait()
+	for _, s := range subs {
+		for want := uint64(1); want <= publishers*each; want++ {
+			if ev := recv(t, s); ev.ID != want {
+				t.Fatalf("%s: got event %d, want %d", s.Name(), ev.ID, want)
+			}
+		}
+	}
+}
+
+func TestStateVocabulary(t *testing.T) {
+	order := []State{StateBlocked, StateError, StateDone, StateWorking, StateIdle, StateNone}
+	for i, s := range order {
+		if s.Rank() != i {
+			t.Errorf("%q rank = %d, want %d", s, s.Rank(), i)
+		}
+		if got, want := s.NeedsAttention(), i < 3; got != want {
+			t.Errorf("%q needs attention = %t", s, got)
+		}
+	}
+	if StateNone.Word() != "none" || StateBlocked.Word() != "blocked" {
+		t.Errorf("words: %q %q", StateNone.Word(), StateBlocked.Word())
+	}
+	if State("bogus").Rank() != StateNone.Rank() {
+		t.Error("unknown states sort last")
+	}
+}

@@ -27,6 +27,7 @@ soft session --help
 stdout 'start'
 stdout 'attach'
 stdout 'ls'
+stdout 'signals'
 stdout 'end'
 
 # start and attach need a terminal (ssh -t); start --detach does not
@@ -36,6 +37,17 @@ stderr 'requires a terminal \(ssh -t\)'
 stderr 'requires a terminal \(ssh -t\)'
 ! soft session start repo1 --detach
 stderr 'Starting sandbox soft-admin-repo1'
+
+# the failed start is a signal, with its reason; only its owner sees it
+soft session signals
+stdout 'TIME +STATE +SESSION +MESSAGE'
+stdout '✗ failed · start +repo1 / main +could not start the session: '
+soft session signals --json --attention
+stdout '"type":"lifecycle".*"step":"failed","op":"start"'
+soft session signals --repo other
+stdout 'No signals yet'
+! soft session signals --limit -1
+stderr 'must not be negative'
 
 # session names are checked
 ! soft session end repo1 --name Bad
@@ -53,9 +65,13 @@ soft user create user1 -k "$USER1_AUTHORIZED_KEY"
 soft repo create private1 -p
 ! usoft session end private1
 stderr 'repository not found'
+usoft session signals
+stdout 'No signals yet'
 
 # anonymous users cannot use sessions
 ! ksoft session ls
+stderr 'unauthorized'
+! ksoft session signals
 stderr 'unauthorized'
 ! ksoft session end repo1
 stderr 'unauthorized'

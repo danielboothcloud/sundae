@@ -175,6 +175,11 @@ config:
       # none, and Soft Serve then leaves sandboxes running (logged once).
       enabled: true
       after: 30m
+    signals:
+      # How many signals (session status changes and lifecycle events) to
+      # keep for `session signals` and the TUI, across all users. In memory
+      # only: the feed is empty after a restart. At most 100000.
+      keep: 1000
     # Named presets for `session start --profile <name>`. Empty fields fall
     # back to openshell.image and openshell.command.
     profiles: {}

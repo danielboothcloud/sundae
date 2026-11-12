@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"charm.land/lipgloss/v2/table"
 	"github.com/charmbracelet/soft-serve/pkg/backend"
@@ -16,6 +15,7 @@ import (
 	"github.com/charmbracelet/soft-serve/pkg/events"
 	"github.com/charmbracelet/soft-serve/pkg/openshell"
 	"github.com/charmbracelet/soft-serve/pkg/proto"
+	"github.com/charmbracelet/soft-serve/pkg/signals"
 	"github.com/charmbracelet/soft-serve/pkg/sshutils"
 	"github.com/spf13/cobra"
 )
@@ -46,6 +46,7 @@ func SessionCommand() *cobra.Command {
 		sessionStartCommand(),
 		sessionAttachCommand(),
 		sessionListCommand(),
+		sessionSignalsCommand(),
 		sessionParkCommand(),
 		sessionResumeCommand(),
 		sessionEndCommand(),
@@ -270,7 +271,7 @@ var sessionColumns = []struct {
 	{"Sandbox", func(r sessionRow, _ time.Time) string { return r.info.Sandbox }},
 	{"Phase", func(r sessionRow, _ time.Time) string { return orDash(r.info.Phase) }},
 	{"State", func(r sessionRow, _ time.Time) string { return stateText(r) }},
-	{"Message", func(r sessionRow, _ time.Time) string { return orDash(messageText(r.record(), maxMessage)) }},
+	{"Message", func(r sessionRow, _ time.Time) string { return orDash(signals.RecordMessage(r.record(), maxMessage)) }},
 	{"Attached", func(r sessionRow, _ time.Time) string {
 		if !r.polled() {
 			return "-"
@@ -288,40 +289,11 @@ var sessionColumns = []struct {
 // maxMessage is how many characters of a message `session ls` shows.
 const maxMessage = 60
 
-// stateOrder is the sort rank of a state: what needs the user first.
-func stateOrder(s events.State) int {
-	switch s {
-	case events.StateBlocked:
-		return 0
-	case events.StateError:
-		return 1
-	case events.StateDone:
-		return 2
-	case events.StateWorking:
-		return 3
-	case events.StateIdle:
-		return 4
-	default:
-		return 5
-	}
-}
-
 // stateText renders a session's state as the TUI does: glyph and word, then
 // the blocked kind, the progress, and the sandbox lifecycle, e.g.
 // "▲ blocked · permission · parked" or "● working 40%".
 func stateText(r sessionRow) string {
-	rec := r.record()
-	word := string(rec.State)
-	if rec.State == events.StateNone {
-		word = "none"
-	}
-	parts := []string{rec.State.Glyph() + " " + word}
-	if rec.State == events.StateBlocked && rec.Kind != "" {
-		parts = append(parts, sanitizeText(string(rec.Kind), 16))
-	}
-	if rec.Progress != nil && (rec.State == events.StateWorking || rec.State == events.StateBlocked) {
-		parts[0] += " " + strconv.Itoa(*rec.Progress) + "%"
-	}
+	parts := []string{signals.RecordLabel(r.record())}
 	if word := openshell.PhaseWord(r.info.Phase); word != "" {
 		parts = append(parts, word)
 	} else {
@@ -333,51 +305,6 @@ func stateText(r sessionRow) string {
 		}
 	}
 	return strings.Join(parts, " · ")
-}
-
-// messageText is the line a session shows: its message, else its title,
-// else the program's name; sanitised and cut to max characters.
-func messageText(rec events.Record, max int) string {
-	for _, s := range []string{rec.Msg, rec.Title, rec.App} {
-		if t := sanitizeText(s, max); t != "" {
-			return t
-		}
-	}
-	return ""
-}
-
-// sanitizeText makes untrusted program output safe to print: invalid UTF-8
-// is replaced, control characters (C0, DEL, C1) and invisible formatting
-// characters (bidi overrides, zero-width characters) are removed, runs of
-// whitespace become one space, and the result is cut to max characters,
-// ending in "…" when cut. max <= 0 does not cut.
-func sanitizeText(s string, max int) string {
-	s = strings.ToValidUTF8(s, "\uFFFD")
-	var b strings.Builder
-	space := false
-	n := 0
-	for _, r := range s {
-		switch {
-		case unicode.IsSpace(r):
-			space = b.Len() > 0
-			continue
-		case unicode.IsControl(r), unicode.Is(unicode.Cf, r):
-			continue
-		}
-		if space {
-			b.WriteByte(' ')
-			n++
-			space = false
-		}
-		b.WriteRune(r)
-		n++
-	}
-	out := b.String()
-	if max > 0 && n > max {
-		runes := []rune(out)
-		out = strings.TrimRightFunc(string(runes[:max-1]), unicode.IsSpace) + "…"
-	}
-	return out
 }
 
 // since renders how long ago t was: "now" under a minute, then minutes,
@@ -438,11 +365,11 @@ func (r sessionRow) json() sessionJSON {
 		Phase:    r.info.Phase,
 		Parked:   openshell.PhaseWord(r.info.Phase) == openshell.WordParked,
 		State:    string(rec.State),
-		Kind:     sanitizeText(string(rec.Kind), 0),
+		Kind:     signals.Sanitize(string(rec.Kind), 0),
 		Progress: rec.Progress,
-		App:      sanitizeText(rec.App, 0),
-		Title:    sanitizeText(rec.Title, 0),
-		Msg:      sanitizeText(rec.Msg, 0),
+		App:      signals.Sanitize(rec.App, 0),
+		Title:    signals.Sanitize(rec.Title, 0),
+		Msg:      signals.Sanitize(rec.Msg, 0),
 	}
 	if j.State == "" {
 		j.State = "none"
@@ -450,7 +377,7 @@ func (r sessionRow) json() sessionJSON {
 	if st := r.status; st != nil {
 		j.Bridges = st.Bridges
 		j.Running, j.Exited, j.ExitCode = st.Running, st.Exited, st.ExitCode
-		j.Stale, j.Error, j.Unsuspendable = st.Stale, sanitizeText(st.Error, 0), st.Unsuspendable
+		j.Stale, j.Error, j.Unsuspendable = st.Stale, signals.Sanitize(st.Error, 0), st.Unsuspendable
 		if !st.Changed.IsZero() {
 			j.Changed = &st.Changed
 		}
@@ -510,7 +437,7 @@ was parked. Listing never resumes a parked session.`,
 			}
 			// List sorts by repository and name; keep that within a state.
 			slices.SortStableFunc(rows, func(a, b sessionRow) int {
-				return stateOrder(a.record().State) - stateOrder(b.record().State)
+				return a.record().State.Rank() - b.record().State.Rank()
 			})
 
 			if asJSON {

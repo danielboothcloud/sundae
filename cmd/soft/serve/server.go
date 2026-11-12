@@ -24,6 +24,7 @@ import (
 	"github.com/charmbracelet/soft-serve/pkg/notify"
 	"github.com/charmbracelet/soft-serve/pkg/openshell"
 	"github.com/charmbracelet/soft-serve/pkg/proto"
+	"github.com/charmbracelet/soft-serve/pkg/signals"
 	sshsrv "github.com/charmbracelet/soft-serve/pkg/ssh"
 	"github.com/charmbracelet/soft-serve/pkg/stats"
 	"github.com/charmbracelet/soft-serve/pkg/utils"
@@ -49,6 +50,9 @@ type Server struct {
 	// Monitor collects session status and parks idle sessions; nil when
 	// OpenShell is disabled.
 	Monitor *openshell.Monitor
+	// Signals keeps the signals feed, recording from the bus from setup
+	// until Shutdown; nil when OpenShell is disabled.
+	Signals *signals.History
 
 	logger *log.Logger
 	ctx    context.Context
@@ -87,6 +91,21 @@ func NewServer(ctx context.Context) (*Server, error) {
 		ctx = openshell.ContextWithMonitor(ctx, monitor)
 	}
 
+	// The signals feed records session events from now on, so it has
+	// what is published while the server starts. It reaches the SSH
+	// server through the context.
+	var sigs *signals.History
+	if cfg.OpenShell.Enabled {
+		sigs = signals.New(cfg.Sessions.Signals.Keep,
+			signals.WithLogger(log.FromContext(ctx)),
+			signals.WithStateLookup(func(sandbox string) (events.State, bool) {
+				st, ok := monitor.Status(sandbox)
+				return st.Record.State, ok && !st.Polled.IsZero()
+			}))
+		sigs.Start(bus)
+		ctx = signals.WithContext(ctx, sigs)
+	}
+
 	// Forges are declared in the config file only. The service goes into
 	// the context the cron jobs and the SSH server are built from.
 	if len(cfg.Forges) > 0 {
@@ -104,6 +123,7 @@ func NewServer(ctx context.Context) (*Server, error) {
 		DB:      db,
 		Events:  bus,
 		Monitor: monitor,
+		Signals: sigs,
 		logger:  log.FromContext(ctx).WithPrefix("server"),
 		ctx:     ctx,
 	}
@@ -357,6 +377,12 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		s.stopMonitor(ctx)
 		return nil
 	})
+	errg.Go(func() error {
+		// Ends `session signals --follow`, which the SSH server would
+		// otherwise wait for.
+		s.Signals.Close()
+		return nil
+	})
 	// defer s.DB.Close() // nolint: errcheck
 	return errg.Wait()
 }
@@ -389,6 +415,10 @@ func (s *Server) Close() error {
 	})
 	errg.Go(func() error {
 		s.stopMonitor(ctx)
+		return nil
+	})
+	errg.Go(func() error {
+		s.Signals.Close()
 		return nil
 	})
 	// defer s.DB.Close() // nolint: errcheck

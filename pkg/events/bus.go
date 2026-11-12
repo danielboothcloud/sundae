@@ -43,7 +43,13 @@ type Bus struct {
 	// mu guards subs and closed. Publish holds it for reading while it
 	// delivers; Cancel and Close hold it for writing before closing a
 	// channel, so a channel is never sent on after it is closed.
-	mu     sync.RWMutex
+	mu sync.RWMutex
+	// pubMu serialises publishing: an event's ID is assigned and the event
+	// delivered to every subscriber before the next publish starts, so
+	// each subscriber receives events in ID order, and an unfiltered
+	// subscriber that sees a hole in the IDs knows it dropped events.
+	// Delivery never blocks, so this costs publishers little.
+	pubMu  sync.Mutex
 	subs   map[*Subscription]struct{}
 	closed bool
 }
@@ -81,6 +87,8 @@ func New(opts ...Option) *Bus {
 // zero, and delivers it to every subscriber whose filter accepts it. It
 // never blocks: a subscriber whose buffer is full loses the event, which is
 // counted on the subscription and in soft_serve_events_dropped_total.
+// Publishes are serialised, so every subscriber receives events in ID
+// order.
 //
 // It returns the stamped event. Publishing on a nil or closed bus, or an
 // event without a payload, delivers nothing and returns ev with ID 0.
@@ -98,6 +106,8 @@ func (b *Bus) Publish(ev Event) Event {
 		ev.Time = b.now()
 	}
 
+	b.pubMu.Lock()
+	defer b.pubMu.Unlock()
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	if b.closed {

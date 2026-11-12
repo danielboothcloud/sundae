@@ -31,6 +31,12 @@ const (
 	// DefaultSuspendAfter is how long a session must sit unattached and not
 	// working before it is parked, by default.
 	DefaultSuspendAfter = 30 * time.Minute
+	// DefaultSignalsKeep is how many signals (session status reports and
+	// lifecycle events) Soft Serve keeps in memory by default.
+	DefaultSignalsKeep = 1000
+	// MaxSignalsKeep is the largest sessions.signals.keep. A signal can
+	// carry a few KB of program output.
+	MaxSignalsKeep = 100000
 )
 
 // SessionsConfig configures agent sessions beyond the OpenShell connection:
@@ -51,6 +57,11 @@ type SessionsConfig struct {
 	// Suspend configures parking: suspending the sandbox of a session that
 	// nobody is attached to and that is not working.
 	Suspend SessionSuspendConfig `envPrefix:"SUSPEND_" yaml:"suspend"`
+
+	// Signals configures the signals feed: the session status reports and
+	// lifecycle events Soft Serve keeps in memory for `session signals`
+	// and the TUI.
+	Signals SessionSignalsConfig `envPrefix:"SIGNALS_" yaml:"signals"`
 
 	// Profiles are named presets a session starts from (session start
 	// --profile NAME). A profile's empty fields fall back to openshell.image
@@ -96,6 +107,14 @@ type SessionSuspendConfig struct {
 	// After is how long a session must have had nobody attached and no
 	// working status before it is parked. 0 means DefaultSuspendAfter.
 	After time.Duration `env:"AFTER" yaml:"after"`
+}
+
+// SessionSignalsConfig configures the signals feed.
+type SessionSignalsConfig struct {
+	// Keep is how many signals are kept, across all users; the oldest go
+	// first. They are kept in memory only. 0 means DefaultSignalsKeep; at
+	// most MaxSignalsKeep.
+	Keep int `env:"KEEP" yaml:"keep"`
 }
 
 // SessionProfile is a named session preset.
@@ -191,6 +210,13 @@ func (c *Config) validateSessions() error {
 		fail("suspend.after %s must not be shorter than status.poll_interval %s", sc.Suspend.After, sc.Status.PollInterval)
 	}
 
+	switch {
+	case sc.Signals.Keep == 0:
+		sc.Signals.Keep = DefaultSignalsKeep
+	case sc.Signals.Keep < 0 || sc.Signals.Keep > MaxSignalsKeep:
+		fail("signals.keep %d must be between 1 and %d", sc.Signals.Keep, MaxSignalsKeep)
+	}
+
 	for _, name := range sortedKeys(sc.Profiles) {
 		p := sc.Profiles[name]
 		key := fmt.Sprintf("profiles.%s", name)
@@ -249,5 +275,6 @@ func (c *Config) sessionsEnviron() []string {
 		"SOFT_SERVE_SESSIONS_STATUS_POLL_INTERVAL=" + c.Sessions.Status.PollInterval.String(),
 		fmt.Sprintf("SOFT_SERVE_SESSIONS_SUSPEND_ENABLED=%t", c.Sessions.Suspend.Enabled),
 		"SOFT_SERVE_SESSIONS_SUSPEND_AFTER=" + c.Sessions.Suspend.After.String(),
+		fmt.Sprintf("SOFT_SERVE_SESSIONS_SIGNALS_KEEP=%d", c.Sessions.Signals.Keep),
 	}
 }

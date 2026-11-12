@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/soft-serve/pkg/forge"
 	"github.com/charmbracelet/soft-serve/pkg/openshell"
 	"github.com/charmbracelet/soft-serve/pkg/proto"
+	"github.com/charmbracelet/soft-serve/pkg/signals"
 	"github.com/charmbracelet/soft-serve/pkg/ssh/cmd"
 	"github.com/charmbracelet/soft-serve/pkg/sshutils"
 	"github.com/charmbracelet/soft-serve/pkg/store"
@@ -127,6 +128,20 @@ func MonitorContextMiddleware(mon *openshell.Monitor) func(ssh.Handler) ssh.Hand
 		return func(s ssh.Session) {
 			if mon != nil {
 				s.Context().SetValue(openshell.MonitorContextKey, mon)
+			}
+			sh(s)
+		}
+	}
+}
+
+// SignalsContextMiddleware attaches the signals feed to the session
+// context, for `session signals`. h is nil when OpenShell is disabled;
+// nothing is attached then.
+func SignalsContextMiddleware(h *signals.History) func(ssh.Handler) ssh.Handler {
+	return func(sh ssh.Handler) ssh.Handler {
+		return func(s ssh.Session) {
+			if h != nil {
+				s.Context().SetValue(signals.ContextKey, h)
 			}
 			sh(s)
 		}

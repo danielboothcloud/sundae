@@ -20,6 +20,7 @@ func TestSessionsDefaults(t *testing.T) {
 	is.Equal(cfg.Sessions.Status.PollInterval, DefaultStatusPollInterval)
 	is.True(cfg.Sessions.Suspend.Enabled)
 	is.Equal(cfg.Sessions.Suspend.After, DefaultSuspendAfter)
+	is.Equal(cfg.Sessions.Signals.Keep, DefaultSignalsKeep)
 
 	// A zeroed section gets the defaults too, except that parking stays
 	// off: false is a value, not an absence.
@@ -29,6 +30,7 @@ func TestSessionsDefaults(t *testing.T) {
 	is.Equal(cfg.Sessions.Osewa.Port, DefaultOsewaPort)
 	is.Equal(cfg.Sessions.Status.PollInterval, DefaultStatusPollInterval)
 	is.Equal(cfg.Sessions.Suspend.After, DefaultSuspendAfter)
+	is.Equal(cfg.Sessions.Signals.Keep, DefaultSignalsKeep)
 	is.True(!cfg.Sessions.Suspend.Enabled)
 
 	// A relative binary_dir is resolved against the data path.
@@ -74,6 +76,17 @@ func TestValidateSessions(t *testing.T) {
 		"suspend after shorter than poll": {
 			func(c *Config) { c.Sessions.Suspend.After = 5 * time.Second },
 			"sessions.suspend.after 5s must not be shorter than status.poll_interval 10s",
+		},
+		"signals keep negative": {
+			func(c *Config) { c.Sessions.Signals.Keep = -1 },
+			"sessions.signals.keep -1 must be between 1 and 100000",
+		},
+		"signals keep too large": {
+			func(c *Config) { c.Sessions.Signals.Keep = MaxSignalsKeep + 1 },
+			"sessions.signals.keep 100001 must be between 1 and 100000",
+		},
+		"signals keep max": {
+			func(c *Config) { c.Sessions.Signals.Keep = MaxSignalsKeep }, "",
 		},
 		"profile name": {
 			func(c *Config) { c.Sessions.Profiles["Bad_Name"] = SessionProfile{} },
@@ -150,6 +163,7 @@ func TestSessionsConfigFileRoundTrip(t *testing.T) {
 	cfg.Sessions.Osewa.Port = 7400
 	cfg.Sessions.Status.PollInterval = 15 * time.Second
 	cfg.Sessions.Suspend = SessionSuspendConfig{Enabled: false, After: 2 * time.Hour}
+	cfg.Sessions.Signals.Keep = 250
 	cfg.Sessions.Profiles = map[string]SessionProfile{
 		"claude": {Image: "ghcr.io/me/agent-claude:latest", Command: `claude --model "opus"`},
 	}
@@ -162,6 +176,7 @@ func TestSessionsConfigFileRoundTrip(t *testing.T) {
 	is.Equal(got.Sessions.Osewa.BinaryDir, DefaultOsewaBinaryDir)
 	is.Equal(got.Sessions.Status.PollInterval, 15*time.Second)
 	is.Equal(got.Sessions.Suspend, SessionSuspendConfig{Enabled: false, After: 2 * time.Hour})
+	is.Equal(got.Sessions.Signals.Keep, 250)
 	is.Equal(got.Sessions.Profiles["claude"], cfg.Sessions.Profiles["claude"])
 	is.Equal(got.Sessions.Repos["infra/*"].Profile, "claude")
 }
@@ -177,6 +192,8 @@ func TestSessionsUnknownKeys(t *testing.T) {
     interval: 5s
   suspend:
     idle: 1h
+  signals:
+    max: 10
   profiles:
     claude:
       agent: claude
@@ -191,8 +208,9 @@ func TestSessionsUnknownKeys(t *testing.T) {
 		"line 3: unknown key sessions.osewa.version",
 		"line 5: unknown key sessions.status.interval",
 		"line 7: unknown key sessions.suspend.idle",
-		"line 10: unknown key sessions.profiles.<name>.agent",
-		"line 13: unknown key sessions.repos.<name>.profil",
+		"line 9: unknown key sessions.signals.max",
+		"line 12: unknown key sessions.profiles.<name>.agent",
+		"line 15: unknown key sessions.repos.<name>.profil",
 	} {
 		is.True(strings.Contains(err.Error(), want)) // missing: want
 	}
@@ -207,12 +225,14 @@ func TestSessionsEnv(t *testing.T) {
 	t.Setenv("SOFT_SERVE_SESSIONS_STATUS_POLL_INTERVAL", "20s")
 	t.Setenv("SOFT_SERVE_SESSIONS_SUSPEND_ENABLED", "false")
 	t.Setenv("SOFT_SERVE_SESSIONS_SUSPEND_AFTER", "45m")
+	t.Setenv("SOFT_SERVE_SESSIONS_SIGNALS_KEEP", "500")
 	cfg := DefaultConfig()
 	is.NoErr(cfg.ParseEnv())
 	is.Equal(cfg.Sessions.Osewa.BinaryDir, "/opt/osewa")
 	is.Equal(cfg.Sessions.Osewa.Port, 7401)
 	is.Equal(cfg.Sessions.Status.PollInterval, 20*time.Second)
 	is.Equal(cfg.Sessions.Suspend, SessionSuspendConfig{Enabled: false, After: 45 * time.Minute})
+	is.Equal(cfg.Sessions.Signals.Keep, 500)
 
 	envs := strings.Join(cfg.Environ(), "\n")
 	is.True(strings.Contains(envs, "SOFT_SERVE_SESSIONS_OSEWA_BINARY_DIR=/opt/osewa\n"))
@@ -220,6 +240,7 @@ func TestSessionsEnv(t *testing.T) {
 	is.True(strings.Contains(envs, "SOFT_SERVE_SESSIONS_STATUS_POLL_INTERVAL=20s"))
 	is.True(strings.Contains(envs, "SOFT_SERVE_SESSIONS_SUSPEND_ENABLED=false"))
 	is.True(strings.Contains(envs, "SOFT_SERVE_SESSIONS_SUSPEND_AFTER=45m0s"))
+	is.True(strings.Contains(envs, "SOFT_SERVE_SESSIONS_SIGNALS_KEEP=500"))
 
 	// Hook subprocesses rebuild the config from Environ.
 	for _, kv := range cfg.Environ() {
@@ -231,4 +252,5 @@ func TestSessionsEnv(t *testing.T) {
 	is.NoErr(again.ParseEnv())
 	is.Equal(again.Sessions.Status, cfg.Sessions.Status)
 	is.Equal(again.Sessions.Suspend, cfg.Sessions.Suspend)
+	is.Equal(again.Sessions.Signals, cfg.Sessions.Signals)
 }

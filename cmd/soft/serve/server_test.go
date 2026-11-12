@@ -3,11 +3,14 @@ package serve
 import (
 	"bytes"
 	"context"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/log/v2"
 	"github.com/charmbracelet/soft-serve/pkg/access"
@@ -15,7 +18,9 @@ import (
 	"github.com/charmbracelet/soft-serve/pkg/config"
 	"github.com/charmbracelet/soft-serve/pkg/db"
 	"github.com/charmbracelet/soft-serve/pkg/db/migrate"
+	"github.com/charmbracelet/soft-serve/pkg/events"
 	"github.com/charmbracelet/soft-serve/pkg/proto"
+	"github.com/charmbracelet/soft-serve/pkg/signals"
 	"github.com/charmbracelet/soft-serve/pkg/store"
 	"github.com/charmbracelet/soft-serve/pkg/store/database"
 	"github.com/matryer/is"
@@ -221,4 +226,45 @@ func TestEnsureDefaultRepoCreateErrorSkipped(t *testing.T) {
 	repos, err := be.Repositories(ctx)
 	is.NoErr(err)
 	is.Equal(len(repos), 0)
+}
+
+// With OpenShell enabled the server keeps a signals feed from the bus, and
+// shutting down ends its followers.
+func TestServerSignalsFeed(t *testing.T) {
+	is := is.New(t)
+	ctx, cfg, be, dbx := setupTestBackendWithDB(t)
+	cfg.OpenShell.Enabled = true
+	cfg.OpenShell.GatewayAddress = "127.0.0.1:1"
+	cfg.OpenShell.Image = "sandbox:latest"
+	cfg.Sessions.Signals.Keep = 7
+	cfg.SSH.ListenAddr, cfg.HTTP.ListenAddr, cfg.Git.ListenAddr, cfg.Stats.ListenAddr = "127.0.0.1:0", "127.0.0.1:0", "127.0.0.1:0", "127.0.0.1:0"
+	is.NoErr(cfg.Validate())
+	ctx = backend.WithContext(ctx, be)
+	ctx = db.WithContext(ctx, dbx)
+	ctx = log.WithContext(ctx, log.New(io.Discard))
+
+	srv, err := NewServer(ctx)
+	is.NoErr(err)
+	is.True(srv.Signals != nil)
+	is.Equal(srv.Signals.Keep(), 7)
+
+	srv.Events.Publish(events.SessionLifecycleEvent(1, events.SessionLifecycle{
+		Session: events.Session{User: "admin", Repo: "r", Name: "main", Sandbox: "soft-admin-r"},
+		Step:    events.LifecycleCreated,
+	}))
+	deadline := time.Now().Add(5 * time.Second)
+	for srv.Signals.Len() != 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("the signal was not recorded")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	snap, feed := srv.Signals.Follow(signals.Query{UserID: 1})
+	is.Equal(len(snap), 1)
+
+	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	is.NoErr(srv.Shutdown(sctx))
+	_, err = feed.Next(sctx)
+	is.True(errors.Is(err, signals.ErrClosed))
 }
