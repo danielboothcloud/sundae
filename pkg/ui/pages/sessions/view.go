@@ -1,0 +1,440 @@
+package sessions
+
+import (
+	"fmt"
+	"strings"
+
+	"charm.land/bubbles/v2/key"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/soft-serve/pkg/events"
+	"github.com/charmbracelet/soft-serve/pkg/sessionctl"
+	"github.com/charmbracelet/soft-serve/pkg/signals"
+	"github.com/charmbracelet/soft-serve/pkg/ui/common"
+	"github.com/charmbracelet/soft-serve/pkg/ui/styles"
+	"github.com/charmbracelet/x/ansi"
+)
+
+// Signals pane column widths (wide layout): the session and state
+// columns fit the rows shown, within these bounds.
+const (
+	sigTimeWidth     = 8
+	sigWhereMaxWidth = 24
+	sigWordsMaxWidth = 22
+	sigGap           = "  "
+	ageWidth         = 5
+)
+
+// gatewayDown is the line that replaces the session list when the
+// gateway cannot be reached (section 5).
+const gatewayDown = "OpenShell gateway unreachable (r to retry)"
+
+// stateStyle returns the colour of a state (section 2).
+func stateStyle(st *styles.Styles, s events.State) lipgloss.Style {
+	switch s {
+	case events.StateBlocked:
+		return st.State.Blocked
+	case events.StateError:
+		return st.State.Error
+	case events.StateDone:
+		return st.State.Done
+	case events.StateWorking:
+		return st.State.Working
+	case events.StateIdle:
+		return st.State.Idle
+	}
+	return st.State.None
+}
+
+// narrow reports whether the tab uses its narrow layout.
+func (m *Sessions) narrow() bool { return m.common.Width < NarrowWidth }
+
+// View implements tea.Model.
+func (m *Sessions) View() string {
+	if m.src == nil {
+		return ""
+	}
+	w, h := m.common.Width, m.common.Height
+	var lines []string
+	switch {
+	case m.form != nil:
+		lines = append([]string{""}, indent(strings.Split(m.form.View(w-1), "\n"), " ")...)
+	case m.op != nil:
+		lines = append([]string{""}, m.opView(w)...)
+	default:
+		if m.narrow() && m.pane == sessionsPane && !m.typing {
+			// The collapsed tabs name the pane; keep the lines for rows.
+			lines = append(lines, "")
+		} else {
+			lines = append(lines, "", m.paneHeader(w), "")
+		}
+		body := h - len(lines)
+		if m.notice.text != "" {
+			body -= 2
+		}
+		if m.pane == signalsPane {
+			lines = append(lines, m.signalsView(w, body)...)
+		} else {
+			lines = append(lines, m.sessionsView(w, body)...)
+		}
+	}
+	if m.notice.text != "" {
+		style := m.common.Styles.RepoSelector.Normal.Desc
+		if m.notice.err {
+			style = m.common.Styles.State.Error
+		}
+		for len(lines) < h-2 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, "", " "+style.Render(common.TruncateString(m.notice.text, w-1)))
+	}
+	if len(lines) > h {
+		lines = lines[:max(h, 0)]
+	}
+	return lipgloss.NewStyle().Width(w).Height(h).MaxHeight(h).Render(strings.Join(lines, "\n"))
+}
+
+func indent(lines []string, pad string) []string {
+	for i, l := range lines {
+		if l != "" {
+			lines[i] = pad + l
+		}
+	}
+	return lines
+}
+
+// opView shows a session being started or resumed: its title, then its
+// progress lines, the latest at the bottom.
+func (m *Sessions) opView(w int) []string {
+	st := m.common.Styles
+	lines := []string{" " + st.RepoSelector.Normal.Title.Render(common.TruncateString(m.op.title, w-1)), ""}
+	progress := m.opLines
+	if room := m.common.Height - 4; room > 0 && len(progress) > room {
+		progress = progress[len(progress)-room:]
+	}
+	for _, l := range progress {
+		lines = append(lines, "   "+st.RepoSelector.Normal.Desc.Render(common.TruncateString(l, w-3)))
+	}
+	if len(m.opLines) == 0 {
+		lines = append(lines, "   "+st.RepoSelector.Normal.Desc.Render("…"))
+	}
+	lines = append(lines, "", " "+st.HelpValue.Render("esc cancel"))
+	return lines
+}
+
+// paneHeader is the line naming the two panes, the active one in ‹ ›,
+// with what the active pane shows on the right; the filter input while
+// the filter is typed.
+func (m *Sessions) paneHeader(w int) string {
+	st := m.common.Styles
+	if m.typing {
+		m.filter.SetWidth(max(w-4, 8))
+		return " " + m.filter.View()
+	}
+	names := []string{"Sessions", "Signals"}
+	var parts []string
+	for i, n := range names {
+		switch {
+		case m.narrow() && m.pane == sessionsPane:
+			// The collapsed tabs already read ‹ Sessions ›.
+		case pane(i) == m.pane:
+			parts = append(parts, st.TopLevelActiveTab.UnsetMarginRight().Render("‹ "+n+" ›"))
+		case !m.narrow():
+			parts = append(parts, n)
+		}
+	}
+	left := " " + strings.Join(parts, "   ")
+	right := m.paneInfo()
+	gap := w - lipgloss.Width(left) - lipgloss.Width(right) - 1
+	if gap < 2 {
+		right = common.TruncateString(right, max(w-lipgloss.Width(left)-3, 0))
+		gap = max(w-lipgloss.Width(left)-lipgloss.Width(right)-1, 1)
+	}
+	return left + strings.Repeat(" ", gap) + st.RepoSelector.Normal.Desc.Render(right)
+}
+
+// paneInfo says what the active pane shows: the number of sessions, or
+// whether the feed follows and how many signals are kept; with the filter.
+func (m *Sessions) paneInfo() string {
+	var parts []string
+	if m.pane == signalsPane {
+		if m.sigCursor == 0 {
+			parts = append(parts, "following")
+		} else {
+			p := "paused"
+			if m.unseen > 0 {
+				p += fmt.Sprintf(" · %d new", m.unseen)
+			}
+			parts = append(parts, p)
+		}
+		if m.attention {
+			parts = append(parts, "attention only")
+		}
+		if m.sigQuery != "" {
+			parts = append(parts, "/"+m.sigQuery)
+		}
+		if m.attention || m.sigQuery != "" {
+			parts = append(parts, fmt.Sprintf("%d of %d", len(m.visibleSignals()), len(m.sigs)))
+		} else {
+			parts = append(parts, fmt.Sprintf("%d kept", len(m.sigs)))
+		}
+		return strings.Join(parts, " · ")
+	}
+	if !m.loaded || m.listErr != nil {
+		return ""
+	}
+	if m.rowQuery != "" {
+		return fmt.Sprintf("/%s · %d of %d", m.rowQuery, len(m.visibleRows()), len(m.rows))
+	}
+	if len(m.rows) == 1 {
+		return "1 session"
+	}
+	return fmt.Sprintf("%d sessions", len(m.rows))
+}
+
+// sessionRowHeight is the lines of a session row, its spacing included.
+func (m *Sessions) sessionRowHeight() int {
+	if m.narrow() {
+		return 4
+	}
+	return 3
+}
+
+func (m *Sessions) signalRowHeight() int {
+	if m.narrow() {
+		return 2
+	}
+	return 1
+}
+
+// perPage is how many rows of the active pane fit.
+func (m *Sessions) perPage() int {
+	body := m.common.Height - 3
+	if m.pane == signalsPane {
+		return max(body/m.signalRowHeight(), 1)
+	}
+	return max((body+1)/m.sessionRowHeight(), 1)
+}
+
+func (m *Sessions) sessionsView(w, h int) []string {
+	st := m.common.Styles
+	switch {
+	case m.listErr != nil:
+		line := gatewayDown
+		cause := signals.Sanitize(m.listErr.Error(), 0)
+		out := " " + st.State.Error.Render(events.StateError.Glyph()+" "+common.TruncateString(line, w-3))
+		if room := w - 3 - lipgloss.Width(line) - 4; room > 8 {
+			out += st.RepoSelector.Normal.Desc.Render("  · " + common.TruncateString(cause, room))
+		}
+		return []string{out}
+	case !m.loaded:
+		return []string{" " + st.RepoSelector.Normal.Desc.Render("Loading sessions…")}
+	case len(m.rows) == 0:
+		return []string{" " + st.NoContent.UnsetMargins().UnsetPadding().Render("No sessions. Press n to start one.")}
+	}
+	vis := m.visibleRows()
+	if len(vis) == 0 {
+		return []string{" " + st.RepoSelector.Normal.Desc.Render("No sessions match “"+m.rowQuery+"”.")}
+	}
+	per := max((h+1)/m.sessionRowHeight(), 1)
+	start := (m.cursor / per) * per
+	var lines []string
+	for i := start; i < len(vis) && i < start+per; i++ {
+		if i > start {
+			lines = append(lines, "")
+		}
+		lines = append(lines, m.sessionRow(vis[i], i == m.cursor, w)...)
+	}
+	return lines
+}
+
+// words is a session's state words, with what the tab is doing to it in
+// place of the lifecycle.
+func (m *Sessions) words(r sessionctl.Row) string {
+	if b := m.busy[r.Info.Sandbox]; b != "" {
+		return signals.RecordWords(r.Record()) + " · " + b
+	}
+	return r.Words()
+}
+
+// sessionRow renders a session as two lines (three when narrow), as
+// section 5 draws: glyph, repo / name, state and age; then the message.
+func (m *Sessions) sessionRow(r sessionctl.Row, selected bool, w int) []string {
+	st := m.common.Styles
+	sel := st.RepoSelector.Normal
+	if selected {
+		sel = st.RepoSelector.Active
+	}
+	base := sel.Base.UnsetHeight()
+	cw := max(w-base.GetHorizontalFrameSize(), 10)
+	ss := stateStyle(st, r.State())
+	glyph := ss.Render(r.State().Glyph())
+	where := sessionLabel(r.Info.Repo, r.Info.Name)
+	words := m.words(r)
+	age := sessionctl.Since(r.Changed(), m.now())
+	if age == "-" {
+		age = ""
+	}
+	msg := m.message(r)
+	msgStyle := sel.Desc
+	if m.copied == r.Info.Sandbox {
+		msg = "(copied to clipboard)"
+	}
+
+	var lines []string
+	if m.narrow() {
+		lines = []string{
+			glyph + " " + sel.Title.Render(common.TruncateString(where, cw-2)),
+			"  " + ss.Render(common.TruncateString(words, cw-2-ageWidth)) + sel.Updated.Render(strings.TrimRight("  "+age, " ")),
+			"  " + msgStyle.Render(common.TruncateString(msg, cw-2)),
+		}
+	} else {
+		right := words + "  " + fmt.Sprintf("%*s", ageWidth-2, age)
+		if lipgloss.Width(right) > cw/2 {
+			words = common.TruncateString(words, cw/2-ageWidth)
+			right = words + "  " + fmt.Sprintf("%*s", ageWidth-2, age)
+		}
+		where = common.TruncateString(where, cw-2-lipgloss.Width(right)-2)
+		gap := max(cw-2-lipgloss.Width(where)-lipgloss.Width(right), 2)
+		lines = []string{
+			glyph + " " + sel.Title.Render(where) + strings.Repeat(" ", gap) +
+				ss.Render(words) + sel.Updated.Render("  "+fmt.Sprintf("%*s", ageWidth-2, age)),
+			"  " + msgStyle.Render(common.TruncateString(msg, cw-2)),
+		}
+	}
+	return strings.Split(base.Render(strings.Join(lines, "\n")), "\n")
+}
+
+func (m *Sessions) signalsView(w, h int) []string {
+	st := m.common.Styles
+	vis := m.visibleSignals()
+	if len(vis) == 0 {
+		text := "No signals yet. Sessions report here as they work."
+		if len(m.sigs) > 0 {
+			text = "No signals match."
+		}
+		return []string{" " + st.RepoSelector.Normal.Desc.Render(text)}
+	}
+	per := max(h/m.signalRowHeight(), 1)
+	start := (m.sigCursor / per) * per
+	end := min(start+per, len(vis))
+	// The session and state columns fit the rows shown.
+	whereW, wordsW := 10, 6
+	for _, s := range vis[start:end] {
+		_, words, _ := strings.Cut(s.Label(), " ")
+		whereW = max(whereW, ansi.StringWidth(s.Where()))
+		wordsW = max(wordsW, ansi.StringWidth(words))
+	}
+	whereW, wordsW = min(whereW, sigWhereMaxWidth), min(wordsW, sigWordsMaxWidth)
+	var lines []string
+	for i := start; i < end; i++ {
+		lines = append(lines, m.signalRow(vis[i], i == m.sigCursor, w, whereW, wordsW)...)
+	}
+	return lines
+}
+
+// signalRow renders a signal (section 7): time, glyph, repo / session,
+// state and message; two lines when narrow.
+func (m *Sessions) signalRow(s signals.Signal, selected bool, w, whereW, wordsW int) []string {
+	st := m.common.Styles
+	sel := st.RepoSelector.Normal
+	if selected {
+		sel = st.RepoSelector.Active
+	}
+	base := sel.Base.UnsetHeight()
+	cw := max(w-base.GetHorizontalFrameSize(), 10)
+	ss := stateStyle(st, s.State())
+	if s.IsGap() {
+		ss = st.State.Blocked
+	}
+	glyph, words, _ := strings.Cut(s.Label(), " ")
+	when := signals.FormatTime(s.Time, m.now())
+	where := s.Where()
+	var lines []string
+	if m.narrow() {
+		head := pad(when, sigTimeWidth) + " "
+		lines = []string{
+			sel.Updated.Render(head) + ss.Render(glyph) + " " + sel.Title.Render(common.TruncateString(where, cw-lipgloss.Width(head)-2)),
+			"  " + ss.Render(common.TruncateString(words, cw-2)) + "  " +
+				sel.Desc.Render(common.TruncateString(s.Message(0), max(cw-4-lipgloss.Width(words), 0))),
+		}
+	} else {
+		fixed := sigTimeWidth + len(sigGap) + 2 + whereW + len(sigGap) + wordsW + len(sigGap)
+		lines = []string{
+			sel.Updated.Render(pad(when, sigTimeWidth)) + sigGap +
+				ss.Render(glyph) + " " +
+				sel.Title.Render(pad(truncate(where, whereW), whereW)) + sigGap +
+				ss.Render(pad(truncate(words, wordsW), wordsW)) + sigGap +
+				sel.Desc.Render(common.TruncateString(s.Message(0), max(cw-fixed, 0))),
+		}
+	}
+	return strings.Split(base.Render(strings.Join(lines, "\n")), "\n")
+}
+
+// truncate cuts s to n cells, ending in "…" when cut.
+func truncate(s string, n int) string { return ansi.Truncate(s, n, "…") }
+
+// pad pads s with spaces to n cells.
+func pad(s string, n int) string {
+	if w := ansi.StringWidth(s); w < n {
+		return s + strings.Repeat(" ", n-w)
+	}
+	return s
+}
+
+// FooterLine is what replaces the help line: the end-session confirm
+// (section 5b). "" when there is none.
+func (m *Sessions) FooterLine(width int) string {
+	if m.confirm == nil {
+		return ""
+	}
+	return m.confirm.View(width)
+}
+
+// ShortHelp implements help.KeyMap.
+func (m *Sessions) ShortHelp() []key.Binding {
+	km := m.common.KeyMap
+	switch {
+	case m.form != nil:
+		return m.form.ShortHelp()
+	case m.confirm != nil:
+		return []key.Binding{m.confirm.Yes, m.confirm.No}
+	case m.op != nil:
+		return []key.Binding{m.keys.Cancel}
+	case m.typing:
+		return []key.Binding{m.keys.Apply, m.keys.Cancel}
+	}
+	pane := m.keys.Pane
+	if m.pane == signalsPane {
+		pane.SetHelp("e", "sessions")
+		return []key.Binding{km.UpDown, m.keys.Attach, pane, m.keys.Attention, m.keys.Filter}
+	}
+	if m.listErr != nil {
+		retry := m.keys.Retry
+		retry.SetHelp("r", "retry")
+		return []key.Binding{retry, pane}
+	}
+	return []key.Binding{km.UpDown, m.keys.Attach, m.keys.New, m.keys.End, m.keys.Filter, pane}
+}
+
+// FullHelp implements help.KeyMap.
+func (m *Sessions) FullHelp() [][]key.Binding {
+	if m.form != nil || m.confirm != nil || m.op != nil || m.typing {
+		return [][]key.Binding{m.ShortHelp()}
+	}
+	km := m.common.KeyMap
+	nav := []key.Binding{km.UpDown, km.NextPage, km.PrevPage, m.keys.Follow, m.keys.Bottom}
+	pane := m.keys.Pane
+	if m.pane == signalsPane {
+		pane.SetHelp("e", "sessions")
+		return [][]key.Binding{
+			nav,
+			{m.keys.Attach, pane, m.keys.Attention},
+			{m.keys.Filter, m.keys.Clear, m.keys.Retry},
+		}
+	}
+	return [][]key.Binding{
+		nav,
+		{m.keys.Attach, m.keys.New, m.keys.End, m.keys.Park},
+		{m.keys.Copy, m.keys.Filter, m.keys.Clear, pane, m.keys.Retry},
+	}
+}

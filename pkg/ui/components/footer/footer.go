@@ -6,6 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/soft-serve/pkg/ui/common"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // ToggleFooterMsg is a message sent to show/hide the footer.
@@ -59,6 +60,11 @@ func (f *Footer) View() string {
 	s := f.common.Styles.Footer.
 		Width(f.common.Width)
 	helpView := f.help.View(f.keymap)
+	if !f.help.ShowAll {
+		// The help model adds items past its width when no "…" fits
+		// after the last one that does; keep the short help on its line.
+		helpView = ansi.Truncate(helpView, max(f.common.Width-f.common.Styles.Footer.GetHorizontalFrameSize(), 0), "…")
+	}
 	return f.common.Zone.Mark(
 		"footer",
 		s.Render(helpView),

@@ -4,7 +4,6 @@ import (
 	"errors"
 
 	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/soft-serve/git"
@@ -15,6 +14,7 @@ import (
 	"github.com/charmbracelet/soft-serve/pkg/ui/components/selector"
 	"github.com/charmbracelet/soft-serve/pkg/ui/pages/repo"
 	"github.com/charmbracelet/soft-serve/pkg/ui/pages/selection"
+	"github.com/charmbracelet/soft-serve/pkg/ui/pages/sessions"
 )
 
 type page int
@@ -78,9 +78,44 @@ func (ui *UI) getMargins() (wm, hm int) {
 		// NOTE: we don't use the footer's style to determine the margins
 		// because footer.Height() is the height of the footer after applying
 		// the styles.
-		hm += ui.footer.Height()
+		hm += lipgloss.Height(ui.footerView())
 	}
 	return
+}
+
+// selection returns the home page.
+func (ui *UI) selection() *selection.Selection {
+	if s, ok := ui.pages[selectionPage].(*selection.Selection); ok {
+		return s
+	}
+	return nil
+}
+
+// footerView renders the footer: the help, or a line the home page puts in
+// its place (the end-session confirm).
+func (ui *UI) footerView() string {
+	if s := ui.selection(); s != nil && ui.activePage == selectionPage && ui.state == readyState {
+		if line := s.FooterLine(ui.common.Width - ui.common.Styles.App.GetHorizontalFrameSize()); line != "" {
+			return ui.common.Styles.Footer.Render(line)
+		}
+	}
+	return ui.footer.View()
+}
+
+// capturing reports whether the home page's active tab takes every key
+// (a form, confirm or filter is open).
+func (ui *UI) capturing() bool {
+	s := ui.selection()
+	return ui.activePage == selectionPage && s != nil && s.Capturing()
+}
+
+// close stops the pages' background work before quitting.
+func (ui *UI) close() {
+	if s := ui.selection(); s != nil {
+		s.Close()
+	}
+	// Stop bubblezone background workers.
+	ui.common.Zone.Close()
 }
 
 // ShortHelp implements help.KeyMap.
@@ -95,7 +130,9 @@ func (ui *UI) ShortHelp() []key.Binding {
 	if !ui.IsFiltering() {
 		b = append(b, ui.common.KeyMap.Quit)
 	}
-	b = append(b, ui.common.KeyMap.Help)
+	if !ui.capturing() {
+		b = append(b, ui.common.KeyMap.Help)
+	}
 	return b
 }
 
@@ -155,10 +192,11 @@ func (ui *UI) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// IsFiltering returns true if the selection page is filtering.
+// IsFiltering returns true if the selection page is filtering, or its
+// active tab takes every key.
 func (ui *UI) IsFiltering() bool {
 	if ui.activePage == selectionPage {
-		if s, ok := ui.pages[selectionPage].(*selection.Selection); ok && s.FilterState() == list.Filtering {
+		if s := ui.selection(); s != nil && s.IsFiltering() {
 			return true
 		}
 	}
@@ -186,12 +224,11 @@ func (ui *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ui.state = readyState
 			// Always show the footer on error.
 			ui.showFooter = ui.footer.ShowAll()
-		case key.Matches(msg, ui.common.KeyMap.Help):
+		case key.Matches(msg, ui.common.KeyMap.Help) && !ui.capturing():
 			cmds = append(cmds, footer.ToggleFooterCmd)
 		case key.Matches(msg, ui.common.KeyMap.Quit):
 			if !ui.IsFiltering() {
-				// Stop bubblezone background workers.
-				ui.common.Zone.Close()
+				ui.close()
 				return ui, tea.Quit
 			}
 		case ui.activePage == repoPage &&
@@ -243,7 +280,15 @@ func (ui *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if cmd != nil {
 		cmds = append(cmds, cmd)
 	}
-	if ui.state != loadingState {
+	if ui.activePage != selectionPage && sessions.IsMsg(msg) {
+		// The Sessions tab keeps following its live updates while a
+		// repository is open.
+		m, cmd := ui.pages[selectionPage].Update(msg)
+		ui.pages[selectionPage] = m.(common.Component)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	} else if ui.state != loadingState {
 		m, cmd := ui.pages[ui.activePage].Update(msg)
 		ui.pages[ui.activePage] = m.(common.Component)
 		if cmd != nil {
@@ -283,10 +328,13 @@ func (ui *UI) View() tea.View {
 		view = "Unknown state :/ this is a bug!"
 	}
 	if ui.activePage == selectionPage {
+		if s := ui.selection(); s != nil {
+			ui.header.SetRight(s.Summary(ui.common.Width-wm < sessions.NarrowWidth))
+		}
 		view = lipgloss.JoinVertical(lipgloss.Left, ui.header.View(), view)
 	}
 	if ui.showFooter {
-		view = lipgloss.JoinVertical(lipgloss.Left, view, ui.footer.View())
+		view = lipgloss.JoinVertical(lipgloss.Left, view, ui.footerView())
 	}
 	v.Content = ui.common.Zone.Scan(
 		ui.common.Styles.App.Render(view),

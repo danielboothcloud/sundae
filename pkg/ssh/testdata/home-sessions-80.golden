@@ -1,0 +1,23 @@
+
+    Soft Serve                              ▲ 1 blocked  ✓ 1 done  ● 2 working
+
+    Repositories  • Sessions    About
+
+   ‹ Sessions ›   Signals                                          5 sessions
+
+  ┃ ▲ infra / claude-1                                            blocked   5m
+  ┃   Apply 3 to add, 1 to change, 0 to destroy?
+
+    ✓ soft-serve / forge-sync                                        done   5m
+      Implemented GitHub discovery
+
+    ● gateway / main                                              working   5m
+      bash
+
+    ● soft-serve / tui                                            working   5m
+      Running go test ./pkg/ui/...
+
+    ○ dotfiles / main                                                idle   5m
+      bash
+
+   ↑↓ navigate • 1-3 tab • enter attach • n new • x end • / filter …

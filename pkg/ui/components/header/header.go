@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/soft-serve/pkg/ui/common"
 )
 
@@ -11,7 +12,12 @@ import (
 type Header struct {
 	common common.Common
 	text   string
+	right  string
 }
+
+// SetRight sets what the header shows at its right end, e.g. the
+// attention summary; "" shows nothing.
+func (h *Header) SetRight(s string) { h.right = s }
 
 // New creates a new header component.
 func New(c common.Common, text string) *Header {
@@ -38,5 +44,18 @@ func (h *Header) Update(_ tea.Msg) (common.Model, tea.Cmd) {
 
 // View implements tea.Model.
 func (h *Header) View() string {
-	return h.common.Styles.ServerName.Render(strings.TrimSpace(h.text))
+	st := h.common.Styles.ServerName
+	if h.right == "" {
+		return st.Render(strings.TrimSpace(h.text))
+	}
+	name := st.UnsetMarginBottom().Render(strings.TrimSpace(h.text))
+	right := h.right
+	gap := h.common.Width - lipgloss.Width(name) - lipgloss.Width(right)
+	if gap < 1 {
+		right = ""
+		gap = 0
+	}
+	return lipgloss.NewStyle().
+		MarginBottom(st.GetMarginBottom()).
+		Render(name + strings.Repeat(" ", gap) + right)
 }

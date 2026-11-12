@@ -3,6 +3,7 @@ package signals
 import (
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/charmbracelet/soft-serve/pkg/events"
@@ -58,7 +59,13 @@ func Sanitize(s string, max int) string {
 // progress of a working or blocked program, and what a blocked one waits
 // for, e.g. "▲ blocked · permission" or "● working 40%".
 func RecordLabel(rec events.Record) string {
-	label := rec.State.Glyph() + " " + rec.State.Word()
+	return rec.State.Glyph() + " " + RecordWords(rec)
+}
+
+// RecordWords is RecordLabel without the glyph, for where the glyph is
+// shown apart from the words: "blocked · permission", "working 40%".
+func RecordWords(rec events.Record) string {
+	label := rec.State.Word()
 	if rec.Progress != nil && (rec.State == events.StateWorking || rec.State == events.StateBlocked) {
 		label += " " + strconv.Itoa(*rec.Progress) + "%"
 	}
@@ -231,4 +238,17 @@ func orWord(s, def string) string {
 		return def
 	}
 	return s
+}
+
+// FormatTime renders when a signal happened: the time of day for today
+// (server time), the date before that; "-" for the zero time.
+func FormatTime(t, now time.Time) string {
+	if t.IsZero() {
+		return "-"
+	}
+	t, now = t.Local(), now.Local()
+	if y, m, d := t.Date(); y == now.Year() && m == now.Month() && d == now.Day() {
+		return t.Format("15:04:05")
+	}
+	return t.Format("Jan 02")
 }

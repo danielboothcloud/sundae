@@ -1411,6 +1411,19 @@ You can copy text to your clipboard over SSH. For instance, you can press
 <kbd>c</kbd> on the highlighted repo in the menu to copy the clone command
 [^osc52].
 
+The home page has tabs: <kbd>1</kbd>–<kbd>n</kbd> jump to one, <kbd>tab</kbd>
+cycles. When OpenShell is enabled and you are signed in with a key, a
+**Sessions** tab lists your agent sessions, what needs you first, and the
+header counts the ones blocked, errored, done and working. In it:
+<kbd>enter</kbd> attaches (detach with <kbd>~.</kbd> to come back to the same
+row), <kbd>n</kbd> starts a session from a profile, <kbd>x</kbd> ends one,
+<kbd>z</kbd> parks or resumes it, <kbd>c</kbd> copies its `session attach`
+command, <kbd>/</kbd> filters, and <kbd>e</kbd> switches to the **Signals**
+pane: the `session signals` feed, live, newest first (<kbd>a</kbd> shows only
+what needs you, <kbd>g</kbd> goes back to the top and follows new signals).
+When the OpenShell gateway is unreachable the tab says so and <kbd>r</kbd>
+retries; the other tabs keep working.
+
 [^osc52]:
     Copying over SSH depends on your terminal support of OSC52. Refer to
     [go-osc52](https://github.com/aymanbagabas/go-osc52) for more information.

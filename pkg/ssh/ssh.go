@@ -11,7 +11,6 @@ import (
 	"charm.land/log/v2"
 	"charm.land/ssh"
 	"charm.land/wish/v2"
-	bm "charm.land/wish/v2/bubbletea"
 	rm "charm.land/wish/v2/recover"
 	"github.com/charmbracelet/keygen"
 	"github.com/charmbracelet/soft-serve/pkg/backend"
@@ -71,8 +70,9 @@ func NewSSHServer(ctx context.Context) (*SSHServer, error) {
 	mw := []wish.Middleware{
 		rm.MiddlewareWithLogger(
 			logger,
-			// BubbleTea middleware.
-			bm.MiddlewareWithProgramHandler(SessionHandler),
+			// BubbleTea middleware: the TUI, which can hand the
+			// terminal to an agent session and take it back.
+			TUIMiddleware,
 			// CLI middleware.
 			CommandMiddleware,
 			// Logging middleware.

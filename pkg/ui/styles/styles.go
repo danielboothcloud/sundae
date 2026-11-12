@@ -164,6 +164,18 @@ type Styles struct {
 		LineDigit lipgloss.Style
 		LineBar   lipgloss.Style
 	}
+
+	// State colours the session status vocabulary: blocked amber, error
+	// red, done green, working teal (the active tab's colour), idle and
+	// none grey.
+	State struct {
+		Blocked lipgloss.Style
+		Error   lipgloss.Style
+		Done    lipgloss.Style
+		Working lipgloss.Style
+		Idle    lipgloss.Style
+		None    lipgloss.Style
+	}
 }
 
 // DefaultStyles returns default styles for the UI.
@@ -522,6 +534,13 @@ func DefaultStyles() *Styles {
 	s.Stash.Selector = lipgloss.NewStyle().
 		Width(1).
 		Foreground(selectorColor)
+
+	s.State.Blocked = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+	s.State.Error = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
+	s.State.Done = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	s.State.Working = lipgloss.NewStyle().Foreground(lipgloss.Color("36"))
+	s.State.Idle = lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
+	s.State.None = s.State.Idle
 
 	return s
 }

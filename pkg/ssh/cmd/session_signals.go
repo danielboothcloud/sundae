@@ -208,7 +208,7 @@ func (w *signalWriter) write(sigs []signals.Signal) error {
 	}
 	now := w.now()
 	for _, s := range sigs {
-		b.WriteString(w.line(signalTime(s.Time, now), s.Label(), s.Where(), s.Message(0)))
+		b.WriteString(w.line(signals.FormatTime(s.Time, now), s.Label(), s.Where(), s.Message(0)))
 	}
 	_, err := io.WriteString(w.out, b.String())
 	return err //nolint:wrapcheck
@@ -232,19 +232,6 @@ func pad(s string, n int) string {
 		return s + strings.Repeat(" ", n-w)
 	}
 	return s
-}
-
-// signalTime renders when a signal happened: the time of day for today
-// (server time), the date before that.
-func signalTime(t, now time.Time) string {
-	if t.IsZero() {
-		return "-"
-	}
-	t, now = t.Local(), now.Local()
-	if y, m, d := t.Date(); y == now.Year() && m == now.Month() && d == now.Day() {
-		return t.Format("15:04:05")
-	}
-	return t.Format("Jan 02")
 }
 
 // signalJSON is one signal of `session signals --json`. Text from the

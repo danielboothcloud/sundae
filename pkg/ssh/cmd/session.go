@@ -4,17 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strconv"
-	"strings"
 	"time"
 
 	"charm.land/lipgloss/v2/table"
 	"github.com/charmbracelet/soft-serve/pkg/backend"
 	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/events"
 	"github.com/charmbracelet/soft-serve/pkg/openshell"
 	"github.com/charmbracelet/soft-serve/pkg/proto"
+	"github.com/charmbracelet/soft-serve/pkg/sessionctl"
 	"github.com/charmbracelet/soft-serve/pkg/signals"
 	"github.com/charmbracelet/soft-serve/pkg/sshutils"
 	"github.com/spf13/cobra"
@@ -22,10 +20,6 @@ import (
 
 // errNoTerminal is returned when a command that attaches runs without a PTY.
 var errNoTerminal = errors.New("requires a terminal (ssh -t)")
-
-// errSessionLost is returned when the sandbox stream ends without reporting
-// an exit status.
-var errSessionLost = errors.New("session ended without an exit status")
 
 // newOpenShellClient creates the OpenShell client for a command invocation.
 // Tests may replace it.
@@ -133,9 +127,7 @@ connection; the program keeps running.`,
 // newManager returns a Manager for a command, publishing on the context's
 // event bus and coordinating with the context's Monitor.
 func newManager(ctx context.Context, client openshell.Client) *openshell.Manager {
-	return openshell.NewManager(client, backend.FromContext(ctx), config.FromContext(ctx),
-		openshell.WithEvents(events.FromContext(ctx)),
-		openshell.WithMonitor(openshell.MonitorFromContext(ctx)))
+	return sessionctl.NewManager(ctx, client)
 }
 
 // runSession starts (create) or resumes the session, then attaches the SSH
@@ -146,8 +138,7 @@ func runSession(cmd *cobra.Command, repo string, opts openshell.StartOptions, cr
 	be := backend.FromContext(ctx)
 	sess := sshutils.SessionFromContext(ctx)
 
-	rr, err := be.Repository(ctx, repo)
-	if err != nil {
+	if _, err := be.Repository(ctx, repo); err != nil {
 		return err
 	}
 
@@ -157,67 +148,42 @@ func runSession(cmd *cobra.Command, repo string, opts openshell.StartOptions, cr
 	}
 	defer client.Close() //nolint:errcheck
 
-	mgr := newManager(ctx, client)
-	opts.User = proto.UserFromContext(ctx)
-	if opts.User == nil {
-		return proto.ErrUnauthorized
+	req := sessionctl.Request{
+		Repo:     repo,
+		Name:     opts.Name,
+		Profile:  opts.Profile,
+		Image:    opts.Image,
+		Create:   create,
+		Progress: cmd.ErrOrStderr(),
 	}
-
-	// Count the bridge from here until it closes, whichever way this
-	// returns, so the session is not parked while it is prepared or
-	// attached. An invalid name counts against a sandbox that cannot exist,
-	// briefly, and Start rejects it.
-	closeBridge := openshell.MonitorFromContext(ctx).OpenBridge(ctx,
-		openshell.SessionSandboxName(opts.User.Username(), rr.Name(), opts.Name))
-	defer closeBridge()
-
-	opts.Repo = rr.Name()
-	opts.VCS = rr.Vcs()
-	opts.Progress = cmd.ErrOrStderr()
 	if sess != nil {
 		if pty, _, ok := sess.Pty(); ok {
-			opts.Term = pty.Term
+			req.Term = pty.Term
 		}
 	}
 
-	var s *openshell.Session
-	if create {
-		s, err = mgr.Start(ctx, opts)
-	} else {
-		s, err = mgr.Resume(ctx, opts)
-	}
+	p, err := sessionctl.Prepare(ctx, newManager(ctx, client), req)
 	if err != nil {
 		return err
 	}
+	defer p.Close()
 
 	if detach {
+		s := p.Session
 		cmd.PrintErrf("Session %s of %s is running in sandbox %s.\n", s.Name, s.Repo, s.Sandbox)
 		cmd.PrintErrf("Attach with: session attach %s%s\n", s.Repo, nameArg(s.Name))
 		return nil
 	}
 
-	return attach(ctx, mgr, s, sess)
+	return attach(ctx, p, sess)
 }
 
 // attach bridges the SSH session to the osewa session and propagates the
 // exit code of the attach client: the program's exit code when it ended, 0
 // when the user detached.
-func attach(ctx context.Context, mgr *openshell.Manager, s *openshell.Session, sess sshSession) error {
-	pty, _, _ := sess.Pty()
-	is, err := mgr.Attach(ctx, s, uint32(pty.Window.Width), uint32(pty.Window.Height)) //nolint:gosec
+func attach(ctx context.Context, p *sessionctl.Prepared, sess sshSession) error {
+	code, err := p.Attach(ctx, sess)
 	if err != nil {
-		return err
-	}
-
-	code, err := openshell.Bridge(ctx, sess, is)
-	if code < 0 && ctx.Err() == nil {
-		// The stream ended without an exit status: surface why.
-		if err == nil {
-			err = errSessionLost
-		}
-		return err
-	}
-	if err != nil && ctx.Err() == nil && code == 0 {
 		return err
 	}
 	if code > 0 {
@@ -242,89 +208,37 @@ func nameArg(name string) string {
 	return " --name " + name
 }
 
-// sessionRow is one session of `session ls`: what the gateway lists, and
-// what the Monitor last read from the sandbox (nil when it has nothing yet).
-type sessionRow struct {
-	info   openshell.Info
-	status *openshell.SessionStatus
-}
-
-// record returns the session's OSC 7501 record; none when unknown.
-func (r sessionRow) record() events.Record {
-	if r.status == nil {
-		return events.Record{}
-	}
-	return r.status.Record
-}
-
-// polled reports whether the Monitor has read the session's status.
-func (r sessionRow) polled() bool { return r.status != nil && !r.status.Polled.IsZero() }
+// sessionRow is one session of `session ls`.
+type sessionRow = sessionctl.Row
 
 // sessionColumns are the columns of `session ls`.
 var sessionColumns = []struct {
 	header string
 	value  func(sessionRow, time.Time) string
 }{
-	{"Repository", func(r sessionRow, _ time.Time) string { return r.info.Repo }},
-	{"Name", func(r sessionRow, _ time.Time) string { return r.info.Name }},
-	{"Profile", func(r sessionRow, _ time.Time) string { return orDash(r.info.Profile) }},
-	{"Sandbox", func(r sessionRow, _ time.Time) string { return r.info.Sandbox }},
-	{"Phase", func(r sessionRow, _ time.Time) string { return orDash(r.info.Phase) }},
-	{"State", func(r sessionRow, _ time.Time) string { return stateText(r) }},
-	{"Message", func(r sessionRow, _ time.Time) string { return orDash(signals.RecordMessage(r.record(), maxMessage)) }},
+	{"Repository", func(r sessionRow, _ time.Time) string { return r.Info.Repo }},
+	{"Name", func(r sessionRow, _ time.Time) string { return r.Info.Name }},
+	{"Profile", func(r sessionRow, _ time.Time) string { return orDash(r.Info.Profile) }},
+	{"Sandbox", func(r sessionRow, _ time.Time) string { return r.Info.Sandbox }},
+	{"Phase", func(r sessionRow, _ time.Time) string { return orDash(r.Info.Phase) }},
+	{"State", func(r sessionRow, _ time.Time) string { return r.Label() }},
+	{"Message", func(r sessionRow, _ time.Time) string { return orDash(signals.RecordMessage(r.Record(), maxMessage)) }},
 	{"Attached", func(r sessionRow, _ time.Time) string {
-		if !r.polled() {
+		if !r.Polled() {
 			return "-"
 		}
-		return strconv.Itoa(r.status.Attached)
+		return strconv.Itoa(r.Status.Attached)
 	}},
 	{"Changed", func(r sessionRow, now time.Time) string {
-		if r.status == nil {
+		if r.Status == nil {
 			return "-"
 		}
-		return since(r.status.Changed, now)
+		return sessionctl.Since(r.Status.Changed, now)
 	}},
 }
 
 // maxMessage is how many characters of a message `session ls` shows.
 const maxMessage = 60
-
-// stateText renders a session's state as the TUI does: glyph and word, then
-// the blocked kind, the progress, and the sandbox lifecycle, e.g.
-// "▲ blocked · permission · parked" or "● working 40%".
-func stateText(r sessionRow) string {
-	parts := []string{signals.RecordLabel(r.record())}
-	if word := openshell.PhaseWord(r.info.Phase); word != "" {
-		parts = append(parts, word)
-	} else {
-		if r.status != nil && r.status.Exited {
-			parts = append(parts, "exited")
-		}
-		if r.status != nil && r.status.Stale && !r.status.Parked {
-			parts = append(parts, "stale")
-		}
-	}
-	return strings.Join(parts, " · ")
-}
-
-// since renders how long ago t was: "now" under a minute, then minutes,
-// hours and days; "-" for the zero time.
-func since(t, now time.Time) string {
-	if t.IsZero() {
-		return "-"
-	}
-	d := now.Sub(t)
-	switch {
-	case d < time.Minute:
-		return "now"
-	case d < time.Hour:
-		return strconv.Itoa(int(d/time.Minute)) + "m"
-	case d < 48*time.Hour:
-		return strconv.Itoa(int(d/time.Hour)) + "h"
-	default:
-		return strconv.Itoa(int(d/(24*time.Hour))) + "d"
-	}
-}
 
 // sessionJSON is one session of `session ls --json`. Text from the program
 // (app, title, msg) is sanitised but not cut.
@@ -355,15 +269,15 @@ type sessionJSON struct {
 	Unsuspendable string `json:"unsuspendable,omitempty"`
 }
 
-func (r sessionRow) json() sessionJSON {
-	rec := r.record()
+func sessionToJSON(r sessionRow) sessionJSON {
+	rec := r.Record()
 	j := sessionJSON{
-		Repo:     r.info.Repo,
-		Name:     r.info.Name,
-		Profile:  r.info.Profile,
-		Sandbox:  r.info.Sandbox,
-		Phase:    r.info.Phase,
-		Parked:   openshell.PhaseWord(r.info.Phase) == openshell.WordParked,
+		Repo:     r.Info.Repo,
+		Name:     r.Info.Name,
+		Profile:  r.Info.Profile,
+		Sandbox:  r.Info.Sandbox,
+		Phase:    r.Info.Phase,
+		Parked:   r.Parked(),
 		State:    string(rec.State),
 		Kind:     signals.Sanitize(string(rec.Kind), 0),
 		Progress: rec.Progress,
@@ -374,14 +288,14 @@ func (r sessionRow) json() sessionJSON {
 	if j.State == "" {
 		j.State = "none"
 	}
-	if st := r.status; st != nil {
+	if st := r.Status; st != nil {
 		j.Bridges = st.Bridges
 		j.Running, j.Exited, j.ExitCode = st.Running, st.Exited, st.ExitCode
 		j.Stale, j.Error, j.Unsuspendable = st.Stale, signals.Sanitize(st.Error, 0), st.Unsuspendable
 		if !st.Changed.IsZero() {
 			j.Changed = &st.Changed
 		}
-		if r.polled() {
+		if r.Polled() {
 			j.Polled = &st.Polled
 			a := st.Attached
 			j.Attached = &a
@@ -422,28 +336,15 @@ was parked. Listing never resumes a parked session.`,
 			}
 			defer client.Close() //nolint:errcheck
 
-			infos, err := newManager(ctx, client).List(ctx, user)
+			rows, err := sessionctl.List(ctx, newManager(ctx, client), openshell.MonitorFromContext(ctx), user)
 			if err != nil {
 				return err
 			}
 
-			statuses := map[string]*openshell.SessionStatus{}
-			for _, st := range openshell.MonitorFromContext(ctx).ForUser(user.ID()) {
-				statuses[st.Session.Sandbox] = &st
-			}
-			rows := make([]sessionRow, len(infos))
-			for i, info := range infos {
-				rows[i] = sessionRow{info: info, status: statuses[info.Sandbox]}
-			}
-			// List sorts by repository and name; keep that within a state.
-			slices.SortStableFunc(rows, func(a, b sessionRow) int {
-				return a.record().State.Rank() - b.record().State.Rank()
-			})
-
 			if asJSON {
 				out := make([]sessionJSON, len(rows))
 				for i, r := range rows {
-					out[i] = r.json()
+					out[i] = sessionToJSON(r)
 				}
 				return writeJSON(cmd, out)
 			}

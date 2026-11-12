@@ -24,6 +24,9 @@ type Tabs struct {
 	TabActive    lipgloss.Style
 	TabDot       lipgloss.Style
 	UseDot       bool
+	// CollapseBelow, when set, shows only the active tab, as "‹ name ›",
+	// when narrower than this many columns.
+	CollapseBelow int
 }
 
 // New creates a new Tabs component.
@@ -51,6 +54,16 @@ func (t *Tabs) SetTabs(tabs []string) {
 		t.activeTab = 0
 	}
 }
+
+// SetActiveTab makes the tab at index i active.
+func (t *Tabs) SetActiveTab(i int) {
+	if i >= 0 && i < len(t.tabs) {
+		t.activeTab = i
+	}
+}
+
+// ActiveTab returns the index of the active tab.
+func (t *Tabs) ActiveTab() int { return t.activeTab }
 
 // Init implements tea.Model.
 func (t *Tabs) Init() tea.Cmd {
@@ -92,6 +105,10 @@ func (t *Tabs) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 
 // View implements tea.Model.
 func (t *Tabs) View() string {
+	if t.CollapseBelow > 0 && t.common.Width < t.CollapseBelow && t.activeTab < len(t.tabs) {
+		tab := t.tabs[t.activeTab]
+		return t.common.Zone.Mark(tab, t.TabActive.Render("‹ "+tab+" ›"))
+	}
 	s := strings.Builder{}
 	sep := t.TabSeparator
 	for i, tab := range t.tabs {
