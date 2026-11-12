@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -347,20 +349,104 @@ func IsVerbose() bool {
 }
 
 // parseFile parses the given file as a configuration file.
-// The file must be in YAML format.
+// The file must be in YAML format. Unknown keys are rejected.
 func parseFile(cfg *Config, path string) error {
+	if err := decodeFile(cfg, path); err != nil {
+		return err
+	}
+
+	return cfg.Validate()
+}
+
+// decodeFile decodes the YAML file at path into cfg. Keys that do not match a
+// config field are rejected, so a misspelt key fails instead of being
+// silently ignored. Problems with individual keys (unknown keys, values of
+// the wrong type) are returned as a *keyErrors, after the rest of the file has
+// been decoded; any other error means the file could not be read or parsed.
+func decodeFile(cfg *Config, path string) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 
 	defer f.Close() //nolint: errcheck
-	if err := yaml.NewDecoder(f).Decode(cfg); err != nil {
+	dec := yaml.NewDecoder(f)
+	dec.KnownFields(true)
+	if err := dec.Decode(cfg); err != nil {
+		var te *yaml.TypeError
+		if errors.As(err, &te) {
+			ke := &keyErrors{}
+			for _, msg := range te.Errors {
+				ke.errs = append(ke.errs, errors.New(describeKeyError(msg)))
+			}
+			return ke
+		}
 		return fmt.Errorf("decode config: %w", err)
 	}
 
-	return cfg.Validate()
+	return nil
 }
+
+// keyErrors holds the problems with individual keys found while decoding a
+// config file.
+type keyErrors struct {
+	errs []error
+}
+
+func (e *keyErrors) Error() string {
+	return "decode config: " + errors.Join(e.errs...).Error()
+}
+
+func (e *keyErrors) Unwrap() []error {
+	return e.errs
+}
+
+// unknownKeyRe matches yaml.v3's error for a key with no matching field.
+var unknownKeyRe = regexp.MustCompile(`^line (\d+): field (\S+) not found in type (\S+)$`)
+
+// describeKeyError rewrites yaml.v3's unknown-field error, which names the Go
+// type ("field listen_adr not found in type config.SSHConfig"), to name the
+// full config key instead ("line 3: unknown key ssh.listen_adr"). Other
+// messages are returned unchanged.
+func describeKeyError(msg string) string {
+	m := unknownKeyRe.FindStringSubmatch(msg)
+	if m == nil {
+		return msg
+	}
+	section, ok := configSections[m[3]]
+	if !ok {
+		return msg
+	}
+	key := m[2]
+	if section != "" {
+		key = section + "." + key
+	}
+	return fmt.Sprintf("line %s: unknown key %s", m[1], key)
+}
+
+// configSections maps the Go type of each config section, as yaml.v3 prints
+// it ("config.SSHConfig"), to the section's key path ("ssh"). The top-level
+// Config maps to "".
+var configSections = func() map[string]string {
+	m := map[string]string{}
+	var walk func(t reflect.Type, path string)
+	walk = func(t reflect.Type, path string) {
+		m[t.String()] = path
+		for i := range t.NumField() {
+			f := t.Field(i)
+			name, _, _ := strings.Cut(f.Tag.Get("yaml"), ",")
+			if f.Type.Kind() != reflect.Struct || name == "" || name == "-" {
+				continue
+			}
+			if path != "" {
+				name = path + "." + name
+			}
+			walk(f.Type, name)
+		}
+	}
+	walk(reflect.TypeOf(Config{}), "")
+	return m
+}()
 
 // ParseFile parses the config from the default file path.
 // This also calls Validate() on the config.
@@ -370,6 +456,16 @@ func (c *Config) ParseFile() error {
 
 // parseEnv parses the environment variables as a configuration file.
 func parseEnv(cfg *Config) error {
+	if err := applyEnv(cfg); err != nil {
+		return err
+	}
+
+	return cfg.Validate()
+}
+
+// applyEnv overrides cfg with the SOFT_SERVE_* environment variables, without
+// validating the result.
+func applyEnv(cfg *Config) error {
 	// Merge initial admin keys from both config file and environment variables.
 	initialAdminKeys := append([]string{}, cfg.InitialAdminKeys...)
 
@@ -385,7 +481,7 @@ func parseEnv(cfg *Config) error {
 		cfg.InitialAdminKeys = append(cfg.InitialAdminKeys, initialAdminKeys...)
 	}
 
-	return cfg.Validate()
+	return nil
 }
 
 // ParseEnv parses the config from the environment variables.
@@ -395,13 +491,37 @@ func (c *Config) ParseEnv() error {
 }
 
 // Parse parses the config from the default file path and environment variables.
-// This also calls Validate() on the config.
+// This also calls Validate() on the config. See Load.
 func (c *Config) Parse() error {
-	if err := c.ParseFile(); err != nil {
-		return err
+	return c.Load(c.ConfigPath())
+}
+
+// Load reads the config the way the server does: the YAML file at path, then
+// the SOFT_SERVE_* environment variables as overrides, then Validate on the
+// result. The file must exist; Load never writes it.
+//
+// It reports every problem it finds, joined: unknown keys and bad values in
+// the file, environment variables that do not parse, and validation errors.
+// It stops early only when the file cannot be read or is not valid YAML.
+func (c *Config) Load(path string) error {
+	var errs []error
+	if err := decodeFile(c, path); err != nil {
+		var ke *keyErrors
+		if !errors.As(err, &ke) {
+			return err
+		}
+		errs = append(errs, ke.errs...)
 	}
 
-	return c.ParseEnv()
+	if err := applyEnv(c); err != nil {
+		errs = append(errs, err)
+	}
+
+	if err := c.Validate(); err != nil {
+		errs = append(errs, err)
+	}
+
+	return errors.Join(errs...)
 }
 
 // writeConfig writes the configuration to the given file.
@@ -521,7 +641,7 @@ func (c *Config) Validate() error {
 	if !filepath.IsAbs(c.DataPath) {
 		dp, err := filepath.Abs(c.DataPath)
 		if err != nil {
-			return err
+			return fmt.Errorf("data path (SOFT_SERVE_DATA_PATH): %w", err)
 		}
 		c.DataPath = dp
 	}
@@ -574,40 +694,47 @@ func (c *Config) validateOpenShell() error {
 		}
 	}
 
-	if oc.Token != "" && oc.TokenFile != "" {
-		return errOpenShellTokenConflict
+	// Collect every problem rather than stopping at the first, so one run
+	// reports everything that needs fixing.
+	var errs []error
+	conflict := oc.Token != "" && oc.TokenFile != ""
+	if conflict {
+		errs = append(errs, errOpenShellTokenConflict)
 	}
 
 	if !oc.Enabled {
-		return nil
+		return errors.Join(errs...)
 	}
 
 	if oc.GatewayAddress == "" {
-		return fmt.Errorf("openshell: gateway_address is required when openshell is enabled")
+		errs = append(errs, errors.New("openshell: gateway_address is required when openshell is enabled"))
 	}
 	if oc.Image == "" {
-		return fmt.Errorf("openshell: image is required when openshell is enabled")
+		errs = append(errs, errors.New("openshell: image is required when openshell is enabled"))
 	}
 	if (oc.TLSCert == "") != (oc.TLSKey == "") {
-		return fmt.Errorf("openshell: tls_cert and tls_key must be set together")
+		errs = append(errs, errors.New("openshell: tls_cert and tls_key must be set together"))
 	}
 	if oc.TokenTTL <= 0 {
-		return fmt.Errorf("openshell: token_ttl must be positive")
+		errs = append(errs, errors.New("openshell: token_ttl must be positive"))
 	}
 	if strings.TrimSpace(oc.Command) == "" {
-		return fmt.Errorf("openshell: command must not be empty")
+		errs = append(errs, errors.New("openshell: command must not be empty"))
 	}
 	if strings.TrimSpace(oc.Workspace) == "" {
-		return fmt.Errorf("openshell: workspace must not be empty")
+		errs = append(errs, errors.New("openshell: workspace must not be empty"))
 	}
 	// Read the token file once now so a missing or unreadable file fails at
 	// startup. The value is not kept: GatewayToken reads the file again for
-	// every client, which picks up a rotated token.
-	if _, err := oc.GatewayToken(); err != nil {
-		return err
+	// every client, which picks up a rotated token. Skipped when both token
+	// and token_file are set, which is already reported above.
+	if !conflict {
+		if _, err := oc.GatewayToken(); err != nil {
+			errs = append(errs, err)
+		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 // errOpenShellTokenConflict is returned when both token and token_file are set.

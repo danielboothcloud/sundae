@@ -136,6 +136,43 @@ Afterwards:
   `openshell`).
 - SSH is the Service `soft-serve-ssh`, port 23231.
 
+## Check the config before deploying
+
+`soft config check` loads a config file the way `soft serve` does (the file,
+then any `SOFT_SERVE_*` variables as overrides, then validation), prints
+`config OK: <path>` and exits 0, or lists every problem and exits 1. Unknown
+keys are errors, reported with their line, so a misspelt key cannot be
+silently ignored. It never writes a file. This renders the chart's ConfigMap,
+with the same values helmfile uses, and checks it. Run it from the repository
+root; it needs no cluster.
+
+```sh
+mise x helmfile@1.8.2 -- helmfile -f deploy/helmfile.yaml -l name=soft-serve \
+    template --skip-deps \
+    --state-values-set openshell.sandboxImage=ghcr.io/you/soft-serve-sandbox:abc1234 \
+    --state-values-set softServe.image.tag=abc1234 \
+  | mise x yq@4 -- yq 'select(.kind == "ConfigMap") | .data["config.yaml"]' \
+  > /tmp/soft-serve-config.yaml
+SOFT_SERVE_DATA_PATH=/soft-serve go run ./cmd/soft config check --file /tmp/soft-serve-config.yaml
+```
+
+Drop the `--state-values-set` flags if `environment.yaml` already has the
+required values. To check the chart on its own, render it with `helm template
+soft-serve deploy/helm/soft-serve -f <values> --show-only
+templates/configmap.yaml` and pipe it through the same `yq` expression.
+`SOFT_SERVE_DATA_PATH` matches the chart's `dataPath`, which relative paths in
+the config resolve against. Export any other `SOFT_SERVE_*` variables the pod
+gets through `extraEnv` too, since they override the file.
+
+Files the config names (TLS files, SSH keys) need not exist where the check
+runs, with one exception: when OpenShell is enabled and
+`openshell.token_file` is set (as it is when
+`softServe.chartValues.openshell.gatewayToken.secretName` is), the check
+reads that file, as `soft serve` does at startup. Outside the pod it fails
+with `openshell: read token_file: ... no such file or directory`; to check the
+rest, point it at a local file with `--state-values-set
+softServe.chartValues.config.openshell.token_file=/tmp/token`.
+
 ## Things to know
 
 - **One pod.** Soft Serve is a single-replica StatefulSet on one

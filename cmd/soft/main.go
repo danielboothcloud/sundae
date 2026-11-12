@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/soft-serve/cmd/soft/admin"
 	"github.com/charmbracelet/soft-serve/cmd/soft/browse"
+	configcmd "github.com/charmbracelet/soft-serve/cmd/soft/config"
 	"github.com/charmbracelet/soft-serve/cmd/soft/hook"
 	"github.com/charmbracelet/soft-serve/cmd/soft/serve"
 	"github.com/charmbracelet/soft-serve/pkg/config"
@@ -76,6 +77,7 @@ func init() {
 		hook.Command,
 		admin.Command,
 		browse.Command,
+		configcmd.Command,
 	)
 	rootCmd.CompletionOptions.HiddenDefaultCmd = true
 
@@ -100,14 +102,14 @@ func init() {
 func main() {
 	ctx := context.Background()
 	cfg := config.DefaultConfig()
-	if cfg.Exist() {
-		if err := cfg.Parse(); err != nil {
+	if loadsConfig(os.Args[1:]) {
+		if cfg.Exist() {
+			if err := cfg.Parse(); err != nil {
+				log.Fatal(fmt.Errorf("config file %s: %w", cfg.ConfigPath(), err))
+			}
+		} else if err := cfg.ParseEnv(); err != nil {
 			log.Fatal(err)
 		}
-	}
-
-	if err := cfg.ParseEnv(); err != nil {
-		log.Fatal(err)
 	}
 
 	ctx = config.WithContext(ctx, cfg)
@@ -138,4 +140,21 @@ func main() {
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		os.Exit(1)
 	}
+}
+
+// loadsConfig reports whether the command selected by args needs the server
+// config loaded before it runs. `soft config` loads (and reports on) the config
+// itself, so it must not be stopped by a bad config here, and must not open
+// the log file the config names.
+func loadsConfig(args []string) bool {
+	c, _, err := rootCmd.Find(args)
+	if err != nil {
+		return true
+	}
+	for ; c != nil; c = c.Parent() {
+		if c == configcmd.Command {
+			return false
+		}
+	}
+	return true
 }

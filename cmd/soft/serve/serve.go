@@ -33,17 +33,18 @@ var (
 			ctx := c.Context()
 			cfg := config.DefaultConfig()
 			if cfg.Exist() {
-				if err := cfg.ParseFile(); err != nil {
-					return fmt.Errorf("parse config file: %w", err)
+				// The file, then SOFT_SERVE_* overrides, then validation,
+				// the same as `soft config check`.
+				if err := cfg.Parse(); err != nil {
+					return fmt.Errorf("config file %s: %w", cfg.ConfigPath(), err)
 				}
 			} else {
 				if err := cfg.WriteConfig(); err != nil {
 					return fmt.Errorf("write config file: %w", err)
 				}
-			}
-
-			if err := cfg.ParseEnv(); err != nil {
-				return fmt.Errorf("parse environment variables: %w", err)
+				if err := cfg.ParseEnv(); err != nil {
+					return fmt.Errorf("parse environment variables: %w", err)
+				}
 			}
 
 			// Create custom hooks directory if it doesn't exist

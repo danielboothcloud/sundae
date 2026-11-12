@@ -1,6 +1,8 @@
 package config
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -303,6 +305,10 @@ func TestValidateOpenShell(t *testing.T) {
 		"zero ttl":         {mutate: func(c *Config) { c.OpenShell.TokenTTL = 0 }, err: "token_ttl"},
 		"empty command":    {mutate: func(c *Config) { c.OpenShell.Command = " " }, err: "command"},
 		"blank workspace":  {mutate: func(c *Config) { c.OpenShell.Workspace = " " }, err: "workspace"},
+		"every problem reported": {mutate: func(c *Config) {
+			c.OpenShell.GatewayAddress = ""
+			c.OpenShell.Image = ""
+		}, err: "openshell: gateway_address is required when openshell is enabled\nopenshell: image is required when openshell is enabled"},
 		"disabled ignores missing fields": {mutate: func(c *Config) {
 			c.OpenShell.Enabled = false
 			c.OpenShell.GatewayAddress = ""
@@ -450,4 +456,91 @@ func TestOpenShellConfigFileRoundTrip(t *testing.T) {
 	is.Equal(got.OpenShell.Command, `bash -lc "echo hi"`)
 	is.Equal(got.OpenShell.TokenFile, filepath.Join(cfg.DataPath, "gw-token"))
 	is.Equal(got.OpenShell.Token, "")
+}
+
+func TestParseFileRejectsUnknownKeys(t *testing.T) {
+	is := is.New(t)
+	td := t.TempDir()
+	p := filepath.Join(td, "config.yaml")
+	is.NoErr(os.WriteFile(p, []byte(`title: "typo"
+ssh:
+  listen_adr: ":23231"
+http:
+  cors:
+    allowed_origin: []
+openshell:
+  gateway: "openshell:8443"
+`), 0o600))
+
+	cfg := &Config{DataPath: td}
+	err := parseFile(cfg, p)
+	is.True(err != nil)
+	for _, want := range []string{
+		"line 1: unknown key title",
+		"line 3: unknown key ssh.listen_adr",
+		"line 6: unknown key http.cors.allowed_origin",
+		"line 8: unknown key openshell.gateway",
+	} {
+		is.True(strings.Contains(err.Error(), want)) // missing: want
+	}
+}
+
+func TestDefaultConfigFileParsesStrictly(t *testing.T) {
+	is := is.New(t)
+	cfg := DefaultConfig()
+	cfg.DataPath = t.TempDir()
+	is.NoErr(cfg.WriteConfig())
+
+	got := &Config{DataPath: cfg.DataPath}
+	is.NoErr(parseFile(got, cfg.ConfigPath()))
+	is.Equal(got.Name, "Soft Serve")
+}
+
+func TestLoadReportsEveryProblem(t *testing.T) {
+	is := is.New(t)
+	td := t.TempDir()
+	t.Setenv("SOFT_SERVE_DATA_PATH", td)
+	t.Setenv("SOFT_SERVE_OPENSHELL_TOKEN_TTL", "0s")
+	p := filepath.Join(td, "config.yaml")
+	is.NoErr(os.WriteFile(p, []byte(`title: "typo"
+openshell:
+  enabled: true
+`), 0o600))
+
+	err := DefaultConfig().Load(p)
+	is.True(err != nil)
+	for _, want := range []string{
+		"line 1: unknown key title",
+		"openshell: gateway_address is required",
+		"openshell: image is required",
+		"openshell: token_ttl must be positive", // from the environment override
+	} {
+		is.True(strings.Contains(err.Error(), want)) // missing: want
+	}
+}
+
+func TestLoadAppliesEnvBeforeValidating(t *testing.T) {
+	is := is.New(t)
+	td := t.TempDir()
+	t.Setenv("SOFT_SERVE_DATA_PATH", td)
+	t.Setenv("SOFT_SERVE_OPENSHELL_GATEWAY_ADDRESS", "openshell:8443")
+	p := filepath.Join(td, "config.yaml")
+	is.NoErr(os.WriteFile(p, []byte(`openshell:
+  enabled: true
+  image: "sandbox:latest"
+`), 0o600))
+
+	cfg := DefaultConfig()
+	is.NoErr(cfg.Load(p))
+	is.Equal(cfg.OpenShell.GatewayAddress, "openshell:8443")
+	is.Equal(cfg.OpenShell.Image, "sandbox:latest")
+}
+
+func TestLoadMissingFile(t *testing.T) {
+	is := is.New(t)
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	err := DefaultConfig().Load(p)
+	is.True(errors.Is(err, fs.ErrNotExist))
+	_, err = os.Stat(p)
+	is.True(errors.Is(err, fs.ErrNotExist)) // Load must not write the file
 }
