@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -307,6 +308,36 @@ func TestValidateOpenShell(t *testing.T) {
 			c.OpenShell.GatewayAddress = ""
 			c.OpenShell.Image = ""
 		}},
+		"token file": {mutate: func(c *Config) {
+			c.OpenShell.TokenFile = writeTokenFile(t, c.DataPath, "gw-token", "gw-secret\n")
+		}},
+		"relative token file": {mutate: func(c *Config) {
+			writeTokenFile(t, c.DataPath, "gw-token", "gw-secret\n")
+			c.OpenShell.TokenFile = "gw-token"
+		}},
+		"token and token file": {mutate: func(c *Config) {
+			c.OpenShell.Token = "gw-secret"
+			c.OpenShell.TokenFile = writeTokenFile(t, c.DataPath, "gw-token", "gw-secret\n")
+		}, err: "token and token_file are mutually exclusive"},
+		"token and token file while disabled": {mutate: func(c *Config) {
+			c.OpenShell.Enabled = false
+			c.OpenShell.Token = "gw-secret"
+			c.OpenShell.TokenFile = "gw-token"
+		}, err: "token and token_file are mutually exclusive"},
+		"missing token file": {mutate: func(c *Config) {
+			c.OpenShell.TokenFile = "does-not-exist"
+		}, err: "read token_file"},
+		"unreadable token file": {mutate: func(c *Config) {
+			// A directory exists but cannot be read as a file.
+			c.OpenShell.TokenFile = c.DataPath
+		}, err: "read token_file"},
+		"empty token file": {mutate: func(c *Config) {
+			c.OpenShell.TokenFile = writeTokenFile(t, c.DataPath, "gw-token", " \n")
+		}, err: "is empty"},
+		"disabled ignores missing token file": {mutate: func(c *Config) {
+			c.OpenShell.Enabled = false
+			c.OpenShell.TokenFile = "does-not-exist"
+		}},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -324,6 +355,79 @@ func TestValidateOpenShell(t *testing.T) {
 	}
 }
 
+func writeTokenFile(t *testing.T, dir, name, content string) string {
+	t.Helper()
+	p := filepath.Join(dir, name)
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestParseOpenShellTokenFileEnv(t *testing.T) {
+	is := is.New(t)
+	td := t.TempDir()
+	writeTokenFile(t, td, "gw-token", "gw-secret\r\n")
+	envs := map[string]string{
+		"SOFT_SERVE_DATA_PATH":                 td,
+		"SOFT_SERVE_OPENSHELL_ENABLED":         "true",
+		"SOFT_SERVE_OPENSHELL_GATEWAY_ADDRESS": "https://openshell.example:8080",
+		"SOFT_SERVE_OPENSHELL_IMAGE":           "ghcr.io/example/sandbox:1",
+		"SOFT_SERVE_OPENSHELL_TOKEN_FILE":      "gw-token",
+	}
+	for k, v := range envs {
+		t.Setenv(k, v)
+	}
+	cfg := DefaultConfig()
+	is.NoErr(cfg.ParseEnv())
+	// Relative paths resolve against the data path, like the TLS files.
+	is.Equal(cfg.OpenShell.TokenFile, filepath.Join(td, "gw-token"))
+	// The token is not copied into the config.
+	is.Equal(cfg.OpenShell.Token, "")
+	token, err := cfg.OpenShell.GatewayToken()
+	is.NoErr(err)
+	is.Equal(token, "gw-secret")
+
+	// The path is passed on; the token never is.
+	environ := cfg.Environ()
+	is.True(slices.Contains(environ, "SOFT_SERVE_OPENSHELL_TOKEN_FILE="+filepath.Join(td, "gw-token")))
+	for _, e := range environ {
+		is.True(!strings.HasPrefix(e, "SOFT_SERVE_OPENSHELL_TOKEN="))
+	}
+}
+
+func TestOpenShellGatewayToken(t *testing.T) {
+	is := is.New(t)
+	td := t.TempDir()
+
+	// No token configured.
+	token, err := OpenShellConfig{}.GatewayToken()
+	is.NoErr(err)
+	is.Equal(token, "")
+
+	// Inline token.
+	token, err = OpenShellConfig{Token: "inline"}.GatewayToken()
+	is.NoErr(err)
+	is.Equal(token, "inline")
+
+	// Only trailing whitespace is trimmed.
+	p := writeTokenFile(t, td, "gw-token", "  first \n\n")
+	oc := OpenShellConfig{TokenFile: p}
+	token, err = oc.GatewayToken()
+	is.NoErr(err)
+	is.Equal(token, "  first")
+
+	// The file is read on every call, so a rotated token is picked up.
+	writeTokenFile(t, td, "gw-token", "second\n")
+	token, err = oc.GatewayToken()
+	is.NoErr(err)
+	is.Equal(token, "second")
+
+	// Both set is refused here too, not only by Validate.
+	_, err = OpenShellConfig{Token: "inline", TokenFile: p}.GatewayToken()
+	is.True(err != nil)
+}
+
 func TestOpenShellConfigFileRoundTrip(t *testing.T) {
 	is := is.New(t)
 	cfg := DefaultConfig()
@@ -331,6 +435,7 @@ func TestOpenShellConfigFileRoundTrip(t *testing.T) {
 	cfg.OpenShell.Enabled = true
 	cfg.OpenShell.GatewayAddress = "openshell:8443"
 	cfg.OpenShell.Image = "sandbox:latest"
+	cfg.OpenShell.TokenFile = writeTokenFile(t, cfg.DataPath, "gw-token", "gw-secret\n")
 	cfg.OpenShell.TokenTTL = 90 * time.Minute
 	cfg.OpenShell.Command = `bash -lc "echo hi"`
 	is.NoErr(cfg.WriteConfig())
@@ -343,4 +448,6 @@ func TestOpenShellConfigFileRoundTrip(t *testing.T) {
 	is.Equal(got.OpenShell.Workspace, "default")
 	is.Equal(got.OpenShell.TokenTTL, 90*time.Minute)
 	is.Equal(got.OpenShell.Command, `bash -lc "echo hi"`)
+	is.Equal(got.OpenShell.TokenFile, filepath.Join(cfg.DataPath, "gw-token"))
+	is.Equal(got.OpenShell.Token, "")
 }

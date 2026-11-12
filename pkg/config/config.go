@@ -1,12 +1,14 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/caarlos0/env/v11"
 	"github.com/charmbracelet/soft-serve/pkg/access"
@@ -159,7 +161,15 @@ type OpenShellConfig struct {
 	Image string `env:"IMAGE" yaml:"image"`
 
 	// Token is an optional bearer token used to authenticate to the gateway.
+	// Mutually exclusive with TokenFile.
 	Token string `env:"TOKEN" yaml:"token"`
+
+	// TokenFile is the path to a file holding the gateway bearer token, so
+	// the token itself stays out of the config file. Trailing whitespace is
+	// trimmed. The file is read again whenever a gateway client is created,
+	// so a token rotated in place is picked up without a restart. Mutually
+	// exclusive with Token.
+	TokenFile string `env:"TOKEN_FILE" yaml:"token_file"`
 
 	// TLSCA is the path to the CA certificate used to verify the gateway.
 	TLSCA string `env:"TLS_CA" yaml:"tls_ca"`
@@ -296,6 +306,7 @@ func (c *Config) Environ() []string {
 		fmt.Sprintf("SOFT_SERVE_OPENSHELL_GATEWAY_ADDRESS=%s", c.OpenShell.GatewayAddress),
 		fmt.Sprintf("SOFT_SERVE_OPENSHELL_WORKSPACE=%s", c.OpenShell.Workspace),
 		fmt.Sprintf("SOFT_SERVE_OPENSHELL_IMAGE=%s", c.OpenShell.Image),
+		fmt.Sprintf("SOFT_SERVE_OPENSHELL_TOKEN_FILE=%s", c.OpenShell.TokenFile),
 		fmt.Sprintf("SOFT_SERVE_OPENSHELL_TLS_CA=%s", c.OpenShell.TLSCA),
 		fmt.Sprintf("SOFT_SERVE_OPENSHELL_TLS_CERT=%s", c.OpenShell.TLSCert),
 		fmt.Sprintf("SOFT_SERVE_OPENSHELL_TLS_KEY=%s", c.OpenShell.TLSKey),
@@ -557,10 +568,14 @@ func (c *Config) Validate() error {
 func (c *Config) validateOpenShell() error {
 	oc := &c.OpenShell
 	oc.CloneURL = strings.TrimSuffix(oc.CloneURL, "/")
-	for _, p := range []*string{&oc.TLSCA, &oc.TLSCert, &oc.TLSKey} {
+	for _, p := range []*string{&oc.TLSCA, &oc.TLSCert, &oc.TLSKey, &oc.TokenFile} {
 		if *p != "" && !filepath.IsAbs(*p) {
 			*p = filepath.Join(c.DataPath, *p)
 		}
+	}
+
+	if oc.Token != "" && oc.TokenFile != "" {
+		return errOpenShellTokenConflict
 	}
 
 	if !oc.Enabled {
@@ -585,8 +600,40 @@ func (c *Config) validateOpenShell() error {
 	if strings.TrimSpace(oc.Workspace) == "" {
 		return fmt.Errorf("openshell: workspace must not be empty")
 	}
+	// Read the token file once now so a missing or unreadable file fails at
+	// startup. The value is not kept: GatewayToken reads the file again for
+	// every client, which picks up a rotated token.
+	if _, err := oc.GatewayToken(); err != nil {
+		return err
+	}
 
 	return nil
+}
+
+// errOpenShellTokenConflict is returned when both token and token_file are set.
+var errOpenShellTokenConflict = errors.New("openshell: token and token_file are mutually exclusive; set only one")
+
+// GatewayToken returns the bearer token for the OpenShell gateway: Token, or
+// the contents of TokenFile with trailing whitespace trimmed. It returns ""
+// when neither is set. TokenFile is read on every call.
+func (oc OpenShellConfig) GatewayToken() (string, error) {
+	if oc.TokenFile == "" {
+		return oc.Token, nil
+	}
+	if oc.Token != "" {
+		return "", errOpenShellTokenConflict
+	}
+
+	bts, err := os.ReadFile(oc.TokenFile)
+	if err != nil {
+		return "", fmt.Errorf("openshell: read token_file: %w", err)
+	}
+	token := strings.TrimRightFunc(string(bts), unicode.IsSpace)
+	if token == "" {
+		return "", fmt.Errorf("openshell: token_file %q is empty", oc.TokenFile)
+	}
+
+	return token, nil
 }
 
 // OpenShellCloneURL returns the base HTTP URL sandboxes use to reach this

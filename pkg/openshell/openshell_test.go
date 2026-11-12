@@ -2,6 +2,8 @@ package openshell
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -9,6 +11,7 @@ import (
 	v1 "github.com/NVIDIA/OpenShell/sdk/go/openshell/v1"
 	"github.com/NVIDIA/OpenShell/sdk/go/openshell/v1/fake"
 	"github.com/NVIDIA/OpenShell/sdk/go/openshell/v1/types"
+	"github.com/charmbracelet/soft-serve/pkg/config"
 )
 
 var dnsLabel = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
@@ -209,4 +212,24 @@ func TestEnsureSandboxStates(t *testing.T) {
 	if _, _, err := c.EnsureSandbox(ctx, "soft-a-broken", req); err == nil {
 		t.Fatal("error phase: expected error")
 	}
+}
+
+func TestNewReadsTokenFile(t *testing.T) {
+	cfg := config.OpenShellConfig{
+		GatewayAddress: "https://openshell.invalid:8080",
+		Workspace:      "default",
+		TokenFile:      filepath.Join(t.TempDir(), "missing"),
+	}
+	if _, err := New(cfg); err == nil || !strings.Contains(err.Error(), "token_file") {
+		t.Fatalf("missing token file: want a token_file error, got %v", err)
+	}
+
+	if err := os.WriteFile(cfg.TokenFile, []byte("gw-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := New(cfg)
+	if err != nil {
+		t.Fatalf("token file present: %v", err)
+	}
+	_ = c.Close()
 }

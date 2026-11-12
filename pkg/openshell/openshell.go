@@ -93,11 +93,16 @@ type Client interface {
 func IsNotFound(err error) bool { return v1.IsNotFound(err) }
 
 // New returns an SDK-backed Client for the given configuration. The gRPC
-// connection is established lazily on first use.
+// connection is established lazily on first use. A token_file is read here,
+// on every call, so a rotated token takes effect for the next client.
 func New(cfg config.OpenShellConfig) (Client, error) {
 	sdkCfg := v1.Config{Address: cfg.GatewayAddress}
-	if cfg.Token != "" {
-		sdkCfg.Auth = v1.StaticToken(cfg.Token)
+	token, err := cfg.GatewayToken()
+	if err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+	if token != "" {
+		sdkCfg.Auth = v1.StaticToken(token)
 	}
 	if cfg.TLSCA != "" || cfg.TLSCert != "" || cfg.TLSKey != "" || cfg.Insecure {
 		sdkCfg.TLS = &v1.TLSConfig{

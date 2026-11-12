@@ -22,7 +22,9 @@ agentSandbox:
 
 openshell:
   # REQUIRED. The default image for the sandboxes Soft Serve starts. It must
-  # provide git and jj, and the cluster must be able to pull it.
+  # provide git and jj, and the cluster must be able to pull it. Build it from
+  # sandbox/Containerfile and push it (README.md, step 1, "Sandbox"), then set
+  # the image and tag you pushed here, e.g. ghcr.io/you/soft-serve-sandbox:abc1234.
   sandboxImage: ""
 
   # Extra values for the OpenShell chart, merged over what helmfile sets (see
@@ -68,4 +70,14 @@ softServe:
 
   # Extra values for the Soft Serve chart, merged over what helmfile sets (see
   # values/soft-serve.yaml.gotmpl and helm/soft-serve/values.yaml).
+  #
+  # The gateway authenticates Soft Serve by its client certificate, so no
+  # gateway token is set. If your gateway also wants a bearer token, put it in
+  # a Secret in `namespace` and name it here; the chart mounts it as a file and
+  # sets openshell.token_file (a token is never put in the ConfigMap):
+  #   chartValues:
+  #     openshell:
+  #       gatewayToken:
+  #         secretName: openshell-gateway-token
+  #         key: token
   chartValues: {}

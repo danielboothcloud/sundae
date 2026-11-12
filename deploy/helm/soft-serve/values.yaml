@@ -38,8 +38,10 @@ configMountPath: /etc/soft-serve
 # Relative paths are resolved against the data path.
 #
 # Do NOT put secrets here: this map becomes a ConfigMap. The chart refuses to
-# render when config.openshell.token is set. For secret values, see
-# `secretMounts` (files) and `extraEnv` (environment variables from Secrets).
+# render when config.openshell.token is set; use openshell.gatewayToken, which
+# mounts the token from a Secret and sets config.openshell.token_file. For
+# other secret values, see `secretMounts` (files) and `extraEnv` (environment
+# variables from Secrets).
 #
 # The listen ports are read from the listen_addr values: the container ports,
 # Service target ports and probes all follow them.
@@ -132,6 +134,10 @@ config:
     # The default sandbox image. It must provide git and jj. Required when
     # enabled.
     image: ""
+    # Path to a file holding the gateway bearer token. Leave empty to have the
+    # chart point it at the mounted openshell.gatewayToken secret, if any. Do
+    # not set `token` here: the chart refuses it.
+    token_file: ""
     # Client TLS files. Leave these empty to have the chart point them at the
     # mounted openshell.clientTLS secret (ca.crt, tls.crt, tls.key).
     tls_ca: ""
@@ -160,6 +166,17 @@ openshell:
     # (for a plaintext or token-only gateway).
     secretName: openshell-client-tls
     mountPath: /etc/openshell-tls
+  # Optional bearer token for the gateway, from an existing Secret in this
+  # namespace. Off by default: the OpenShell chart's gateway authenticates
+  # Soft Serve by its client certificate (clientTLS above). When secretName is
+  # set, the one key is mounted read-only as <mountPath>/<key> and
+  # config.openshell.token_file points at it. The directory is mounted rather
+  # than the single file, so a rotated Secret reaches the pod; Soft Serve
+  # reads the file again for every session command.
+  gatewayToken:
+    secretName: ""
+    key: token
+    mountPath: /etc/openshell-token
 
 # Extra existing Secrets mounted read-only as files, for anything the config
 # refers to by path (http.tls_key_path, ssh.key_path, ...).
@@ -169,13 +186,15 @@ secretMounts: []
 #    mountPath: /etc/soft-serve-tls
 
 # Extra environment variables. SOFT_SERVE_* variables override the config
-# file, so this is how a secret value gets in without touching the ConfigMap:
+# file, so this is how a secret value without a *_file setting gets in
+# without touching the ConfigMap. For the gateway token, use
+# openshell.gatewayToken instead.
 extraEnv: []
-#  - name: SOFT_SERVE_OPENSHELL_TOKEN
+#  - name: SOFT_SERVE_DB_DATA_SOURCE
 #    valueFrom:
 #      secretKeyRef:
-#        name: openshell-gateway-token
-#        key: token
+#        name: soft-serve-postgres
+#        key: data-source
 
 persistence:
   # When false the data lives in an emptyDir and is lost with the pod.

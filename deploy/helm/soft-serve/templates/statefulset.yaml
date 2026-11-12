@@ -1,6 +1,7 @@
 {{- $cfg := .Values.config }}
 {{- $fullname := include "soft-serve.fullname" . }}
 {{- $openshellTLS := include "soft-serve.openshellTLSMounted" . }}
+{{- $openshellToken := include "soft-serve.openshellTokenMounted" . }}
 {{- $httpScheme := ternary "HTTPS" "HTTP" (and (not (empty $cfg.http.tls_key_path)) (not (empty $cfg.http.tls_cert_path))) }}
 apiVersion: apps/v1
 kind: StatefulSet
@@ -141,6 +142,12 @@ spec:
               mountPath: {{ .Values.openshell.clientTLS.mountPath | quote }}
               readOnly: true
             {{- end }}
+            {{- if $openshellToken }}
+            # A directory mount, not subPath, so a rotated Secret reaches the pod.
+            - name: openshell-gateway-token
+              mountPath: {{ .Values.openshell.gatewayToken.mountPath | quote }}
+              readOnly: true
+            {{- end }}
             {{- range .Values.secretMounts }}
             - name: {{ printf "secret-%s" .name | quote }}
               mountPath: {{ .mountPath | quote }}
@@ -156,6 +163,17 @@ spec:
         - name: openshell-client-tls
           secret:
             secretName: {{ .Values.openshell.clientTLS.secretName | quote }}
+            # Readable by the pod's fsGroup only.
+            defaultMode: 0440
+        {{- end }}
+        {{- if $openshellToken }}
+        - name: openshell-gateway-token
+          secret:
+            secretName: {{ .Values.openshell.gatewayToken.secretName | quote }}
+            # Only the token key, as the file config.openshell.token_file names.
+            items:
+              - key: {{ .Values.openshell.gatewayToken.key | quote }}
+                path: {{ .Values.openshell.gatewayToken.key | quote }}
             # Readable by the pod's fsGroup only.
             defaultMode: 0440
         {{- end }}

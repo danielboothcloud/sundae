@@ -369,12 +369,17 @@ and the OpenShell gateway is the source of truth. To enable it:
 openshell:
   enabled: true
   # The OpenShell gateway gRPC address (http:// = plaintext, https:// or no scheme = TLS).
-  gateway_address: "https://openshell-gateway.openshell.svc:8443"
+  gateway_address: "https://openshell.openshell.svc.cluster.local:8080"
   workspace: "default"
   # Default sandbox image. It must provide git and jj.
   image: "ghcr.io/example/agent-sandbox:latest"
-  # Optional bearer token for the gateway.
+  # Optional bearer token for the gateway. Prefer token_file, which keeps the
+  # token out of this file. Set at most one of the two.
   #token: ""
+  # File holding the bearer token, e.g. mounted from a secret. Trailing
+  # whitespace is trimmed. The file is read again for every session command,
+  # so a token rotated in place needs no restart.
+  #token_file: "/etc/openshell-token/token"
   # Client TLS files, e.g. mounted from the openshell-client-tls secret.
   tls_ca: "/etc/openshell-tls/ca.crt"
   tls_cert: "/etc/openshell-tls/tls.crt"
@@ -382,7 +387,7 @@ openshell:
   insecure: false
   # Internal HTTP base URL that sandboxes use to clone and push.
   # Defaults to http.public_url.
-  clone_url: "http://soft-serve.soft-serve.svc.cluster.local:23232"
+  clone_url: "http://soft-serve-http.openshell.svc.cluster.local:23232"
   # Lifetime of the access token issued to each sandbox.
   token_ttl: "24h"
   # What runs when you attach.
@@ -392,7 +397,9 @@ openshell:
 Every setting can also be set with a `SOFT_SERVE_OPENSHELL_*` environment
 variable, for example `SOFT_SERVE_OPENSHELL_ENABLED=true` or
 `SOFT_SERVE_OPENSHELL_GATEWAY_ADDRESS=...`. When OpenShell is enabled,
-`gateway_address` and `image` are required.
+`gateway_address` and `image` are required, and a `token_file`, if set, must be
+readable and not empty. Setting both `token` and `token_file`
+(`SOFT_SERVE_OPENSHELL_TOKEN_FILE`) is an error.
 
 **Client TLS secret.** In Kubernetes, mount the gateway's client certificate
 secret, typically `openshell-client-tls`, into the Soft Serve pod and point the
@@ -434,7 +441,7 @@ network_policies:
   soft_serve_git:
     name: soft-serve-git
     endpoints:
-      - host: soft-serve.soft-serve.svc.cluster.local
+      - host: soft-serve-http.openshell.svc.cluster.local
         port: 23232
         protocol: rest
         access: read-write

@@ -81,10 +81,31 @@ true
 {{- end }}
 
 {{/*
+Whether the OpenShell gateway token secret is mounted.
+*/}}
+{{- define "soft-serve.openshellTokenMounted" -}}
+{{- $os := .Values.config.openshell | default dict -}}
+{{- $tok := .Values.openshell.gatewayToken | default dict -}}
+{{- if and $os.enabled $tok.secretName -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
+The path of the mounted OpenShell gateway token file.
+*/}}
+{{- define "soft-serve.openshellTokenPath" -}}
+{{- $tok := .Values.openshell.gatewayToken -}}
+{{- printf "%s/%s" ($tok.mountPath | trimSuffix "/") (required "openshell.gatewayToken.key is required when openshell.gatewayToken.secretName is set" $tok.key) -}}
+{{- end }}
+
+{{/*
 The Soft Serve config file: .Values.config, plus
   - initial_admin_keys merged with .Values.initialAdminKeys;
   - when OpenShell is enabled and the client TLS secret is mounted, any empty
-    openshell.tls_* path pointed at that mount.
+    openshell.tls_* path pointed at that mount;
+  - when OpenShell is enabled and the gateway token secret is mounted, an
+    empty openshell.token_file pointed at the mounted key.
 Refuses to render secret material or an OpenShell section Soft Serve itself
 would reject at startup.
 */}}
@@ -101,7 +122,7 @@ would reject at startup.
 
 {{- $os := get $cfg "openshell" | default dict -}}
 {{- if get $os "token" -}}
-{{- fail "config.openshell.token must not be set: the config is rendered into a ConfigMap. Pass SOFT_SERVE_OPENSHELL_TOKEN from a Secret through extraEnv instead." -}}
+{{- fail "config.openshell.token must not be set: the config is rendered into a ConfigMap. Put the token in a Secret and set openshell.gatewayToken.secretName instead; the chart mounts it and sets config.openshell.token_file." -}}
 {{- end -}}
 {{- if get $os "enabled" -}}
 {{- if not (get $os "gateway_address") -}}
@@ -117,6 +138,9 @@ would reject at startup.
 {{- $_ := set $os $field (printf "%s/%s" $dir $file) -}}
 {{- end -}}
 {{- end -}}
+{{- end -}}
+{{- if and (include "soft-serve.openshellTokenMounted" .) (not (get $os "token_file")) -}}
+{{- $_ := set $os "token_file" (include "soft-serve.openshellTokenPath" .) -}}
 {{- end -}}
 {{- if ne (empty (get $os "tls_cert")) (empty (get $os "tls_key")) -}}
 {{- fail "config.openshell.tls_cert and config.openshell.tls_key must be set together" -}}

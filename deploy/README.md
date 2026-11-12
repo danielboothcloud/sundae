@@ -24,12 +24,13 @@ Nothing here has been deployed to a cluster yet. See
 - `helm` 4, `helmfile` 1.8 (`mise x helmfile@1.8.2 -- helmfile ...`), `git`
   (helmfile fetches the Agent Sandbox chart from GitHub), and the `helm-diff`
   plugin if you want `helmfile diff` or `apply`.
-- `podman` or `docker` to build the image, and push access to the registry.
-- A sandbox image that provides `git` and `jj`.
+- `podman` or `docker` to build the images, and push access to the registry.
 
-## 1. Build and push the image
+## 1. Build and push the images
 
 Run from the repository root. Build for the architecture of the cluster nodes.
+
+### Soft Serve
 
 ```sh
 IMAGE=ghcr.io/danielboothcloud/soft-serve   # placeholder: confirm the registry path
@@ -49,6 +50,39 @@ podman push "$IMAGE:$TAG"
 `docker build` takes the same arguments. The repository's `Dockerfile` is the
 goreleaser one and is not used here.
 
+### Sandbox
+
+The image the OpenShell sandboxes run, built from
+[`sandbox/Containerfile`](sandbox/Containerfile): Ubuntu 24.04 (the base
+OpenShell uses for its own default sandbox image) with `git`, `jj` 0.47.1,
+`bash`, `ca-certificates`, `curl`, `openssh-client`, `less`, `nano` and
+`vi`. Its comments list what OpenShell expects of a sandbox image.
+
+```sh
+SANDBOX_IMAGE=ghcr.io/danielboothcloud/soft-serve-sandbox   # placeholder: confirm the registry path
+TAG="$(git rev-parse --short HEAD)"
+
+podman build -f deploy/sandbox/Containerfile \
+  --platform linux/amd64 \
+  -t "$SANDBOX_IMAGE:$TAG" deploy/sandbox
+
+podman push "$SANDBOX_IMAGE:$TAG"
+```
+
+Use `--platform linux/arm64` for arm64 nodes. For both at once, build a
+manifest list with `--platform linux/amd64,linux/arm64 --manifest
+"$SANDBOX_IMAGE:$TAG"` instead of `-t`, then `podman manifest push --all
+"$SANDBOX_IMAGE:$TAG"`.
+
+The image declares the user `sandbox`, UID and GID 10001, with `/sandbox` as
+its home. On Kubernetes OpenShell runs sandboxes as its own sandbox UID/GID
+(10001 unless the OpenShell chart's `server.sandboxUid` / `server.sandboxGid`
+are set), not as the image's `USER`. If you set those, rebuild with
+`--build-arg SANDBOX_UID=<uid> --build-arg SANDBOX_GID=<gid>` so the passwd
+entry matches.
+
+Set `openshell.sandboxImage` to `$SANDBOX_IMAGE:$TAG` in step 2.
+
 ## 2. Set the values
 
 Edit [`environment.yaml`](environment.yaml), or pass the same keys with
@@ -56,8 +90,8 @@ Edit [`environment.yaml`](environment.yaml), or pass the same keys with
 
 | Value | Required | What it is |
 | --- | --- | --- |
-| `openshell.sandboxImage` | yes | Default image for the sandboxes Soft Serve starts. |
-| `softServe.image.tag` | yes | The tag pushed in step 1. |
+| `openshell.sandboxImage` | yes | Default image for the sandboxes Soft Serve starts, built in step 1. |
+| `softServe.image.tag` | yes | The Soft Serve tag pushed in step 1. |
 | `softServe.image.repository` | check | Defaults to the placeholder `ghcr.io/danielboothcloud/soft-serve`. |
 | `softServe.initialAdminKeys` | in practice | Admin public keys. Without one nobody can administer the server. |
 | `softServe.ssh.serviceType` | in practice | `LoadBalancer` or `NodePort` to reach SSH from outside the cluster. |
@@ -98,8 +132,8 @@ Afterwards:
 - Sandboxes clone from
   `http://soft-serve-http.<namespace>.svc.cluster.local:23232`. The sandbox
   network policy must allow that host and port (see "Sandbox egress" in the
-  top-level README; the host name there is an example and differs from this
-  one).
+  top-level README, whose example uses this host for the default namespace
+  `openshell`).
 - SSH is the Service `soft-serve-ssh`, port 23231.
 
 ## Things to know
@@ -111,8 +145,16 @@ Afterwards:
   annotation. SSH sessions are dropped when the pod restarts.
 - **No secrets in the ConfigMap.** The chart refuses `config.openshell.token`.
   Secret files come from existing Secrets (`openshell.clientTLS`,
-  `secretMounts`); a secret value can be passed as a `SOFT_SERVE_*` variable
-  through `extraEnv`.
+  `openshell.gatewayToken`, `secretMounts`); a secret value with no file
+  setting can be passed as a `SOFT_SERVE_*` variable through `extraEnv`.
+- **No gateway token by default.** The gateway authenticates Soft Serve by
+  its client certificate. If it also needs a bearer token, put the token in a
+  Secret in the namespace and set
+  `softServe.chartValues.openshell.gatewayToken.secretName` (and `.key`,
+  default `token`). The chart mounts that key at
+  `/etc/openshell-token/<key>` and sets `openshell.token_file` to it. Soft
+  Serve reads the file again for every `session` command, so a rotated
+  Secret needs no restart once the kubelet has updated the mounted file.
 - **The data volume outlives the release.** `hf destroy` keeps the
   `data-soft-serve-0` claim and the Agent Sandbox CRDs. Its size cannot be
   changed through helmfile after the first install.
@@ -130,9 +172,16 @@ started against the rendered config from a read-only file and answered
 
 Not checked, because it needs an image build or a live cluster:
 
-- The image itself was never built: no container engine was running. The
-  `apk` package names and base image tags were checked against the registries
-  only.
+- The images were never built: no container engine was running. For the
+  Soft Serve image, the `apk` package names and base image tags were checked
+  against the registries only. For the sandbox image, the base image tag and
+  digest (amd64 and arm64) were checked against nvcr.io, the `apt` package
+  names against the Ubuntu 24.04 (noble) `main` indexes for amd64 and arm64,
+  and the jj 0.47.1 release tarballs were downloaded and their SHA-256
+  checksums compared with the ones in the Containerfile.
+- Whether a sandbox started from the sandbox image comes up under OpenShell:
+  the workspace seeding, the UID 10001 identity, and the binary paths in the
+  sandbox network policy.
 - Nothing was installed: no `helmfile sync`, so the release order, the hooks
   and the waits are untested.
 - Whether the gateway accepts Soft Serve's requests with only the client

@@ -157,8 +157,13 @@ openshell:
   workspace: "{{ .OpenShell.Workspace }}"
   # The default sandbox base image. It must provide git and jj.
   image: "{{ .OpenShell.Image }}"
-  # Optional bearer token used to authenticate to the gateway.
+  # Optional bearer token used to authenticate to the gateway. Prefer
+  # token_file, which keeps the token out of this file. Set at most one.
   #token: ""
+  # Path to a file holding the bearer token, e.g. mounted from a secret.
+  # Trailing whitespace is trimmed. The file is read again for every session
+  # command, so a token rotated in place is picked up without a restart.
+  token_file: "{{ .OpenShell.TokenFile }}"
   # Client TLS files, e.g. mounted from the openshell-client-tls secret.
   tls_ca: "{{ .OpenShell.TLSCA }}"
   tls_cert: "{{ .OpenShell.TLSCert }}"
