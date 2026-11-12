@@ -1,0 +1,23 @@
+{
+  "defaultRecipe": "default",
+  "recipes": {
+    "default": {
+      "description": "Recipe for Soft Serve",
+      "model": "anthropic/claude-opus-5-5",
+      "thinkingLevel": "high",
+      "permissionMode": "auto",
+      "style": "ste",
+      "models": [
+          "anthropic/claude-opus-5-5",
+          "anthropic/claude-fable-5-2"
+      ],
+      "mcpServers": {},
+      "extensions": [
+        "npm:@upstash/context7-pi",
+        "npm:pi-lens",
+        "npm:@gotgenes/pi-anthropic-auth"
+      ],
+      "blocklist": {}
+    }
+  }
+}
