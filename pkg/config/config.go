@@ -228,6 +228,11 @@ type Config struct {
 	// OpenShell is the configuration for OpenShell agent sessions.
 	OpenShell OpenShellConfig `envPrefix:"OPENSHELL_" yaml:"openshell"`
 
+	// Forges are the GitHub and GitLab accounts whose repositories are
+	// discovered, imported and kept in sync. The environment form is
+	// SOFT_SERVE_FORGES_<index>_<KEY>, e.g. SOFT_SERVE_FORGES_0_NAME.
+	Forges []ForgeConfig `envPrefix:"FORGES_" yaml:"forges"`
+
 	// InitialAdminKeys is a list of public keys that will be added to the list of admins.
 	InitialAdminKeys []string `env:"INITIAL_ADMIN_KEYS" envSeparator:"\n" yaml:"initial_admin_keys"`
 
@@ -320,6 +325,10 @@ func (c *Config) Environ() []string {
 		// handed to hook and git subprocesses, which never need the gateway
 		// credential.
 	}...)
+
+	// Forge tokens only ever live in their token_file; only the paths are
+	// passed on.
+	envs = append(envs, c.forgeEnviron()...)
 
 	// AnonAccess and AllowKeyless are tri-state overrides: only emit them
 	// when explicitly set, so a subprocess parsing these envs sees the same
@@ -435,13 +444,23 @@ var configSections = func() map[string]string {
 		for i := range t.NumField() {
 			f := t.Field(i)
 			name, _, _ := strings.Cut(f.Tag.Get("yaml"), ",")
-			if f.Type.Kind() != reflect.Struct || name == "" || name == "-" {
+			if name == "" || name == "-" {
+				continue
+			}
+			ft := f.Type
+			if ft.Kind() == reflect.Slice && ft.Elem().Kind() == reflect.Struct {
+				// A list of sections, such as forges: its entries are
+				// reported as "forges[].key".
+				ft = ft.Elem()
+				name += "[]"
+			}
+			if ft.Kind() != reflect.Struct {
 				continue
 			}
 			if path != "" {
 				name = path + "." + name
 			}
-			walk(f.Type, name)
+			walk(ft, name)
 		}
 	}
 	walk(reflect.TypeOf(Config{}), "")
@@ -680,7 +699,7 @@ func (c *Config) Validate() error {
 
 	c.HTTP.CORS.AllowedOrigins = append([]string{c.HTTP.PublicURL}, c.HTTP.CORS.AllowedOrigins...)
 
-	return c.validateOpenShell()
+	return errors.Join(c.validateOpenShell(), c.validateForges())
 }
 
 // validateOpenShell validates the OpenShell configuration and resolves its

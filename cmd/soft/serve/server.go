@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/soft-serve/pkg/cron"
 	"github.com/charmbracelet/soft-serve/pkg/daemon"
 	"github.com/charmbracelet/soft-serve/pkg/db"
+	"github.com/charmbracelet/soft-serve/pkg/forge"
 	"github.com/charmbracelet/soft-serve/pkg/jobs"
 	"github.com/charmbracelet/soft-serve/pkg/proto"
 	sshsrv "github.com/charmbracelet/soft-serve/pkg/ssh"
@@ -51,6 +52,18 @@ func NewServer(ctx context.Context) (*Server, error) {
 	be := backend.FromContext(ctx)
 	db := db.FromContext(ctx)
 	logger := log.FromContext(ctx).WithPrefix("server")
+
+	// Forges are declared in the config file only. The service goes into
+	// the context the cron jobs and the SSH server are built from.
+	if len(cfg.Forges) > 0 {
+		svc, err := forge.NewService(cfg, be, log.FromContext(ctx))
+		if err != nil {
+			return nil, fmt.Errorf("forges: %w", err)
+		}
+		ctx = forge.WithContext(ctx, svc)
+	}
+	jobs.RegisterForgeSync(cfg)
+
 	srv := &Server{
 		Config:  cfg,
 		Backend: be,

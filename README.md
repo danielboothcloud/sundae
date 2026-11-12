@@ -269,6 +269,14 @@ lfs:
 jobs:
   mirror_pull: "@every 10m"
 
+# GitHub and GitLab accounts to import from and sync with. See "Forges".
+#forges:
+#  - name: github
+#    kind: github
+#    token_file: /etc/soft-serve/secrets/github-token
+#    include: ["me/*"]
+#    sync: 10m
+
 # The stats server configuration.
 stats:
   # The address on which the stats server will listen.
@@ -304,6 +312,7 @@ name all in uppercase. Here are some examples:
 - `SOFT_SERVE_ANON_ACCESS`: Overrides the `anon-access` setting (see [Authentication](#authentication))
 - `SOFT_SERVE_ALLOW_KEYLESS`: Overrides the `allow-keyless` setting (see [Authentication](#authentication))
 - `SOFT_SERVE_DEFAULT_REPO`: Repository name to create on boot if missing
+- `SOFT_SERVE_FORGES_0_NAME`, `SOFT_SERVE_FORGES_0_KIND`, ...: The first entry of `forges` (see [Forges](#forges)); list values are comma-separated
 
 #### Database Configuration
 
@@ -755,6 +764,112 @@ ssh -p 23231 localhost repo import soft-serve https://github.com/charmbracelet/s
 ```
 
 Use `--mirror` or `-m` to mark the repository as a *pull* mirror.
+
+### Forges
+
+Soft Serve can see your repositories on GitHub and GitLab, import them, and
+keep them in sync without ever losing work you pushed only to Soft Serve.
+Unlike a mirror, a forge repository is a normal, writable repository: sync
+never rewrites or deletes a branch, and pushing back to the forge is a
+separate, explicit command.
+
+Forges are declared in the config file only (there is no runtime "add
+forge"), and their tokens only ever come from a file:
+
+```yaml
+forges:
+  - name: github                    # DNS label: commands, ref namespace, git config
+    kind: github                    # github or gitlab
+    token_file: /etc/soft-serve/secrets/github-token
+    include: ["me/*", "my-org/**"]  # globs on owner/repo; empty = everything
+    exclude: ["me/old-*"]
+    sync: 10m                       # scheduled sync, at least 1m (default 10m)
+  - name: gitlab
+    kind: gitlab
+    url: https://gitlab.example.com # default https://github.com / https://gitlab.com
+    token_file: /etc/soft-serve/secrets/gitlab-token
+    prefix: work                    # import as work/<group>/<project> (default: name)
+```
+
+- `url` is the forge's web address. The API is derived from it:
+  `https://api.github.com` for github.com, `<url>/api/v3` for GitHub
+  Enterprise Server, `<url>/api/v4` for GitLab.
+- `token_file` is read again for every API call and git operation, so a
+  rotated token is picked up without a restart. Discovery needs it: GitHub
+  `repo` (or a fine-grained token with Contents read, plus write to push),
+  GitLab `read_api` and `read_repository` (`write_repository` to push).
+- `include` and `exclude` match the forge path case-insensitively. `*` does
+  not cross `/`, `**` does. Write alternatives as separate entries.
+- `prefix` must be unique and must not nest inside another forge's prefix, so
+  two forges can never produce the same repository name.
+- Changing forges means editing the file and restarting (the Helm chart rolls
+  the pod when its ConfigMap changes). `soft config check` validates them,
+  including that every token file is readable.
+
+The forge host you declare is trusted: Soft Serve's SSRF guard for
+user-supplied remotes (which refuses private addresses) does not apply to it,
+so a self-hosted GitLab on a private address works by declaring its `url`.
+What the forge API returns is not trusted: a clone URL that is not on the
+declared scheme, host, port and base path is rejected, API pagination links
+and redirects that leave the host are refused, and git never follows HTTP
+redirects.
+
+The `forge` command is only there when at least one forge is configured.
+Listing, importing and syncing are for server admins; pushing needs write
+access to the repository.
+
+```sh
+ssh -p 23231 localhost forge ls [--json]                         # forges, repo counts, last sync, last error
+ssh -p 23231 localhost forge repos github [--all] [--json]       # forge repos, imported or not, ahead/behind
+ssh -p 23231 localhost forge import github me/tool me/other      # import some
+ssh -p 23231 localhost forge import github --all                 # import everything include/exclude let through
+ssh -p 23231 localhost forge sync [github [github/me/tool]]      # sync now (also runs every `sync` interval)
+ssh -p 23231 localhost forge push github/me/tool [main] [--force-with-lease]
+```
+
+**Naming.** `owner/repo` on a forge is imported as `<prefix>/owner/repo`, e.g.
+`github/me/tool`; GitLab subgroups nest the same way. A name already taken by
+a repository that was not imported from the same forge path is a collision:
+that repository is left untouched and its import fails. Importing an
+already-imported repository does nothing. A repository private (or GitLab
+internal) on the forge is private on Soft Serve. Imported repositories get the
+server's default VCS kind, `jj`, like any other new repository; pass `--vcs
+git` to `forge import` for git presentation.
+
+**Sync.** Upstream branches and tags are fetched into the forge's own
+namespace, `refs/remotes/<forge>/heads/*` and `refs/remotes/<forge>/tags/*`,
+which the TUI and web views do not list and pushes to Soft Serve cannot write.
+Pruning happens only there. Then, for each upstream branch:
+
+| Local branch | Sync |
+| --- | --- |
+| missing | created at upstream |
+| strictly behind upstream (no local-only commits) | fast-forwarded |
+| equal, ahead, or diverged | left alone; ahead/behind reported |
+| exists only on Soft Serve, or deleted upstream | left alone, never deleted |
+
+Upstream tags missing locally are created; an existing tag is never moved.
+Every update is a compare-and-swap, so a push landing meanwhile wins. A
+branch deleted on Soft Serve but still upstream is created again by the next
+sync.
+
+**Push.** `forge push` pushes one branch (default: the branch `HEAD` points
+at) as a fast-forward. If the forge has commits the branch lacks, as of the
+last sync, the push is refused and the number of missing commits reported;
+if the forge moved after the last sync, the forge refuses it and you are told
+to sync first. `--force-with-lease` overwrites the forge branch, but only if
+it is still where the last sync saw it.
+
+**Where the link lives.** Each imported repository keeps its link in its own
+git config, the way mirrors keep their remote: a remote named after the forge
+(`remote.<forge>.url` and fetch refspecs into the namespace) and a `[forge]`
+section with `name`, `path`, `defaultbranch`, `lastsync` and `lasterror`.
+There is no database table. The token is never written to the repository: git
+gets it as an `Authorization: Basic` header scoped to the forge URL through
+`GIT_CONFIG_*` environment variables (user name `x-access-token` for GitHub,
+`oauth2` for GitLab; both take the token as the password).
+
+Git LFS objects of forge repositories are not fetched.
 
 ### Deleting Repositories
 

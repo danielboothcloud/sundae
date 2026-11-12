@@ -171,7 +171,8 @@ runs, with one exception: when OpenShell is enabled and
 reads that file, as `soft serve` does at startup. Outside the pod it fails
 with `openshell: read token_file: ... no such file or directory`; to check the
 rest, point it at a local file with `--state-values-set
-softServe.chartValues.config.openshell.token_file=/tmp/token`.
+softServe.chartValues.config.openshell.token_file=/tmp/token`. The same goes
+for every `config.forges[].token_file`: the check reads each one.
 
 ## Things to know
 
@@ -192,6 +193,13 @@ softServe.chartValues.config.openshell.token_file=/tmp/token`.
   `/etc/openshell-token/<key>` and sets `openshell.token_file` to it. Soft
   Serve reads the file again for every `session` command, so a rotated
   Secret needs no restart once the kubelet has updated the mounted file.
+- **Forges.** GitHub and GitLab accounts go under
+  `softServe.chartValues.config.forges` (example in `environment.yaml` and
+  the chart's `values.yaml`; semantics in the top-level README, "Forges").
+  Each token is a key in an existing Secret, mounted as a directory through
+  `softServe.chartValues.secretMounts` and named by `token_file`; Soft Serve
+  rejects an inline `token`. Soft Serve needs egress to each forge's HTTPS
+  host. Adding or changing a forge rolls the pod like any config change.
 - **The data volume outlives the release.** `hf destroy` keeps the
   `data-soft-serve-0` claim and the Agent Sandbox CRDs. Its size cannot be
   changed through helmfile after the first install.

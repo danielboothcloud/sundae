@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/soft-serve/pkg/backend"
 	"github.com/charmbracelet/soft-serve/pkg/config"
 	"github.com/charmbracelet/soft-serve/pkg/db"
+	"github.com/charmbracelet/soft-serve/pkg/forge"
 	"github.com/charmbracelet/soft-serve/pkg/store"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -78,6 +79,9 @@ func NewSSHServer(ctx context.Context) (*SSHServer, error) {
 			// is in fact the one used for authentication, so we need to
 			// check it again here.
 			AuthenticationMiddleware,
+			// Forge middleware: attaches the forge service, when forges
+			// are configured, for the `forge` command.
+			ForgeContextMiddleware(forge.FromContext(ctx)),
 			// Context middleware.
 			// This must come first to set up the context.
 			ContextMiddleware(cfg, dbx, datastore, be, logger),

@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/soft-serve/pkg/backend"
 	"github.com/charmbracelet/soft-serve/pkg/config"
 	"github.com/charmbracelet/soft-serve/pkg/db"
+	"github.com/charmbracelet/soft-serve/pkg/forge"
 	"github.com/charmbracelet/soft-serve/pkg/proto"
 	"github.com/charmbracelet/soft-serve/pkg/ssh/cmd"
 	"github.com/charmbracelet/soft-serve/pkg/sshutils"
@@ -89,6 +90,19 @@ func ContextMiddleware(cfg *config.Config, dbx *db.DB, datastore store.Store, be
 	}
 }
 
+// ForgeContextMiddleware attaches the forge service to the session context.
+// svc is nil when no forges are configured; nothing is attached then.
+func ForgeContextMiddleware(svc *forge.Service) func(ssh.Handler) ssh.Handler {
+	return func(sh ssh.Handler) ssh.Handler {
+		return func(s ssh.Session) {
+			if svc != nil {
+				s.Context().SetValue(forge.ContextKey, svc)
+			}
+			sh(s)
+		}
+	}
+}
+
 var cliCommandCounter = promauto.NewCounterVec(prometheus.CounterOpts{
 	Namespace: "soft_serve",
 	Subsystem: "cli",
@@ -151,6 +165,12 @@ func CommandMiddleware(sh ssh.Handler) ssh.Handler {
 		if cfg.OpenShell.Enabled {
 			rootCmd.AddCommand(
 				cmd.SessionCommand(),
+			)
+		}
+
+		if len(cfg.Forges) > 0 {
+			rootCmd.AddCommand(
+				cmd.ForgeCommand(),
 			)
 		}
 

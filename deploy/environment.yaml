@@ -80,4 +80,19 @@ softServe:
   #       gatewayToken:
   #         secretName: openshell-gateway-token
   #         key: token
+  #
+  # Forges (GitHub, GitLab) are declared under config.forges, with each token
+  # mounted from a Secret through secretMounts (see the chart's values.yaml
+  # and the top-level README, "Forges"):
+  #   chartValues:
+  #     secretMounts:
+  #       - name: github-token
+  #         secretName: soft-serve-github-token
+  #         mountPath: /etc/soft-serve-forges/github
+  #     config:
+  #       forges:
+  #         - name: github
+  #           kind: github
+  #           token_file: /etc/soft-serve-forges/github/token
+  #           include: ["me/*"]
   chartValues: {}

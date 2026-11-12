@@ -150,6 +150,22 @@ config:
     token_ttl: "24h"
     command: "bash -l"
 
+  # GitHub and GitLab accounts whose repositories Soft Serve discovers,
+  # imports and keeps in sync (ssh <server> forge --help). Tokens are only
+  # read from files: put each token in an existing Secret, mount it with
+  # `secretMounts` below, and point token_file at the mounted file. Do not
+  # put a token here; Soft Serve rejects a `token` key.
+  forges: []
+  #  - name: github
+  #    kind: github
+  #    # url defaults to https://github.com (https://gitlab.com for gitlab).
+  #    # A self-hosted forge on a private address is allowed by declaring it.
+  #    token_file: /etc/soft-serve-forges/github/token
+  #    include: ["me/*"]
+  #    exclude: []
+  #    sync: 10m
+  #    # prefix defaults to the name: me/tool is imported as github/me/tool.
+
   # Leave empty; use the top-level initialAdminKeys instead.
   initial_admin_keys: []
 
@@ -184,6 +200,13 @@ secretMounts: []
 #  - name: http-tls
 #    secretName: soft-serve-http-tls
 #    mountPath: /etc/soft-serve-tls
+#  # A forge token, for config.forges[].token_file
+#  # (/etc/soft-serve-forges/github/token). The directory is mounted, not a
+#  # subPath, so a rotated Secret reaches the pod; Soft Serve reads the file
+#  # again for every forge operation.
+#  - name: github-token
+#    secretName: soft-serve-github-token
+#    mountPath: /etc/soft-serve-forges/github
 
 # Extra environment variables. SOFT_SERVE_* variables override the config
 # file, so this is how a secret value without a *_file setting gets in

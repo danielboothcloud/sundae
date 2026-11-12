@@ -44,6 +44,48 @@ func TestCheck(t *testing.T) {
 		is.True(strings.Contains(msg, "\n  openshell: image is required"))
 	})
 
+	t.Run("forges", func(t *testing.T) {
+		is := is.New(t)
+		writeFile(t, filepath.Join(td, "gh-token"), "ghp_x\n")
+		p := filepath.Join(td, "forges.yaml")
+		writeFile(t, p, `forges:
+  - name: github
+    kind: github
+    token_file: gh-token
+    include: ["me/*"]
+  - name: gitlab
+    kind: gitlab
+    url: http://10.0.0.5/gitlab
+`)
+		is.NoErr(check(p))
+
+		writeFile(t, p, `forges:
+  - name: github
+    kind: github
+    token: inline
+    token_file: missing-token
+  - name: github
+    kind: gitea
+    include: ["[x"]
+    sync: 5s
+`)
+		err := check(p)
+		is.True(err != nil)
+		msg := err.Error()
+		for _, want := range []string{
+			"line 4: unknown key forges[].token",
+			"forges[0] (github): read token_file",
+			`forges[1] (github): name "github" is already used by forges[0]`,
+			`forges[1] (github): kind "gitea" is not supported`,
+			`forges[1] (github): include[0] "[x": invalid glob`,
+			"forges[1] (github): sync 5s is too short",
+		} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("%q missing from:\n%s", want, msg)
+			}
+		}
+	})
+
 	t.Run("missing file is not written", func(t *testing.T) {
 		is := is.New(t)
 		p := filepath.Join(td, "missing", "config.yaml")

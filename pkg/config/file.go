@@ -178,6 +178,55 @@ openshell:
   # The command run in the sandbox when a user attaches.
   command: {{ printf "%q" .OpenShell.Command }}
 
+# Forges: GitHub and GitLab accounts whose repositories Soft Serve discovers,
+# imports and keeps in sync (ssh <server> forge --help). Sync never rewrites or
+# deletes a Soft Serve branch: upstream refs are fetched into
+# refs/remotes/<name>/heads/* and refs/remotes/<name>/tags/*, branches that are
+# strictly behind are fast-forwarded and missing ones created. Pushing to a
+# forge is always explicit (forge push). Changes take effect on restart.
+#
+#   name        unique DNS label; used in commands, ref namespaces and git config
+#   kind        github or gitlab
+#   url         web base URL; defaults to https://github.com or https://gitlab.com.
+#               This host is trusted: a self-hosted forge on a private address
+#               is allowed by declaring it here.
+#   token_file  file holding the access token (never put a token in this file)
+#   include     globs matched against "owner/repo"; empty includes everything.
+#               "*" does not cross "/", "**" does. Case-insensitive.
+#   exclude     globs removed from what include lets through
+#   sync        scheduled sync interval, at least 1m (default 10m)
+#   prefix      repository namespace: "owner/repo" is imported as
+#               "<prefix>/owner/repo" (default: name)
+{{- if .Forges }}
+forges:
+{{- range .Forges }}
+  - name: {{ printf "%q" .Name }}
+    kind: {{ printf "%q" .Kind }}
+    url: {{ printf "%q" .URL }}
+    token_file: {{ printf "%q" .TokenFile }}
+    {{- if .Include }}
+    include: [{{ range $i, $p := .Include }}{{ if $i }}, {{ end }}{{ printf "%q" $p }}{{ end }}]
+    {{- end }}
+    {{- if .Exclude }}
+    exclude: [{{ range $i, $p := .Exclude }}{{ if $i }}, {{ end }}{{ printf "%q" $p }}{{ end }}]
+    {{- end }}
+    sync: "{{ .Sync }}"
+    prefix: {{ printf "%q" .Prefix }}
+{{- end }}
+{{- else }}
+#forges:
+#  - name: github
+#    kind: github
+#    token_file: /etc/soft-serve/secrets/github-token
+#    include: ["me/*"]
+#    exclude: []
+#    sync: 10m
+#  - name: gitlab
+#    kind: gitlab
+#    url: https://gitlab.com
+#    token_file: /etc/soft-serve/secrets/gitlab-token
+{{- end }}
+
 # Additional admin keys.
 #initial_admin_keys:
 #  - "ssh-rsa AAAAB3NzaC1yc2..."
