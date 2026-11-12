@@ -172,7 +172,10 @@ reads that file, as `soft serve` does at startup. Outside the pod it fails
 with `openshell: read token_file: ... no such file or directory`; to check the
 rest, point it at a local file with `--state-values-set
 softServe.chartValues.config.openshell.token_file=/tmp/token`. The same goes
-for every `config.forges[].token_file`: the check reads each one.
+for every `config.forges[].token_file`: the check reads each one. And for
+`config.notifications.ntfy.token_file` when ntfy is enabled (set to
+`/etc/soft-serve-ntfy/token` when
+`softServe.chartValues.notifications.ntfyToken.secretName` is set).
 
 ## Things to know
 
@@ -200,6 +203,18 @@ for every `config.forges[].token_file`: the check reads each one.
   `softServe.chartValues.secretMounts` and named by `token_file`; Soft Serve
   rejects an inline `token`. Soft Serve needs egress to each forge's HTTPS
   host. Adding or changing a forge rolls the pod like any config change.
+- **Notifications (ntfy).** Off by default. Turn them on under
+  `softServe.chartValues.config.notifications` (example in
+  `environment.yaml`; semantics in the top-level README, "Notifications").
+  Quote the `"on":` key: Helm reads a bare `on:` as `true`, and the chart
+  refuses to render that. For an access-controlled topic, put the ntfy
+  access token in a Secret in the namespace and set
+  `softServe.chartValues.notifications.ntfyToken.secretName` (and `.key`,
+  default `token`). The chart mounts that key at `/etc/soft-serve-ntfy/<key>`
+  and sets `notifications.ntfy.token_file` to it; Soft Serve reads the file
+  for every message, so a rotated Secret needs no restart. The chart refuses
+  an inline `notifications.ntfy.token`. Soft Serve needs egress to the ntfy
+  server.
 - **The data volume outlives the release.** `hf destroy` keeps the
   `data-soft-serve-0` claim and the Agent Sandbox CRDs. Its size cannot be
   changed through helmfile after the first install.
@@ -234,6 +249,9 @@ Not checked, because it needs an image build or a live cluster:
   (0.1.6) works against a 0.1.8 gateway.
 - Whether sandboxes can reach Soft Serve's HTTP Service, and how the sandbox
   egress policy is supplied.
+- Notifications against a real ntfy server from the cluster (egress, and an
+  access-controlled topic with a token). The publish format was checked
+  against an `httptest` server.
 - Whether the cluster's StorageClass honours `fsGroup`. If the pod cannot
   write `/soft-serve`, that is the first thing to look at.
 - Running with a read-only root filesystem. If something needs to write

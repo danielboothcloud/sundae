@@ -233,6 +233,10 @@ type Config struct {
 	// SOFT_SERVE_FORGES_<index>_<KEY>, e.g. SOFT_SERVE_FORGES_0_NAME.
 	Forges []ForgeConfig `envPrefix:"FORGES_" yaml:"forges"`
 
+	// Notifications configures notifications on agent session and forge
+	// events. Off unless notifications.ntfy.enabled is true.
+	Notifications NotificationsConfig `envPrefix:"NOTIFICATIONS_" yaml:"notifications"`
+
 	// InitialAdminKeys is a list of public keys that will be added to the list of admins.
 	InitialAdminKeys []string `env:"INITIAL_ADMIN_KEYS" envSeparator:"\n" yaml:"initial_admin_keys"`
 
@@ -329,6 +333,9 @@ func (c *Config) Environ() []string {
 	// Forge tokens only ever live in their token_file; only the paths are
 	// passed on.
 	envs = append(envs, c.forgeEnviron()...)
+
+	// The ntfy token only ever lives in its token_file.
+	envs = append(envs, c.notificationsEnviron()...)
 
 	// AnonAccess and AllowKeyless are tri-state overrides: only emit them
 	// when explicitly set, so a subprocess parsing these envs sees the same
@@ -429,6 +436,11 @@ func describeKeyError(msg string) string {
 	key := m[2]
 	if section != "" {
 		key = section + "." + key
+	}
+	if key == "notifications.true" {
+		// YAML 1.1 tools, Helm among them, read an unquoted `on:` key as
+		// the boolean true.
+		return fmt.Sprintf("line %s: unknown key %s (an unquoted `on:` key was read as true by a YAML 1.1 tool; quote it: \"on\":)", m[1], key)
 	}
 	return fmt.Sprintf("line %s: unknown key %s", m[1], key)
 }
@@ -650,6 +662,10 @@ func DefaultConfig() *Config {
 			TokenTTL:  24 * time.Hour,
 			Command:   "bash -l",
 		},
+		Notifications: NotificationsConfig{
+			On:       append([]string(nil), DefaultTriggers...),
+			Debounce: DefaultNotificationDebounce,
+		},
 	}
 }
 
@@ -699,7 +715,7 @@ func (c *Config) Validate() error {
 
 	c.HTTP.CORS.AllowedOrigins = append([]string{c.HTTP.PublicURL}, c.HTTP.CORS.AllowedOrigins...)
 
-	return errors.Join(c.validateOpenShell(), c.validateForges())
+	return errors.Join(c.validateOpenShell(), c.validateForges(), c.validateNotifications())
 }
 
 // validateOpenShell validates the OpenShell configuration and resolves its

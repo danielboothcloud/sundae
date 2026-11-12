@@ -6,6 +6,7 @@ import (
 	"charm.land/lipgloss/v2/table"
 	"github.com/charmbracelet/soft-serve/pkg/backend"
 	"github.com/charmbracelet/soft-serve/pkg/config"
+	"github.com/charmbracelet/soft-serve/pkg/events"
 	"github.com/charmbracelet/soft-serve/pkg/openshell"
 	"github.com/charmbracelet/soft-serve/pkg/proto"
 	"github.com/charmbracelet/soft-serve/pkg/sshutils"
@@ -78,7 +79,7 @@ run "session start" again to re-attach and "session end" to delete it.`,
 			}
 			defer client.Close() //nolint:errcheck
 
-			mgr := openshell.NewManager(client, be, cfg)
+			mgr := openshell.NewManager(client, be, cfg, openshell.WithEvents(events.FromContext(ctx)))
 			pty, _, _ := sess.Pty()
 			s, err := mgr.Start(ctx, openshell.StartOptions{
 				User:     user,
@@ -179,7 +180,8 @@ func sessionEndCommand() *cobra.Command {
 			// No repository lookup: a session must stay endable after its
 			// repository is deleted or renamed. repoArg is the same
 			// sanitized name Start derives the sandbox name from.
-			existed, err := openshell.NewManager(client, be, cfg).End(ctx, proto.UserFromContext(ctx), repoArg(args))
+			mgr := openshell.NewManager(client, be, cfg, openshell.WithEvents(events.FromContext(ctx)))
+			existed, err := mgr.End(ctx, proto.UserFromContext(ctx), repoArg(args))
 			if err != nil {
 				return err
 			}

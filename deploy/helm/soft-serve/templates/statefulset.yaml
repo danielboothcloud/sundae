@@ -2,6 +2,7 @@
 {{- $fullname := include "soft-serve.fullname" . }}
 {{- $openshellTLS := include "soft-serve.openshellTLSMounted" . }}
 {{- $openshellToken := include "soft-serve.openshellTokenMounted" . }}
+{{- $ntfyToken := include "soft-serve.ntfyTokenMounted" . }}
 {{- $httpScheme := ternary "HTTPS" "HTTP" (and (not (empty $cfg.http.tls_key_path)) (not (empty $cfg.http.tls_cert_path))) }}
 apiVersion: apps/v1
 kind: StatefulSet
@@ -148,6 +149,12 @@ spec:
               mountPath: {{ .Values.openshell.gatewayToken.mountPath | quote }}
               readOnly: true
             {{- end }}
+            {{- if $ntfyToken }}
+            # A directory mount, not subPath, so a rotated Secret reaches the pod.
+            - name: ntfy-token
+              mountPath: {{ .Values.notifications.ntfyToken.mountPath | quote }}
+              readOnly: true
+            {{- end }}
             {{- range .Values.secretMounts }}
             - name: {{ printf "secret-%s" .name | quote }}
               mountPath: {{ .mountPath | quote }}
@@ -174,6 +181,17 @@ spec:
             items:
               - key: {{ .Values.openshell.gatewayToken.key | quote }}
                 path: {{ .Values.openshell.gatewayToken.key | quote }}
+            # Readable by the pod's fsGroup only.
+            defaultMode: 0440
+        {{- end }}
+        {{- if $ntfyToken }}
+        - name: ntfy-token
+          secret:
+            secretName: {{ .Values.notifications.ntfyToken.secretName | quote }}
+            # Only the token key, as the file config.notifications.ntfy.token_file names.
+            items:
+              - key: {{ .Values.notifications.ntfyToken.key | quote }}
+                path: {{ .Values.notifications.ntfyToken.key | quote }}
             # Readable by the pod's fsGroup only.
             defaultMode: 0440
         {{- end }}

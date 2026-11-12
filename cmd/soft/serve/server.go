@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"charm.land/log/v2"
 
@@ -16,8 +17,10 @@ import (
 	"github.com/charmbracelet/soft-serve/pkg/cron"
 	"github.com/charmbracelet/soft-serve/pkg/daemon"
 	"github.com/charmbracelet/soft-serve/pkg/db"
+	"github.com/charmbracelet/soft-serve/pkg/events"
 	"github.com/charmbracelet/soft-serve/pkg/forge"
 	"github.com/charmbracelet/soft-serve/pkg/jobs"
+	"github.com/charmbracelet/soft-serve/pkg/notify"
 	"github.com/charmbracelet/soft-serve/pkg/proto"
 	sshsrv "github.com/charmbracelet/soft-serve/pkg/ssh"
 	"github.com/charmbracelet/soft-serve/pkg/stats"
@@ -37,6 +40,10 @@ type Server struct {
 	Config      *config.Config
 	Backend     *backend.Backend
 	DB          *db.DB
+	// Events is the event bus, which lives as long as the server.
+	Events *events.Bus
+	// Notifier publishes notifications; nil when notifications are off.
+	Notifier *notify.Notifier
 
 	logger *log.Logger
 	ctx    context.Context
@@ -53,10 +60,16 @@ func NewServer(ctx context.Context) (*Server, error) {
 	db := db.FromContext(ctx)
 	logger := log.FromContext(ctx).WithPrefix("server")
 
+	// The event bus lives as long as the server. It goes into the context
+	// the cron jobs and the SSH server are built from, so sessions and jobs
+	// publish to the same bus.
+	bus := events.New(events.WithLogger(log.FromContext(ctx)))
+	ctx = events.WithContext(ctx, bus)
+
 	// Forges are declared in the config file only. The service goes into
 	// the context the cron jobs and the SSH server are built from.
 	if len(cfg.Forges) > 0 {
-		svc, err := forge.NewService(cfg, be, log.FromContext(ctx))
+		svc, err := forge.NewService(cfg, be, log.FromContext(ctx), forge.WithNotifier(forge.BusNotifier(bus)))
 		if err != nil {
 			return nil, fmt.Errorf("forges: %w", err)
 		}
@@ -68,8 +81,16 @@ func NewServer(ctx context.Context) (*Server, error) {
 		Config:  cfg,
 		Backend: be,
 		DB:      db,
+		Events:  bus,
 		logger:  log.FromContext(ctx).WithPrefix("server"),
 		ctx:     ctx,
+	}
+
+	// Notifications are off unless ntfy is enabled in the config file.
+	if cfg.Notifications.Ntfy.Enabled {
+		srv.Notifier = notify.New(cfg.Notifications, notify.WithLogger(log.FromContext(ctx)))
+		srv.Notifier.Start(bus)
+		logger.Info("ntfy notifications enabled", "url", cfg.Notifications.Ntfy.URL, "on", cfg.Notifications.On)
 	}
 
 	// Add cron jobs.
@@ -244,6 +265,7 @@ func (s *Server) Start() error {
 
 // Shutdown lets the server gracefully shutdown.
 func (s *Server) Shutdown(ctx context.Context) error {
+	defer s.closeEvents(ctx)
 	errg, ctx := errgroup.WithContext(ctx)
 	errg.Go(func() error {
 		return s.GitDaemon.Shutdown(ctx)
@@ -268,8 +290,23 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return errg.Wait()
 }
 
+// closeEventsTimeout bounds how long Close waits for held notifications.
+const closeEventsTimeout = 5 * time.Second
+
+// closeEvents sends the notifications still held, within ctx, and closes the
+// event bus.
+func (s *Server) closeEvents(ctx context.Context) {
+	if err := s.Notifier.Close(ctx); err != nil {
+		s.logger.Warn("notifications not all sent at shutdown", "err", err)
+	}
+	s.Events.Close()
+}
+
 // Close closes the SSH server.
 func (s *Server) Close() error {
+	ctx, cancel := context.WithTimeout(context.Background(), closeEventsTimeout)
+	defer cancel()
+	defer s.closeEvents(ctx)
 	var errg errgroup.Group
 	errg.Go(s.GitDaemon.Close)
 	errg.Go(s.HTTPServer.Close)

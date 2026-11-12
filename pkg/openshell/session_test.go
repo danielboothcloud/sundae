@@ -164,12 +164,17 @@ type harness struct {
 	mgr    *Manager
 }
 
-func newHarness(t *testing.T) *harness {
-	t.Helper()
+func newHarnessConfig() *config.Config {
 	cfg := config.DefaultConfig()
 	cfg.HTTP.PublicURL = "https://git.example.com"
 	cfg.OpenShell.CloneURL = "http://soft-serve.svc:23232"
 	cfg.OpenShell.Image = "default-image"
+	return cfg
+}
+
+func newHarness(t *testing.T) *harness {
+	t.Helper()
+	cfg := newHarnessConfig()
 	fc := fake.NewClient()
 	t.Cleanup(func() { _ = fc.Close() })
 	ex := newFakeExec()

@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/soft-serve/pkg/backend"
 	"github.com/charmbracelet/soft-serve/pkg/config"
 	"github.com/charmbracelet/soft-serve/pkg/db"
+	"github.com/charmbracelet/soft-serve/pkg/events"
 	"github.com/charmbracelet/soft-serve/pkg/forge"
 	"github.com/charmbracelet/soft-serve/pkg/proto"
 	"github.com/charmbracelet/soft-serve/pkg/ssh/cmd"
@@ -97,6 +98,20 @@ func ForgeContextMiddleware(svc *forge.Service) func(ssh.Handler) ssh.Handler {
 		return func(s ssh.Session) {
 			if svc != nil {
 				s.Context().SetValue(forge.ContextKey, svc)
+			}
+			sh(s)
+		}
+	}
+}
+
+// EventsContextMiddleware attaches the event bus to the session context, so
+// commands publish to it (session lifecycle) and can subscribe to it. bus
+// may be nil, e.g. in tests; nothing is attached then.
+func EventsContextMiddleware(bus *events.Bus) func(ssh.Handler) ssh.Handler {
+	return func(sh ssh.Handler) ssh.Handler {
+		return func(s ssh.Session) {
+			if bus != nil {
+				s.Context().SetValue(events.ContextKey, bus)
 			}
 			sh(s)
 		}

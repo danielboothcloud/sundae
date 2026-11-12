@@ -100,12 +100,34 @@ The path of the mounted OpenShell gateway token file.
 {{- end }}
 
 {{/*
+Whether the ntfy token secret is mounted.
+*/}}
+{{- define "soft-serve.ntfyTokenMounted" -}}
+{{- $n := .Values.config.notifications | default dict -}}
+{{- $ntfy := get $n "ntfy" | default dict -}}
+{{- $tok := (.Values.notifications | default dict).ntfyToken | default dict -}}
+{{- if and (get $ntfy "enabled") $tok.secretName -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
+The path of the mounted ntfy token file.
+*/}}
+{{- define "soft-serve.ntfyTokenPath" -}}
+{{- $tok := .Values.notifications.ntfyToken -}}
+{{- printf "%s/%s" ($tok.mountPath | trimSuffix "/") (required "notifications.ntfyToken.key is required when notifications.ntfyToken.secretName is set" $tok.key) -}}
+{{- end }}
+
+{{/*
 The Soft Serve config file: .Values.config, plus
   - initial_admin_keys merged with .Values.initialAdminKeys;
   - when OpenShell is enabled and the client TLS secret is mounted, any empty
     openshell.tls_* path pointed at that mount;
   - when OpenShell is enabled and the gateway token secret is mounted, an
-    empty openshell.token_file pointed at the mounted key.
+    empty openshell.token_file pointed at the mounted key;
+  - when ntfy notifications are enabled and the ntfy token secret is mounted,
+    an empty notifications.ntfy.token_file pointed at the mounted key.
 Refuses to render secret material or an OpenShell section Soft Serve itself
 would reject at startup.
 */}}
@@ -146,6 +168,28 @@ would reject at startup.
 {{- fail "config.openshell.tls_cert and config.openshell.tls_key must be set together" -}}
 {{- end -}}
 {{- $_ := set $cfg "openshell" $os -}}
+{{- end -}}
+
+{{- $notif := get $cfg "notifications" | default dict -}}
+{{- if hasKey $notif "true" -}}
+{{- fail "config.notifications has a key `true`: Helm reads a bare `on:` as true. Quote the key: \"on\": [blocked, done, error]" -}}
+{{- end -}}
+{{- $ntfy := get $notif "ntfy" | default dict -}}
+{{- if get $ntfy "token" -}}
+{{- fail "config.notifications.ntfy.token must not be set: the config is rendered into a ConfigMap. Put the token in a Secret and set notifications.ntfyToken.secretName instead; the chart mounts it and sets config.notifications.ntfy.token_file." -}}
+{{- end -}}
+{{- if get $ntfy "enabled" -}}
+{{- if not (get $ntfy "url") -}}
+{{- fail "config.notifications.ntfy.url (the ntfy server's base URL) is required when config.notifications.ntfy.enabled is true" -}}
+{{- end -}}
+{{- if not (get $ntfy "topic") -}}
+{{- fail "config.notifications.ntfy.topic is required when config.notifications.ntfy.enabled is true" -}}
+{{- end -}}
+{{- if and (include "soft-serve.ntfyTokenMounted" .) (not (get $ntfy "token_file")) -}}
+{{- $_ := set $ntfy "token_file" (include "soft-serve.ntfyTokenPath" .) -}}
+{{- end -}}
+{{- $_ := set $notif "ntfy" $ntfy -}}
+{{- $_ := set $cfg "notifications" $notif -}}
 {{- end -}}
 
 {{- toYaml $cfg -}}

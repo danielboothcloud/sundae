@@ -277,6 +277,16 @@ jobs:
 #    include: ["me/*"]
 #    sync: 10m
 
+# Notifications about agent sessions, through ntfy. See "Notifications".
+#notifications:
+#  "on": [blocked, done, error]
+#  debounce: 30s
+#  ntfy:
+#    enabled: true
+#    url: https://ntfy.sh
+#    topic: my-unguessable-topic
+#    token_file: /etc/soft-serve/secrets/ntfy-token
+
 # The stats server configuration.
 stats:
   # The address on which the stats server will listen.
@@ -313,6 +323,7 @@ name all in uppercase. Here are some examples:
 - `SOFT_SERVE_ALLOW_KEYLESS`: Overrides the `allow-keyless` setting (see [Authentication](#authentication))
 - `SOFT_SERVE_DEFAULT_REPO`: Repository name to create on boot if missing
 - `SOFT_SERVE_FORGES_0_NAME`, `SOFT_SERVE_FORGES_0_KIND`, ...: The first entry of `forges` (see [Forges](#forges)); list values are comma-separated
+- `SOFT_SERVE_NOTIFICATIONS_ON`, `SOFT_SERVE_NOTIFICATIONS_NTFY_ENABLED`, ...: The `notifications` section (see [Notifications](#notifications)); `on` is comma-separated
 
 #### Database Configuration
 
@@ -466,6 +477,109 @@ either direction counts as activity. A shell that sits completely quiet for
 longer than the timeout is disconnected, but the sandbox keeps running, and
 `session start` re-attaches. To avoid the disconnects, raise `idle_timeout`
 or set `0`, or set `ServerAliveInterval` in your SSH client.
+
+#### Notifications
+
+Soft Serve can push a notification to your phone when an agent session needs
+you or has finished, through [ntfy](https://ntfy.sh): the public ntfy.sh
+server or a self-hosted one. It is off by default.
+
+```yaml
+notifications:
+  # What notifies (quote the key; see below).
+  "on": [blocked, done, error]
+  # Per-session rate limit. "0s" sends every change at once.
+  debounce: 30s
+  ntfy:
+    enabled: true
+    # The server's base URL, without the topic.
+    url: https://ntfy.sh
+    # 1 to 64 letters, digits, '-' or '_'.
+    topic: my-unguessable-topic
+    # Optional access token (tk_...), sent as a bearer token. The file is
+    # read again for every message, so a rotated token needs no restart.
+    token_file: /etc/soft-serve/secrets/ntfy-token
+    # Optional URL opened when the notification is tapped.
+    click_url: "https://git.example.com/{repo}?session={session}"
+```
+
+**What notifies.** `on` lists the triggers:
+
+| Trigger | When | Priority |
+|---------|------|----------|
+| `blocked` | An agent waits for you: permission, a question, or a login (OSC 7501 `blocked`) | high |
+| `done` | An agent finished a piece of work | default |
+| `error` | An agent failed and stopped | default |
+| `working`, `idle` | An agent started working, or came to rest. Off by default: noise on a phone | low |
+| `session_failed` | Starting or ending a session failed, with the reason. Opt-in | default |
+| `forge_failed` | A forge import, sync, push or listing failed. Opt-in. A repeat of the same failure (a scheduled sync failing every 10 minutes on an expired token) notifies once, and again only after a success | default |
+
+The default is `[blocked, done, error]`. Agent states come from the
+[Program Status Protocol (OSC 7501)](https://www.superlogical.com/rex/docs/build/program-status)
+that agents report. Collecting them from session pods is a separate step;
+until it lands, only `session_failed` and `forge_failed` have a source.
+
+**What a notification says.** The title has the state's glyph, the state and
+the session, for example `▲ blocked · infra / claude-1`. Each record of a
+session (`id`) is told apart: a child record shows as `infra / claude-1/build`.
+The body is the agent's message, led by what a blocked agent waits for
+(`Needs permission: Apply 3 to add?`), then the program (`app`) and progress
+when reported. Tags carry the state, kind and app. Everything an agent writes
+is untrusted: control characters and invisible formatting characters are
+removed, the title is capped at 192 bytes and the body at 1 KB, and Markdown
+is never enabled.
+
+**Rate limit.** Per session record, the first notification goes out at once
+and opens a `debounce` window. Changes inside the window are held and only the
+latest is sent when it closes, unless it repeats what was already sent (same
+state, kind and message) or is a state that does not notify. So a flapping
+agent sends at most one notification per window, the final state is never
+dropped (it is sent when the window closes, or at shutdown), and an agent
+that was blocked and then lost its status (it exited, or the shell prompt
+returned) is not reported as blocked again.
+
+**Tap action.** `click_url` may use `{repo}`, `{session}`, `{sandbox}` and
+`{user}`, replaced with URL-escaped values (`/` in a repository name is kept).
+A notification without a value for a placeholder it uses, such as `{session}`
+on a forge notification, is sent without the tap action. Any scheme ntfy
+supports works, such as `https://` or an app's own scheme.
+
+**Delivery.** Messages are posted as JSON to the server's root URL. A request
+times out after 10 seconds. Network errors, timeouts, `429` and `5xx` are
+retried with exponential backoff (from 1 second, honouring `Retry-After`) for
+up to 2 minutes; other responses, such as `401`, are not retried. Redirects
+are not followed. Sending happens off the event bus, so a slow or unreachable
+ntfy server never holds up sessions; if it stays down long enough for 64
+messages to queue, further messages are dropped and counted in
+`soft_serve_notifications_total{result="dropped"}`.
+
+**Checks.** While `ntfy.enabled` is false nothing in this section is checked
+beyond its types. When it is true, `url` and `topic` are required, `url` must
+be an `http(s)` base URL without credentials or the topic, every `on` entry
+must be a trigger, `debounce` must not be negative, `click_url` may only use
+the placeholders above, and `token_file` must be readable and not empty (a
+relative path resolves against the data path). There is no inline `token`
+key. `soft config check` reports all of it.
+
+**YAML 1.1 tools.** Quote the `on` key (`"on":`). Soft Serve reads a bare
+`on:` correctly, but YAML 1.1 tools such as Helm read it as the boolean
+`true`; Soft Serve then reports `unknown key notifications.true` with a hint,
+and the Helm chart refuses to render.
+
+**Topic privacy.** On a public server anyone who knows a topic can read and
+publish to it. Use an unguessable topic name, or an access-controlled topic
+with an access token in `token_file`. The topic itself is in the config file.
+
+Each setting has a `SOFT_SERVE_NOTIFICATIONS_*` environment variable, for
+example `SOFT_SERVE_NOTIFICATIONS_ON=blocked,done` or
+`SOFT_SERVE_NOTIFICATIONS_NTFY_TOKEN_FILE=...`.
+
+**Event bus.** Notifications are one subscriber of an in-process event bus
+that carries session status changes, session lifecycle steps (created,
+resumed, ready, parked, ended, failed) and forge outcomes. Each subscriber
+has a bounded buffer; one that falls behind loses events rather than slowing
+anything down, counted in `soft_serve_events_dropped_total{subscriber}`.
+`soft_serve_events_published_total{kind}` counts what was published.
 
 ## Server Access
 

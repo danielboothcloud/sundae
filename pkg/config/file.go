@@ -227,6 +227,39 @@ forges:
 #    token_file: /etc/soft-serve/secrets/gitlab-token
 {{- end }}
 
+# Notifications: agent session status changes, pushed to a phone through ntfy
+# (https://ntfy.sh or a self-hosted server). Off by default: while
+# ntfy.enabled is false nothing in this section is checked. Changes take
+# effect on restart.
+notifications:
+  # What notifies. Agent states (OSC 7501): blocked, done, error, working,
+  # idle. Also session_failed (starting or ending a session failed) and
+  # forge_failed (a forge import, sync, push or listing failed; a repeat of
+  # the same failure only notifies again after a success).
+  # Quote the key: YAML 1.1 tools such as Helm read a bare on: as true.
+  "on": [{{ range $i, $t := .Notifications.On }}{{ if $i }}, {{ end }}{{ printf "%q" $t }}{{ end }}]
+  # Per-session rate limit. After a notification, changes of the same
+  # session are held for this long and only the latest is sent, unless it
+  # repeats what was already sent. "0s" sends every change at once.
+  debounce: "{{ .Notifications.Debounce }}"
+  ntfy:
+    # Publish notifications to ntfy.
+    enabled: {{ .Notifications.Ntfy.Enabled }}
+    # The server's base URL, without the topic, e.g. https://ntfy.sh.
+    url: {{ printf "%q" .Notifications.Ntfy.URL }}
+    # The topic to publish to: 1 to 64 letters, digits, '-' or '_'. On a
+    # public server anyone who knows the topic can read it; use an
+    # unguessable name or an access-controlled topic with token_file.
+    topic: {{ printf "%q" .Notifications.Ntfy.Topic }}
+    # Optional file holding an ntfy access token (tk_...), sent as a bearer
+    # token. Read again for every message, so a rotated token is picked up
+    # without a restart. Never put the token in this file.
+    token_file: {{ printf "%q" .Notifications.Ntfy.TokenFile }}
+    # Optional URL opened when the notification is tapped. Placeholders,
+    # replaced by URL-escaped values: {repo}, {session}, {sandbox}, {user}.
+    # Left off a notification that has no value for a placeholder it uses.
+    click_url: {{ printf "%q" .Notifications.Ntfy.ClickURL }}
+
 # Additional admin keys.
 #initial_admin_keys:
 #  - "ssh-rsa AAAAB3NzaC1yc2..."

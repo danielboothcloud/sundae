@@ -8,11 +8,14 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"charm.land/log/v2"
 	"charm.land/ssh"
 	"github.com/NVIDIA/OpenShell/sdk/go/openshell/v1/types"
 	"github.com/charmbracelet/soft-serve/pkg/backend"
 	"github.com/charmbracelet/soft-serve/pkg/config"
+	"github.com/charmbracelet/soft-serve/pkg/events"
 	"github.com/charmbracelet/soft-serve/pkg/openshell"
 	"github.com/charmbracelet/soft-serve/pkg/proto"
 	"github.com/charmbracelet/soft-serve/pkg/sshutils"
@@ -231,4 +234,37 @@ func TestSessionListAndEnd(t *testing.T) {
 	_, stderr, err = runSession(t, ctx, "end", "gone")
 	is.NoErr(err)
 	is.True(strings.Contains(stderr, "No session to end"))
+}
+
+// The session commands publish the lifecycle on the bus in the context.
+func TestSessionCommandsPublishLifecycle(t *testing.T) {
+	is := is.New(t)
+	ctx, be, user, fc := newSessionTestContext(t)
+	_, err := be.CreateRepository(ctx, "r", user, proto.RepositoryOptions{})
+	is.NoErr(err)
+
+	bus := events.New(events.WithLogger(log.New(io.Discard)))
+	defer bus.Close()
+	sub := bus.Subscribe(events.ForUser(user.ID()))
+	ctx = events.WithContext(ctx, bus)
+	ctx = context.WithValue(ctx, sshutils.ContextKeySession, &fakeSSHSession{})
+
+	_, _, err = runSession(t, ctx, "start", "r")
+	is.NoErr(err)
+	_, _, err = runSession(t, ctx, "end", "r")
+	is.NoErr(err)
+	_, ok := fc.sandboxes["soft-alice-r"]
+	is.True(!ok)
+
+	var steps []string
+	for range 3 {
+		select {
+		case ev := <-sub.C:
+			is.Equal(ev.Lifecycle.Session.Sandbox, "soft-alice-r")
+			steps = append(steps, string(ev.Lifecycle.Step))
+		case <-time.After(5 * time.Second):
+			t.Fatalf("lifecycle events so far: %v", steps)
+		}
+	}
+	is.Equal(strings.Join(steps, ","), "created,ready,ended")
 }

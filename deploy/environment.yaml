@@ -95,4 +95,20 @@ softServe:
   #           kind: github
   #           token_file: /etc/soft-serve-forges/github/token
   #           include: ["me/*"]
+  #
+  # Notifications through ntfy are off by default. Quote the "on" key: Helm
+  # reads a bare on: as true. An ntfy access token comes from a Secret in
+  # `namespace`; the chart mounts it and sets notifications.ntfy.token_file:
+  #   chartValues:
+  #     notifications:
+  #       ntfyToken:
+  #         secretName: soft-serve-ntfy-token
+  #         key: token
+  #     config:
+  #       notifications:
+  #         "on": [blocked, done, error]
+  #         ntfy:
+  #           enabled: true
+  #           url: https://ntfy.sh
+  #           topic: my-unguessable-topic
   chartValues: {}

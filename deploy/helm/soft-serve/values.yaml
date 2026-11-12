@@ -166,6 +166,33 @@ config:
   #    sync: 10m
   #    # prefix defaults to the name: me/tool is imported as github/me/tool.
 
+  # Notifications about agent sessions, pushed to a phone through ntfy
+  # (https://ntfy.sh or a self-hosted server). Off by default; while
+  # ntfy.enabled is false nothing here is checked. Semantics in the top-level
+  # README, "Notifications".
+  notifications:
+    # Keep the key quoted: Helm (YAML 1.1) reads a bare `on:` as `true`, and
+    # the chart refuses that. Triggers: blocked, done, error, working, idle,
+    # session_failed, forge_failed.
+    "on": ["blocked", "done", "error"]
+    # Per-session rate limit; "0s" sends every change at once.
+    debounce: "30s"
+    ntfy:
+      enabled: false
+      # The server's base URL, without the topic. Soft Serve needs egress to
+      # it.
+      url: ""
+      # 1 to 64 letters, digits, '-' or '_'. Anyone who knows a topic on a
+      # public server can read it: use an unguessable name, or an
+      # access-controlled topic and notifications.ntfyToken below.
+      topic: ""
+      # Leave empty to have the chart point it at the mounted
+      # notifications.ntfyToken secret, if any. Do not set `token`.
+      token_file: ""
+      # Optional URL opened when a notification is tapped, with the
+      # placeholders {repo}, {session}, {sandbox} and {user}.
+      click_url: ""
+
   # Leave empty; use the top-level initialAdminKeys instead.
   initial_admin_keys: []
 
@@ -193,6 +220,19 @@ openshell:
     secretName: ""
     key: token
     mountPath: /etc/openshell-token
+
+# Chart-side wiring for config.notifications. Only used when
+# config.notifications.ntfy.enabled is true.
+notifications:
+  # Optional ntfy access token (tk_...), from an existing Secret in this
+  # namespace. When secretName is set, the one key is mounted read-only as
+  # <mountPath>/<key> and config.notifications.ntfy.token_file points at it.
+  # The directory is mounted rather than the single file, so a rotated Secret
+  # reaches the pod; Soft Serve reads the file again for every notification.
+  ntfyToken:
+    secretName: ""
+    key: token
+    mountPath: /etc/soft-serve-ntfy
 
 # Extra existing Secrets mounted read-only as files, for anything the config
 # refers to by path (http.tls_key_path, ssh.key_path, ...).

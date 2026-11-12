@@ -86,6 +86,56 @@ func TestCheck(t *testing.T) {
 		}
 	})
 
+	t.Run("notifications", func(t *testing.T) {
+		is := is.New(t)
+		writeFile(t, filepath.Join(td, "ntfy-token"), "tk_x\n")
+		p := filepath.Join(td, "notifications.yaml")
+		writeFile(t, p, `notifications:
+  "on": [blocked, done, session_failed]
+  debounce: 1m
+  ntfy:
+    enabled: true
+    url: https://ntfy.example.com
+    topic: agents
+    token_file: ntfy-token
+    click_url: "https://git.example.com/{repo}?s={session}"
+`)
+		is.NoErr(check(p))
+
+		// Disabled: nothing beyond types is checked.
+		writeFile(t, p, `notifications:
+  "on": [nonsense]
+  ntfy:
+    url: ftp://x
+    token_file: missing
+`)
+		is.NoErr(check(p))
+
+		writeFile(t, p, `notifications:
+  "on": [blokced]
+  ntfy:
+    enabled: true
+    token: tk_inline
+    token_file: missing
+    click_url: "https://x/{nope}"
+`)
+		err := check(p)
+		is.True(err != nil)
+		msg := err.Error()
+		for _, want := range []string{
+			"line 5: unknown key notifications.ntfy.token",
+			`notifications.on[0] "blokced" is not a trigger`,
+			"notifications.ntfy.url is required",
+			"notifications.ntfy.topic is required",
+			"notifications.ntfy.token_file: read token_file",
+			`notifications.ntfy.click_url "https://x/{nope}": unknown placeholder {nope}`,
+		} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("%q missing from:\n%s", want, msg)
+			}
+		}
+	})
+
 	t.Run("missing file is not written", func(t *testing.T) {
 		is := is.New(t)
 		p := filepath.Join(td, "missing", "config.yaml")

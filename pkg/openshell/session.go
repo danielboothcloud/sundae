@@ -17,6 +17,7 @@ import (
 	v1 "github.com/NVIDIA/OpenShell/sdk/go/openshell/v1"
 	"github.com/anmitsu/go-shlex"
 	"github.com/charmbracelet/soft-serve/pkg/config"
+	"github.com/charmbracelet/soft-serve/pkg/events"
 	"github.com/charmbracelet/soft-serve/pkg/proto"
 )
 
@@ -44,12 +45,24 @@ type Manager struct {
 	command  string
 	tokenTTL time.Duration
 	now      func() time.Time
+	// bus receives lifecycle events. nil drops them.
+	bus *events.Bus
+}
+
+// ManagerOption configures a Manager.
+type ManagerOption func(*Manager)
+
+// WithEvents publishes the session lifecycle (created, resumed, ready,
+// ended, failed) on bus. Without it, or with a nil bus, nothing is
+// published.
+func WithEvents(bus *events.Bus) ManagerOption {
+	return func(m *Manager) { m.bus = bus }
 }
 
 // NewManager returns a Manager using client for sandboxes and tokens for git
 // credentials, configured from cfg.
-func NewManager(client Client, tokens TokenStore, cfg *config.Config) *Manager {
-	return &Manager{
+func NewManager(client Client, tokens TokenStore, cfg *config.Config, opts ...ManagerOption) *Manager {
+	m := &Manager{
 		client:   client,
 		tokens:   tokens,
 		image:    cfg.OpenShell.Image,
@@ -58,6 +71,26 @@ func NewManager(client Client, tokens TokenStore, cfg *config.Config) *Manager {
 		tokenTTL: cfg.OpenShell.TokenTTL,
 		now:      time.Now,
 	}
+	for _, o := range opts {
+		o(m)
+	}
+	return m
+}
+
+// lifecycle publishes a lifecycle step of the user's session for repo.
+func (m *Manager) lifecycle(user proto.User, repo, sandbox string, step events.Lifecycle, op string, err error) {
+	if m.bus == nil {
+		return
+	}
+	l := events.SessionLifecycle{
+		Session: events.Session{User: user.Username(), Repo: repo, Sandbox: sandbox},
+		Step:    step,
+		Op:      op,
+	}
+	if err != nil {
+		l.Reason = err.Error()
+	}
+	m.bus.Publish(events.SessionLifecycleEvent(user.ID(), l))
 }
 
 // StartOptions configures Start.
@@ -105,7 +138,10 @@ func TokenName(sandbox string) string { return tokenPrefix + sandbox }
 
 // Start ensures the user's sandbox for the repository is running, clones the
 // repository on first use, and returns the attach parameters.
-func (m *Manager) Start(ctx context.Context, opts StartOptions) (*Session, error) {
+//
+// It publishes created or resumed once the sandbox is running, ready when
+// the session can be attached to, and failed when it returns an error.
+func (m *Manager) Start(ctx context.Context, opts StartOptions) (_ *Session, err error) {
 	if opts.User == nil {
 		return nil, proto.ErrUnauthorized
 	}
@@ -114,12 +150,18 @@ func (m *Manager) Start(ctx context.Context, opts StartOptions) (*Session, error
 		progress = io.Discard
 	}
 
-	command, err := shlex.Split(m.command, true)
-	if err != nil || len(command) == 0 {
+	name := SandboxName(opts.User.Username(), opts.Repo)
+	defer func() {
+		if err != nil {
+			m.lifecycle(opts.User, opts.Repo, name, events.LifecycleFailed, "start", err)
+		}
+	}()
+
+	command, serr := shlex.Split(m.command, true)
+	if serr != nil || len(command) == 0 {
 		return nil, fmt.Errorf("openshell: invalid command %q", m.command)
 	}
 
-	name := SandboxName(opts.User.Username(), opts.Repo)
 	image := opts.Image
 	if image == "" {
 		image = m.image
@@ -136,6 +178,11 @@ func (m *Manager) Start(ctx context.Context, opts StartOptions) (*Session, error
 	})
 	if err != nil {
 		return nil, err
+	}
+	if created {
+		m.lifecycle(opts.User, opts.Repo, name, events.LifecycleCreated, "", nil)
+	} else {
+		m.lifecycle(opts.User, opts.Repo, name, events.LifecycleResumed, "", nil)
 	}
 	if !created && opts.Image != "" {
 		fmt.Fprintf(progress, "Warning: --image ignored, sandbox %s already exists\n", sb.Name) //nolint:errcheck
@@ -173,6 +220,7 @@ func (m *Manager) Start(ctx context.Context, opts StartOptions) (*Session, error
 		s.Env["TERM"] = opts.Term
 	}
 
+	m.lifecycle(opts.User, opts.Repo, name, events.LifecycleReady, "", nil)
 	return s, nil
 }
 
@@ -191,28 +239,38 @@ func (m *Manager) Attach(ctx context.Context, s *Session, cols, rows uint32) (In
 // End deletes the user's sandbox for the repository and revokes its access
 // tokens. It reports whether a sandbox existed; ending an absent session is a
 // successful no-op.
+//
+// It publishes ended once the sandbox is deleted, and failed when the
+// sandbox could not be looked up or deleted. Ending an absent session
+// publishes nothing.
 func (m *Manager) End(ctx context.Context, user proto.User, repo string) (bool, error) {
 	if user == nil {
 		return false, proto.ErrUnauthorized
 	}
 
 	name := SandboxName(user.Username(), repo)
+	failed := func(err error) (bool, error) {
+		m.lifecycle(user, repo, name, events.LifecycleFailed, "end", err)
+		return false, err
+	}
 	existed := true
 	sb, err := m.client.GetSandbox(ctx, name)
 	switch {
 	case IsNotFound(err):
 		existed = false
 	case err != nil:
-		return false, fmt.Errorf("openshell: get sandbox %q: %w", name, err)
+		return failed(fmt.Errorf("openshell: get sandbox %q: %w", name, err))
 	case !owns(sb, ownerLabels(user)):
-		return false, ErrNotOwned
+		return failed(ErrNotOwned)
 	}
 
 	if existed {
 		// Seam: snapshotting /sandbox belongs here, before the delete.
 		if err := m.client.DeleteSandbox(ctx, name); err != nil {
-			return false, err
+			return failed(err)
 		}
+		// The session is gone even if revoking its tokens below fails.
+		m.lifecycle(user, repo, name, events.LifecycleEnded, "", nil)
 	}
 
 	if err := m.revokeTokens(ctx, user, TokenName(name), true); err != nil {

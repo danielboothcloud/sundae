@@ -3,6 +3,9 @@ package forge
 import (
 	"context"
 	"time"
+
+	"github.com/charmbracelet/soft-serve/pkg/events"
+	"github.com/charmbracelet/soft-serve/pkg/proto"
 )
 
 // EventKind is the kind of a forge event.
@@ -54,3 +57,32 @@ func (f NotifierFunc) ForgeEvent(ctx context.Context, ev Event) { f(ctx, ev) }
 type nopNotifier struct{}
 
 func (nopNotifier) ForgeEvent(context.Context, Event) {}
+
+// BusNotifier returns a Notifier that publishes every forge event on bus as
+// an events.KindForge event. The event belongs to the user in the
+// operation's context, if any (a scheduled sync has none). A nil bus drops
+// everything. Publishing never blocks.
+func BusNotifier(bus *events.Bus) Notifier {
+	return NotifierFunc(func(ctx context.Context, ev Event) {
+		if bus == nil {
+			return
+		}
+		var userID int64
+		if u := proto.UserFromContext(ctx); u != nil {
+			userID = u.ID()
+		}
+		out := events.ForgeOutcome{
+			Kind:  string(ev.Kind),
+			Forge: ev.Forge,
+			Repo:  ev.Repo,
+			Path:  ev.Path,
+			OK:    ev.Err == nil,
+		}
+		if ev.Err != nil {
+			out.Error = ev.Err.Error()
+		}
+		e := events.ForgeEvent(userID, out)
+		e.Time = ev.Time
+		bus.Publish(e)
+	})
+}
