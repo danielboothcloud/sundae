@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/soft-serve/pkg/db"
 	"github.com/charmbracelet/soft-serve/pkg/events"
 	"github.com/charmbracelet/soft-serve/pkg/forge"
+	"github.com/charmbracelet/soft-serve/pkg/openshell"
 	"github.com/charmbracelet/soft-serve/pkg/proto"
 	"github.com/charmbracelet/soft-serve/pkg/ssh/cmd"
 	"github.com/charmbracelet/soft-serve/pkg/sshutils"
@@ -112,6 +113,20 @@ func EventsContextMiddleware(bus *events.Bus) func(ssh.Handler) ssh.Handler {
 		return func(s ssh.Session) {
 			if bus != nil {
 				s.Context().SetValue(events.ContextKey, bus)
+			}
+			sh(s)
+		}
+	}
+}
+
+// MonitorContextMiddleware attaches the session Monitor to the session
+// context, so session commands read status, count bridges and park through
+// it. mon is nil when OpenShell is disabled; nothing is attached then.
+func MonitorContextMiddleware(mon *openshell.Monitor) func(ssh.Handler) ssh.Handler {
+	return func(sh ssh.Handler) ssh.Handler {
+		return func(s ssh.Session) {
+			if mon != nil {
+				s.Context().SetValue(openshell.MonitorContextKey, mon)
 			}
 			sh(s)
 		}

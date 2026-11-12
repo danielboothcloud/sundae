@@ -18,7 +18,7 @@ const (
 	// is set.
 	KindSessionStatus Kind = "session.status"
 	// KindSessionLifecycle is a session lifecycle step: created, ready,
-	// resumed, parked, ended or failed. Lifecycle is set.
+	// resumed, parked, exited, ended or failed. Lifecycle is set.
 	KindSessionLifecycle Kind = "session.lifecycle"
 	// KindForge is the outcome of a forge operation. Forge is set.
 	KindForge Kind = "forge"
@@ -164,12 +164,16 @@ const (
 	// LifecycleCreated: the sandbox was created.
 	LifecycleCreated Lifecycle = "created"
 	// LifecycleResumed: an existing sandbox was reused (started again if it
-	// was stopped).
+	// was stopped, resumed if it was parked).
 	LifecycleResumed Lifecycle = "resumed"
 	// LifecycleReady: the session is ready to attach to.
 	LifecycleReady Lifecycle = "ready"
-	// LifecycleParked: the sandbox was suspended while idle.
+	// LifecycleParked: the sandbox was suspended while idle. Op is "auto"
+	// when Soft Serve parked it, "park" when the user did.
 	LifecycleParked Lifecycle = "parked"
+	// LifecycleExited: the session's program exited; the sandbox is still
+	// there, and the next attach starts the program again. ExitCode is set.
+	LifecycleExited Lifecycle = "exited"
 	// LifecycleEnded: the session was ended and its sandbox deleted.
 	LifecycleEnded Lifecycle = "ended"
 	// LifecycleFailed: starting or ending the session failed. Reason says
@@ -182,10 +186,12 @@ type SessionLifecycle struct {
 	Session Session   `json:"session"`
 	Step    Lifecycle `json:"step"`
 	// Op is the operation that failed ("start", "end"); set for
-	// LifecycleFailed.
+	// LifecycleFailed. For LifecycleParked it says who parked the session.
 	Op string `json:"op,omitempty"`
 	// Reason says why a step failed. It may quote command output.
 	Reason string `json:"reason,omitempty"`
+	// ExitCode is the program's exit status; set for LifecycleExited.
+	ExitCode *int `json:"exit_code,omitempty"`
 }
 
 // ForgeOutcome is the outcome of one forge operation.

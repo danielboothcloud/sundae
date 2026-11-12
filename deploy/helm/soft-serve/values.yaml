@@ -163,6 +163,18 @@ config:
       binary_dir: "/usr/local/share/soft-serve/osewa"
       # Loopback port of the osewa server inside each sandbox.
       port: 7322
+    status:
+      # How often Soft Serve reads each running session's OSC 7501 status
+      # (`osewa local ls`, one exec per sandbox) for `session ls` and
+      # notifications. At least 1s.
+      poll_interval: 10s
+    suspend:
+      # Park (suspend) a session's sandbox once nobody has been attached and it
+      # has not reported "working" for `after`. Needs an OpenShell compute
+      # driver with suspend support; the OpenShell 0.1.8 Kubernetes driver has
+      # none, and Soft Serve then leaves sandboxes running (logged once).
+      enabled: true
+      after: 30m
     # Named presets for `session start --profile <name>`. Empty fields fall
     # back to openshell.image and openshell.command.
     profiles: {}

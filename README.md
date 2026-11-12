@@ -277,8 +277,13 @@ jobs:
 #    include: ["me/*"]
 #    sync: 10m
 
-# Agent session profiles. See "OpenShell Agent Sessions".
+# Agent session status, parking and profiles. See "OpenShell Agent Sessions".
 #sessions:
+#  status:
+#    poll_interval: 10s
+#  suspend:
+#    enabled: true
+#    after: 30m
 #  profiles:
 #    claude:
 #      image: ghcr.io/example/agent-claude:latest
@@ -387,8 +392,11 @@ ssh -t -p 23231 localhost session start icecream --name review    # a second ses
 ssh -t -p 23231 localhost session start icecream --profile claude # create from a profile (see below)
 ssh -t -p 23231 localhost session start icecream --image my/img   # image used only when the sandbox is first created
 ssh    -p 23231 localhost session start icecream -n bg --detach   # create or resume without attaching (no -t needed)
-ssh -t -p 23231 localhost session attach icecream --name review   # attach to an existing session
-ssh    -p 23231 localhost session ls                              # your sessions: repo, name, profile, sandbox, phase
+ssh -t -p 23231 localhost session attach icecream --name review   # attach to an existing session (resuming it if parked)
+ssh    -p 23231 localhost session ls                              # your sessions, with what each agent is doing
+ssh    -p 23231 localhost session ls --json                       # the same as JSON
+ssh    -p 23231 localhost session park icecream --name review     # suspend that session's sandbox now
+ssh    -p 23231 localhost session resume icecream --name review   # resume it without attaching
 ssh    -p 23231 localhost session end icecream --name review      # delete that session's sandbox and revoke its token
 ```
 
@@ -450,6 +458,14 @@ sessions:
     binary_dir: "/usr/local/share/soft-serve/osewa"
     # Loopback port of the osewa server inside each sandbox.
     port: 7322
+  status:
+    # How often to read each running session's status (at least 1s).
+    poll_interval: 10s
+  suspend:
+    # Park idle sessions (see "Parking idle sessions").
+    enabled: true
+    # Nobody attached and not working for this long.
+    after: 30m
   # Named presets for `session start --profile NAME`.
   profiles:
     claude:
@@ -461,10 +477,14 @@ sessions:
       profile: claude
 ```
 
-The `openshell` settings and `sessions.osewa` can also be set with
-`SOFT_SERVE_OPENSHELL_*` and `SOFT_SERVE_SESSIONS_OSEWA_*` environment
-variables, for example `SOFT_SERVE_OPENSHELL_ENABLED=true`;
-`sessions.profiles` and `sessions.repos` only in the file. When OpenShell is
+The `openshell` settings and `sessions.osewa`, `sessions.status` and
+`sessions.suspend` can also be set with `SOFT_SERVE_OPENSHELL_*` and
+`SOFT_SERVE_SESSIONS_OSEWA_*`, `SOFT_SERVE_SESSIONS_STATUS_*` and
+`SOFT_SERVE_SESSIONS_SUSPEND_*` environment variables, for example
+`SOFT_SERVE_OPENSHELL_ENABLED=true` or
+`SOFT_SERVE_SESSIONS_SUSPEND_AFTER=1h`; `sessions.profiles` and
+`sessions.repos` only in the file. `status.poll_interval` must be at least
+`1s`, and `suspend.after` must not be shorter than it. When OpenShell is
 enabled, `gateway_address` and `image` are required, and a `token_file`, if
 set, must be readable and not empty. Setting both `token` and `token_file` is
 an error. `soft config check` reports every problem, naming the key.
@@ -502,6 +522,86 @@ The bridge is `osewa attach` against that loopback server. Sandbox images
 other than the one in `deploy/sandbox` need `sh`, `git`, `gzip`, `base64`
 and `sha256sum` (and `flock`, used when present). osewa ends a session that
 has had nobody attached and no output for 24 hours.
+
+**Session status.** Agents report what they are doing with the
+[Program Status Protocol (OSC 7501)](https://www.superlogical.com/rex/docs/build/program-status);
+osewa keeps each session's latest report. While OpenShell is enabled, Soft
+Serve reads it from every running session: every `sessions.status.poll_interval`
+(default 10s) it lists the sandboxes it created and, in each Ready one, runs
+`osewa local ls` (one exec per sandbox, at most 8 at a time, each cut off
+after 15 seconds) and finds the session's program by the id recorded in the
+sandbox. It keeps, in memory only, the state, kind, progress, program, title
+and message, how many clients are attached, how long osewa has seen no
+output, whether the program exited and with what status, when the state last
+changed, and when and why the last poll failed. Each change goes on the event
+bus as a status event (so `notifications` see it), and a program exiting as
+an `exited` lifecycle event. The first poll after Soft Serve starts only
+records what it finds, so a restart does not notify again about every
+session; "last changed" then counts from the restart.
+
+`session ls` shows it, most urgent first: blocked, error, done, working,
+idle, then sessions that never reported:
+
+```
+Repository  Name    Phase      State                           Message                   Attached  Changed
+infra       claude  Suspended  ▲ blocked · permission · parked  Apply 3 to add, 1 to cha…  0         4m
+soft-serve  main    Ready      ● working 40%                   Running go test ./pkg/…   1         now
+dotfiles    main    Ready      · none                          -                         0         3h
+```
+
+(Profile and Sandbox columns left out.) The message is the agent's `msg`,
+else its title, else the program's name, with control and invisible
+formatting characters removed and cut to 60 characters. After the state come
+the blocked kind and progress, then `parked` or `starting` for the sandbox,
+`exited` when the program has ended, and `stale` when the last poll failed: a
+session that cannot be read keeps its last known status. Suspended,
+stopped and starting sandboxes are never exec'd; a parked session shows the
+status it had when it was parked. `session ls --json` prints the same as a
+list of objects (`state` is `none` when there is no report); text from the
+agent is sanitised there too, but not cut. Listing never resumes a parked
+session. osewa keeps only the root record, so child records (`id=...`) and
+changes between two polls are not seen.
+
+**Parking idle sessions.** A session nobody uses is parked: its sandbox is
+suspended through OpenShell, keeping its memory where the compute driver can,
+so it uses no CPU until someone comes back. A session is parked once, for the
+whole of `sessions.suspend.after` (default 30m), nobody has been attached
+(osewa counts no attached client, and Soft Serve has no bridge open on it)
+and it has not reported `working`. Every other state counts as not working,
+so an agent waiting on you (`blocked`) is parked too and still reads
+`▲ blocked · parked`. A program that never reports a status must also have
+been quiet that long (osewa has seen no output from it), so a plain shell
+running a long build is not frozen. A program that has exited runs nothing,
+so its session is parked like an idle one; the next attach starts it again
+either way. Soft Serve also counts its own bridges: from the moment `session
+start` or `session attach` begins preparing a session until its bridge
+closes, however it closes, the session is not parked. The idle window starts
+again whenever Soft Serve sees a client attached, a bridge open or close, a
+`working` report, or the sandbox come back up, and when Soft Serve starts.
+Each park is a `parked` lifecycle event (`op` `auto`, or `park` for `session
+park`).
+
+`session start`, `session attach` and `session resume` resume a parked
+session (and say so), then carry on as usual; that is a `resumed` event. A
+resume asks OpenShell to boot the sandbox cleanly if its memory cannot be
+restored (`RestartIfRestoreFails`): the session stays usable with what the
+backend kept of `/sandbox`, rather than failing until it is ended. osewa's
+server and the program are gone after such a restart, so Soft Serve starts
+them again, as for an exited program, and tells you: `Started claude again:
+it was not running when the session resumed (it had exited, or the sandbox
+could not restore its memory and restarted cleanly)`. Whatever the program
+held in memory, such as an agent's conversation, is lost then.
+
+`session park` parks a session at once (not while a bridge is open on it);
+`session resume` resumes one without attaching. Soft Serve only parks
+sandboxes it created (labelled `soft-serve.managed=true`, with an owner and a
+repository). Parking needs a compute driver with OpenShell's suspend-resume
+capability; the OpenShell 0.1.8 Kubernetes driver has none. When the gateway
+refuses, Soft Serve logs it once, stops trying for that sandbox until it
+restarts, and `session ls --json` shows why under `unsuspendable`. Set
+`sessions.suspend.enabled: false` to not try at all. After a Soft Serve
+restart a session that was parked before shows no status until it is
+resumed: the status is kept in memory only.
 
 **Client TLS secret.** In Kubernetes, mount the gateway's client certificate
 secret, typically `openshell-client-tls`, into the Soft Serve pod and point the
@@ -606,8 +706,9 @@ notifications:
 
 The default is `[blocked, done, error]`. Agent states come from the
 [Program Status Protocol (OSC 7501)](https://www.superlogical.com/rex/docs/build/program-status)
-that agents report. Collecting them from session pods is a separate step;
-until it lands, only `session_failed` and `forge_failed` have a source.
+that agents report, as Soft Serve polls them (see "Session status" under
+"OpenShell Agent Sessions"): a change is seen up to `sessions.status.poll_interval`
+late, and a state that lasts less than that may not be seen at all.
 
 **What a notification says.** The title has the state's glyph, the state and
 the session, for example `▲ blocked · infra / claude-1`. Each record of a
@@ -666,8 +767,8 @@ example `SOFT_SERVE_NOTIFICATIONS_ON=blocked,done` or
 
 **Event bus.** Notifications are one subscriber of an in-process event bus
 that carries session status changes, session lifecycle steps (created,
-resumed, ready, parked, ended, failed, each naming the repository, session
-name and sandbox) and forge outcomes. Each subscriber
+resumed, ready, parked, exited, ended, failed, each naming the repository,
+session name and sandbox) and forge outcomes. Each subscriber
 has a bounded buffer; one that falls behind loses events rather than slowing
 anything down, counted in `soft_serve_events_dropped_total{subscriber}`.
 `soft_serve_events_published_total{kind}` counts what was published.

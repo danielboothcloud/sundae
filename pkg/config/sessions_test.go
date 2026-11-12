@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/matryer/is"
 )
@@ -16,12 +17,19 @@ func TestSessionsDefaults(t *testing.T) {
 	is.NoErr(cfg.Validate())
 	is.Equal(cfg.Sessions.Osewa.BinaryDir, DefaultOsewaBinaryDir)
 	is.Equal(cfg.Sessions.Osewa.Port, DefaultOsewaPort)
+	is.Equal(cfg.Sessions.Status.PollInterval, DefaultStatusPollInterval)
+	is.True(cfg.Sessions.Suspend.Enabled)
+	is.Equal(cfg.Sessions.Suspend.After, DefaultSuspendAfter)
 
-	// A zeroed section gets the defaults too.
+	// A zeroed section gets the defaults too, except that parking stays
+	// off: false is a value, not an absence.
 	cfg.Sessions = SessionsConfig{}
 	is.NoErr(cfg.Validate())
 	is.Equal(cfg.Sessions.Osewa.BinaryDir, DefaultOsewaBinaryDir)
 	is.Equal(cfg.Sessions.Osewa.Port, DefaultOsewaPort)
+	is.Equal(cfg.Sessions.Status.PollInterval, DefaultStatusPollInterval)
+	is.Equal(cfg.Sessions.Suspend.After, DefaultSuspendAfter)
+	is.True(!cfg.Sessions.Suspend.Enabled)
 
 	// A relative binary_dir is resolved against the data path.
 	cfg.Sessions.Osewa.BinaryDir = "osewa"
@@ -50,6 +58,22 @@ func TestValidateSessions(t *testing.T) {
 		"bad port": {func(c *Config) { c.Sessions.Osewa.Port = 70000 }, "sessions.osewa.port 70000 must be between 1 and 65535"},
 		"negative port": {
 			func(c *Config) { c.Sessions.Osewa.Port = -1 }, "sessions.osewa.port -1",
+		},
+		"poll interval too short": {
+			func(c *Config) { c.Sessions.Status.PollInterval = 500 * time.Millisecond },
+			"sessions.status.poll_interval 500ms must be at least 1s",
+		},
+		"negative poll interval": {
+			func(c *Config) { c.Sessions.Status.PollInterval = -time.Second },
+			"sessions.status.poll_interval -1s must be at least 1s",
+		},
+		"negative suspend after": {
+			func(c *Config) { c.Sessions.Suspend.After = -time.Minute },
+			"sessions.suspend.after -1m0s must not be negative",
+		},
+		"suspend after shorter than poll": {
+			func(c *Config) { c.Sessions.Suspend.After = 5 * time.Second },
+			"sessions.suspend.after 5s must not be shorter than status.poll_interval 10s",
 		},
 		"profile name": {
 			func(c *Config) { c.Sessions.Profiles["Bad_Name"] = SessionProfile{} },
@@ -124,6 +148,8 @@ func TestSessionsConfigFileRoundTrip(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.DataPath = t.TempDir()
 	cfg.Sessions.Osewa.Port = 7400
+	cfg.Sessions.Status.PollInterval = 15 * time.Second
+	cfg.Sessions.Suspend = SessionSuspendConfig{Enabled: false, After: 2 * time.Hour}
 	cfg.Sessions.Profiles = map[string]SessionProfile{
 		"claude": {Image: "ghcr.io/me/agent-claude:latest", Command: `claude --model "opus"`},
 	}
@@ -134,6 +160,8 @@ func TestSessionsConfigFileRoundTrip(t *testing.T) {
 	is.NoErr(parseFile(got, cfg.ConfigPath()))
 	is.Equal(got.Sessions.Osewa.Port, 7400)
 	is.Equal(got.Sessions.Osewa.BinaryDir, DefaultOsewaBinaryDir)
+	is.Equal(got.Sessions.Status.PollInterval, 15*time.Second)
+	is.Equal(got.Sessions.Suspend, SessionSuspendConfig{Enabled: false, After: 2 * time.Hour})
 	is.Equal(got.Sessions.Profiles["claude"], cfg.Sessions.Profiles["claude"])
 	is.Equal(got.Sessions.Repos["infra/*"].Profile, "claude")
 }
@@ -145,6 +173,10 @@ func TestSessionsUnknownKeys(t *testing.T) {
 	is.NoErr(os.WriteFile(p, []byte(`sessions:
   osewa:
     version: v0.1.4
+  status:
+    interval: 5s
+  suspend:
+    idle: 1h
   profiles:
     claude:
       agent: claude
@@ -157,8 +189,10 @@ func TestSessionsUnknownKeys(t *testing.T) {
 	is.True(err != nil)
 	for _, want := range []string{
 		"line 3: unknown key sessions.osewa.version",
-		"line 6: unknown key sessions.profiles.<name>.agent",
-		"line 9: unknown key sessions.repos.<name>.profil",
+		"line 5: unknown key sessions.status.interval",
+		"line 7: unknown key sessions.suspend.idle",
+		"line 10: unknown key sessions.profiles.<name>.agent",
+		"line 13: unknown key sessions.repos.<name>.profil",
 	} {
 		is.True(strings.Contains(err.Error(), want)) // missing: want
 	}
@@ -170,12 +204,31 @@ func TestSessionsEnv(t *testing.T) {
 	t.Setenv("SOFT_SERVE_DATA_PATH", td)
 	t.Setenv("SOFT_SERVE_SESSIONS_OSEWA_BINARY_DIR", "/opt/osewa")
 	t.Setenv("SOFT_SERVE_SESSIONS_OSEWA_PORT", "7401")
+	t.Setenv("SOFT_SERVE_SESSIONS_STATUS_POLL_INTERVAL", "20s")
+	t.Setenv("SOFT_SERVE_SESSIONS_SUSPEND_ENABLED", "false")
+	t.Setenv("SOFT_SERVE_SESSIONS_SUSPEND_AFTER", "45m")
 	cfg := DefaultConfig()
 	is.NoErr(cfg.ParseEnv())
 	is.Equal(cfg.Sessions.Osewa.BinaryDir, "/opt/osewa")
 	is.Equal(cfg.Sessions.Osewa.Port, 7401)
+	is.Equal(cfg.Sessions.Status.PollInterval, 20*time.Second)
+	is.Equal(cfg.Sessions.Suspend, SessionSuspendConfig{Enabled: false, After: 45 * time.Minute})
 
 	envs := strings.Join(cfg.Environ(), "\n")
 	is.True(strings.Contains(envs, "SOFT_SERVE_SESSIONS_OSEWA_BINARY_DIR=/opt/osewa\n"))
 	is.True(strings.Contains(envs, "SOFT_SERVE_SESSIONS_OSEWA_PORT=7401"))
+	is.True(strings.Contains(envs, "SOFT_SERVE_SESSIONS_STATUS_POLL_INTERVAL=20s"))
+	is.True(strings.Contains(envs, "SOFT_SERVE_SESSIONS_SUSPEND_ENABLED=false"))
+	is.True(strings.Contains(envs, "SOFT_SERVE_SESSIONS_SUSPEND_AFTER=45m0s"))
+
+	// Hook subprocesses rebuild the config from Environ.
+	for _, kv := range cfg.Environ() {
+		if k, v, ok := strings.Cut(kv, "="); ok && strings.HasPrefix(k, "SOFT_SERVE_SESSIONS_") {
+			t.Setenv(k, v)
+		}
+	}
+	again := DefaultConfig()
+	is.NoErr(again.ParseEnv())
+	is.Equal(again.Sessions.Status, cfg.Sessions.Status)
+	is.Equal(again.Sessions.Suspend, cfg.Sessions.Suspend)
 }

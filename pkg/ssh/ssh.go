@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/soft-serve/pkg/db"
 	"github.com/charmbracelet/soft-serve/pkg/events"
 	"github.com/charmbracelet/soft-serve/pkg/forge"
+	"github.com/charmbracelet/soft-serve/pkg/openshell"
 	"github.com/charmbracelet/soft-serve/pkg/store"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -86,6 +87,10 @@ func NewSSHServer(ctx context.Context) (*SSHServer, error) {
 			// Events middleware: attaches the event bus, for session
 			// lifecycle events and subscribers.
 			EventsContextMiddleware(events.FromContext(ctx)),
+			// Monitor middleware: attaches the session monitor, when
+			// OpenShell is enabled, for session status, bridge
+			// tracking and parking.
+			MonitorContextMiddleware(openshell.MonitorFromContext(ctx)),
 			// Context middleware.
 			// This must come first to set up the context.
 			ContextMiddleware(cfg, dbx, datastore, be, logger),

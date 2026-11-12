@@ -4,6 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+	"unicode"
 
 	"charm.land/lipgloss/v2/table"
 	"github.com/charmbracelet/soft-serve/pkg/backend"
@@ -41,6 +46,8 @@ func SessionCommand() *cobra.Command {
 		sessionStartCommand(),
 		sessionAttachCommand(),
 		sessionListCommand(),
+		sessionParkCommand(),
+		sessionResumeCommand(),
 		sessionEndCommand(),
 	)
 
@@ -67,7 +74,8 @@ session is created.
 
 Detach with ~. (after a newline), or just close the connection: the program
 keeps running. "session attach" re-attaches and "session end" deletes the
-session. With --detach, start the session without attaching.`,
+session. With --detach, start the session without attaching. A parked
+session is resumed first.`,
 		Args: cobra.ExactArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if !detach {
@@ -101,8 +109,9 @@ func sessionAttachCommand() *cobra.Command {
 		Short: "Attach to a running agent session (requires ssh -t)",
 		Long: `Attach to an existing agent session of a repository.
 
-The session's program is started again if it is not running. Detach with ~.
-(after a newline), or close the connection; the program keeps running.`,
+The session is resumed first if it is parked, and its program is started
+again if it is not running. Detach with ~. (after a newline), or close the
+connection; the program keeps running.`,
 		Args: cobra.ExactArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if err := checkTerminal(cmd); err != nil {
@@ -118,6 +127,14 @@ The session's program is started again if it is not running. Detach with ~.
 	cmd.Flags().StringVarP(&name, "name", "n", "", `Session name (default "main")`)
 
 	return cmd
+}
+
+// newManager returns a Manager for a command, publishing on the context's
+// event bus and coordinating with the context's Monitor.
+func newManager(ctx context.Context, client openshell.Client) *openshell.Manager {
+	return openshell.NewManager(client, backend.FromContext(ctx), config.FromContext(ctx),
+		openshell.WithEvents(events.FromContext(ctx)),
+		openshell.WithMonitor(openshell.MonitorFromContext(ctx)))
 }
 
 // runSession starts (create) or resumes the session, then attaches the SSH
@@ -139,8 +156,20 @@ func runSession(cmd *cobra.Command, repo string, opts openshell.StartOptions, cr
 	}
 	defer client.Close() //nolint:errcheck
 
-	mgr := openshell.NewManager(client, be, cfg, openshell.WithEvents(events.FromContext(ctx)))
+	mgr := newManager(ctx, client)
 	opts.User = proto.UserFromContext(ctx)
+	if opts.User == nil {
+		return proto.ErrUnauthorized
+	}
+
+	// Count the bridge from here until it closes, whichever way this
+	// returns, so the session is not parked while it is prepared or
+	// attached. An invalid name counts against a sandbox that cannot exist,
+	// briefly, and Start rejects it.
+	closeBridge := openshell.MonitorFromContext(ctx).OpenBridge(ctx,
+		openshell.SessionSandboxName(opts.User.Username(), rr.Name(), opts.Name))
+	defer closeBridge()
+
 	opts.Repo = rr.Name()
 	opts.VCS = rr.Vcs()
 	opts.Progress = cmd.ErrOrStderr()
@@ -212,17 +241,226 @@ func nameArg(name string) string {
 	return " --name " + name
 }
 
-// sessionColumns are the columns of `session ls`. Status columns from the
-// sessions' osewa status go at the end.
+// sessionRow is one session of `session ls`: what the gateway lists, and
+// what the Monitor last read from the sandbox (nil when it has nothing yet).
+type sessionRow struct {
+	info   openshell.Info
+	status *openshell.SessionStatus
+}
+
+// record returns the session's OSC 7501 record; none when unknown.
+func (r sessionRow) record() events.Record {
+	if r.status == nil {
+		return events.Record{}
+	}
+	return r.status.Record
+}
+
+// polled reports whether the Monitor has read the session's status.
+func (r sessionRow) polled() bool { return r.status != nil && !r.status.Polled.IsZero() }
+
+// sessionColumns are the columns of `session ls`.
 var sessionColumns = []struct {
 	header string
-	value  func(openshell.Info) string
+	value  func(sessionRow, time.Time) string
 }{
-	{"Repository", func(i openshell.Info) string { return i.Repo }},
-	{"Name", func(i openshell.Info) string { return i.Name }},
-	{"Profile", func(i openshell.Info) string { return orDash(i.Profile) }},
-	{"Sandbox", func(i openshell.Info) string { return i.Sandbox }},
-	{"Phase", func(i openshell.Info) string { return orDash(i.Phase) }},
+	{"Repository", func(r sessionRow, _ time.Time) string { return r.info.Repo }},
+	{"Name", func(r sessionRow, _ time.Time) string { return r.info.Name }},
+	{"Profile", func(r sessionRow, _ time.Time) string { return orDash(r.info.Profile) }},
+	{"Sandbox", func(r sessionRow, _ time.Time) string { return r.info.Sandbox }},
+	{"Phase", func(r sessionRow, _ time.Time) string { return orDash(r.info.Phase) }},
+	{"State", func(r sessionRow, _ time.Time) string { return stateText(r) }},
+	{"Message", func(r sessionRow, _ time.Time) string { return orDash(messageText(r.record(), maxMessage)) }},
+	{"Attached", func(r sessionRow, _ time.Time) string {
+		if !r.polled() {
+			return "-"
+		}
+		return strconv.Itoa(r.status.Attached)
+	}},
+	{"Changed", func(r sessionRow, now time.Time) string {
+		if r.status == nil {
+			return "-"
+		}
+		return since(r.status.Changed, now)
+	}},
+}
+
+// maxMessage is how many characters of a message `session ls` shows.
+const maxMessage = 60
+
+// stateOrder is the sort rank of a state: what needs the user first.
+func stateOrder(s events.State) int {
+	switch s {
+	case events.StateBlocked:
+		return 0
+	case events.StateError:
+		return 1
+	case events.StateDone:
+		return 2
+	case events.StateWorking:
+		return 3
+	case events.StateIdle:
+		return 4
+	default:
+		return 5
+	}
+}
+
+// stateText renders a session's state as the TUI does: glyph and word, then
+// the blocked kind, the progress, and the sandbox lifecycle, e.g.
+// "▲ blocked · permission · parked" or "● working 40%".
+func stateText(r sessionRow) string {
+	rec := r.record()
+	word := string(rec.State)
+	if rec.State == events.StateNone {
+		word = "none"
+	}
+	parts := []string{rec.State.Glyph() + " " + word}
+	if rec.State == events.StateBlocked && rec.Kind != "" {
+		parts = append(parts, sanitizeText(string(rec.Kind), 16))
+	}
+	if rec.Progress != nil && (rec.State == events.StateWorking || rec.State == events.StateBlocked) {
+		parts[0] += " " + strconv.Itoa(*rec.Progress) + "%"
+	}
+	if word := openshell.PhaseWord(r.info.Phase); word != "" {
+		parts = append(parts, word)
+	} else {
+		if r.status != nil && r.status.Exited {
+			parts = append(parts, "exited")
+		}
+		if r.status != nil && r.status.Stale && !r.status.Parked {
+			parts = append(parts, "stale")
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+// messageText is the line a session shows: its message, else its title,
+// else the program's name; sanitised and cut to max characters.
+func messageText(rec events.Record, max int) string {
+	for _, s := range []string{rec.Msg, rec.Title, rec.App} {
+		if t := sanitizeText(s, max); t != "" {
+			return t
+		}
+	}
+	return ""
+}
+
+// sanitizeText makes untrusted program output safe to print: invalid UTF-8
+// is replaced, control characters (C0, DEL, C1) and invisible formatting
+// characters (bidi overrides, zero-width characters) are removed, runs of
+// whitespace become one space, and the result is cut to max characters,
+// ending in "…" when cut. max <= 0 does not cut.
+func sanitizeText(s string, max int) string {
+	s = strings.ToValidUTF8(s, "\uFFFD")
+	var b strings.Builder
+	space := false
+	n := 0
+	for _, r := range s {
+		switch {
+		case unicode.IsSpace(r):
+			space = b.Len() > 0
+			continue
+		case unicode.IsControl(r), unicode.Is(unicode.Cf, r):
+			continue
+		}
+		if space {
+			b.WriteByte(' ')
+			n++
+			space = false
+		}
+		b.WriteRune(r)
+		n++
+	}
+	out := b.String()
+	if max > 0 && n > max {
+		runes := []rune(out)
+		out = strings.TrimRightFunc(string(runes[:max-1]), unicode.IsSpace) + "…"
+	}
+	return out
+}
+
+// since renders how long ago t was: "now" under a minute, then minutes,
+// hours and days; "-" for the zero time.
+func since(t, now time.Time) string {
+	if t.IsZero() {
+		return "-"
+	}
+	d := now.Sub(t)
+	switch {
+	case d < time.Minute:
+		return "now"
+	case d < time.Hour:
+		return strconv.Itoa(int(d/time.Minute)) + "m"
+	case d < 48*time.Hour:
+		return strconv.Itoa(int(d/time.Hour)) + "h"
+	default:
+		return strconv.Itoa(int(d/(24*time.Hour))) + "d"
+	}
+}
+
+// sessionJSON is one session of `session ls --json`. Text from the program
+// (app, title, msg) is sanitised but not cut.
+type sessionJSON struct {
+	Repo     string `json:"repo"`
+	Name     string `json:"name"`
+	Profile  string `json:"profile,omitempty"`
+	Sandbox  string `json:"sandbox"`
+	Phase    string `json:"phase"`
+	Parked   bool   `json:"parked"`
+	State    string `json:"state"`
+	Kind     string `json:"kind,omitempty"`
+	Progress *int   `json:"progress,omitempty"`
+	App      string `json:"app,omitempty"`
+	Title    string `json:"title,omitempty"`
+	Msg      string `json:"msg,omitempty"`
+	// Attached is nil until the status has been read.
+	Attached *int       `json:"attached,omitempty"`
+	Bridges  int        `json:"bridges"`
+	Running  bool       `json:"running"`
+	Exited   bool       `json:"exited"`
+	ExitCode *int       `json:"exit_code,omitempty"`
+	Changed  *time.Time `json:"changed,omitempty"`
+	Polled   *time.Time `json:"polled,omitempty"`
+	Stale    bool       `json:"stale"`
+	Error    string     `json:"error,omitempty"`
+	// Unsuspendable is why the gateway refused to park the session.
+	Unsuspendable string `json:"unsuspendable,omitempty"`
+}
+
+func (r sessionRow) json() sessionJSON {
+	rec := r.record()
+	j := sessionJSON{
+		Repo:     r.info.Repo,
+		Name:     r.info.Name,
+		Profile:  r.info.Profile,
+		Sandbox:  r.info.Sandbox,
+		Phase:    r.info.Phase,
+		Parked:   openshell.PhaseWord(r.info.Phase) == openshell.WordParked,
+		State:    string(rec.State),
+		Kind:     sanitizeText(string(rec.Kind), 0),
+		Progress: rec.Progress,
+		App:      sanitizeText(rec.App, 0),
+		Title:    sanitizeText(rec.Title, 0),
+		Msg:      sanitizeText(rec.Msg, 0),
+	}
+	if j.State == "" {
+		j.State = "none"
+	}
+	if st := r.status; st != nil {
+		j.Bridges = st.Bridges
+		j.Running, j.Exited, j.ExitCode = st.Running, st.Exited, st.ExitCode
+		j.Stale, j.Error, j.Unsuspendable = st.Stale, sanitizeText(st.Error, 0), st.Unsuspendable
+		if !st.Changed.IsZero() {
+			j.Changed = &st.Changed
+		}
+		if r.polled() {
+			j.Polled = &st.Polled
+			a := st.Attached
+			j.Attached = &a
+		}
+	}
+	return j
 }
 
 func orDash(s string) string {
@@ -233,15 +471,23 @@ func orDash(s string) string {
 }
 
 func sessionListCommand() *cobra.Command {
-	return &cobra.Command{
+	var asJSON bool
+	cmd := &cobra.Command{
 		Use:     "ls",
 		Aliases: []string{"list"},
-		Short:   "List your agent sessions",
-		Args:    cobra.NoArgs,
+		Short:   "List your agent sessions and what their agents are doing",
+		Long: `List your agent sessions: repository, name, profile, sandbox, phase,
+and the agent's status (OSC 7501) as Soft Serve last read it: state, message,
+how many clients are attached, and when the state last changed.
+
+Sessions that need you come first: blocked, error, done, working, idle,
+then those with no status. A parked session keeps the state it had when it
+was parked. Listing never resumes a parked session.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
 			cfg := config.FromContext(ctx)
-			be := backend.FromContext(ctx)
+			user := proto.UserFromContext(ctx)
 
 			client, err := newOpenShellClient(cfg)
 			if err != nil {
@@ -249,25 +495,47 @@ func sessionListCommand() *cobra.Command {
 			}
 			defer client.Close() //nolint:errcheck
 
-			infos, err := openshell.NewManager(client, be, cfg).List(ctx, proto.UserFromContext(ctx))
+			infos, err := newManager(ctx, client).List(ctx, user)
 			if err != nil {
 				return err
 			}
 
-			if len(infos) == 0 {
+			statuses := map[string]*openshell.SessionStatus{}
+			for _, st := range openshell.MonitorFromContext(ctx).ForUser(user.ID()) {
+				statuses[st.Session.Sandbox] = &st
+			}
+			rows := make([]sessionRow, len(infos))
+			for i, info := range infos {
+				rows[i] = sessionRow{info: info, status: statuses[info.Sandbox]}
+			}
+			// List sorts by repository and name; keep that within a state.
+			slices.SortStableFunc(rows, func(a, b sessionRow) int {
+				return stateOrder(a.record().State) - stateOrder(b.record().State)
+			})
+
+			if asJSON {
+				out := make([]sessionJSON, len(rows))
+				for i, r := range rows {
+					out[i] = r.json()
+				}
+				return writeJSON(cmd, out)
+			}
+
+			if len(rows) == 0 {
 				cmd.Println("No sessions found")
 				return nil
 			}
 
+			now := time.Now()
 			headers := make([]string, len(sessionColumns))
 			for i, c := range sessionColumns {
 				headers[i] = c.header
 			}
 			t := table.New().Headers(headers...)
-			for _, info := range infos {
+			for _, r := range rows {
 				row := make([]string, len(sessionColumns))
 				for i, c := range sessionColumns {
-					row[i] = c.value(info)
+					row[i] = c.value(r, now)
 				}
 				t = t.Row(row...)
 			}
@@ -275,6 +543,70 @@ func sessionListCommand() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "print JSON")
+	return cmd
+}
+
+func sessionParkCommand() *cobra.Command {
+	var name string
+	cmd := &cobra.Command{
+		Use:   "park REPOSITORY",
+		Short: "Park (suspend) an agent session now",
+		Long: `Park an agent session: suspend its sandbox, keeping its memory where the
+OpenShell compute driver supports it, so it uses no CPU until it is resumed.
+"session start", "session attach" and "session resume" resume it.
+
+A session with an open bridge is not parked; detach first. Sessions are also
+parked automatically after sessions.suspend.after with nobody attached and
+no working status.`,
+		Args:    cobra.ExactArgs(1),
+		PreRunE: checkIfReadable,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			client, err := newOpenShellClient(config.FromContext(ctx))
+			if err != nil {
+				return err
+			}
+			defer client.Close() //nolint:errcheck
+
+			// Like end, no repository lookup: repoArg is the name the
+			// sandbox name derives from.
+			repo := repoArg(args)
+			parked, err := newManager(ctx, client).Park(ctx, proto.UserFromContext(ctx), repo, name)
+			if err != nil {
+				return err
+			}
+			if name == "" {
+				name = openshell.DefaultSessionName
+			}
+			if parked {
+				cmd.PrintErrf("Session %s of %s parked. Resume it with: session resume %s%s\n", name, repo, repo, nameArg(name))
+			} else {
+				cmd.PrintErrf("Session %s of %s is already parked\n", name, repo)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&name, "name", "n", "", `Session name (default "main")`)
+	return cmd
+}
+
+func sessionResumeCommand() *cobra.Command {
+	var name string
+	cmd := &cobra.Command{
+		Use:   "resume REPOSITORY",
+		Short: "Resume a parked agent session without attaching",
+		Long: `Resume an agent session without attaching to it: resume its sandbox if it
+is parked, renew its git credentials, and start its program again if it is
+not running. Like "session attach --detach"; it never creates a session.`,
+		Args:    cobra.ExactArgs(1),
+		PreRunE: checkIfReadable,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runSession(cmd, args[0], openshell.StartOptions{Name: name}, false, true)
+		},
+	}
+	cmd.Flags().StringVarP(&name, "name", "n", "", `Session name (default "main")`)
+	return cmd
 }
 
 func sessionEndCommand() *cobra.Command {
@@ -289,10 +621,7 @@ credentials. Other sessions of the repository are left running.`,
 		PreRunE: checkIfReadable,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			cfg := config.FromContext(ctx)
-			be := backend.FromContext(ctx)
-
-			client, err := newOpenShellClient(cfg)
+			client, err := newOpenShellClient(config.FromContext(ctx))
 			if err != nil {
 				return err
 			}
@@ -301,7 +630,7 @@ credentials. Other sessions of the repository are left running.`,
 			// No repository lookup: a session must stay endable after its
 			// repository is deleted or renamed. repoArg is the same
 			// sanitized name Start derives the sandbox name from.
-			mgr := openshell.NewManager(client, be, cfg, openshell.WithEvents(events.FromContext(ctx)))
+			mgr := newManager(ctx, client)
 			existed, err := mgr.End(ctx, proto.UserFromContext(ctx), repoArg(args), name)
 			if err != nil {
 				return err

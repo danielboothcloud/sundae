@@ -24,6 +24,7 @@ var allScripts = map[string]string{
 	osewaEnrollName:    osewaEnrollScript,
 	osewaHostsName:     osewaHostsScript,
 	osewaListName:      osewaListScript,
+	osewaStatusName:    osewaStatusScript,
 	osewaNewName:       osewaNewScript,
 	gitCredentialsName: gitCredentialsScript,
 }

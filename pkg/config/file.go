@@ -192,6 +192,18 @@ sessions:
     binary_dir: {{ printf "%q" .Sessions.Osewa.BinaryDir }}
     # Loopback port of the osewa server inside each sandbox.
     port: {{ .Sessions.Osewa.Port }}
+  status:
+    # How often Soft Serve runs "osewa local ls" in each running session's
+    # sandbox to read its OSC 7501 status (shown by "session ls", sent to
+    # notifications). At least 1s.
+    poll_interval: "{{ .Sessions.Status.PollInterval }}"
+  suspend:
+    # Park (suspend) a session's sandbox once nobody has been attached to it
+    # and it has not reported "working" for "after". Needs an OpenShell
+    # compute driver that supports suspend; otherwise sandboxes keep running.
+    # "session start" and "session attach" resume a parked session.
+    enabled: {{ .Sessions.Suspend.Enabled }}
+    after: "{{ .Sessions.Suspend.After }}"
   # Named presets for "session start --profile NAME". Empty fields fall back
   # to openshell.image and openshell.command.
 {{- if .Sessions.Profiles }}

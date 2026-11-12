@@ -1,0 +1,1 @@
+{"id":0,"sessions":[{"id":"0a37cad0111161f38ab404a00dd6c51e","title":"","cols":80,"rows":24,"created":1794521972,"exited":false,"exit_code":0,"attached":0,"idle_seconds":0,"status":{"state":"blocked","kind":"permission","app":"soft-test","msg":"Apply 3 changes?"},"build":{"version":0,"ghostty":"83fb95624b0439ee660c2679b43b38c8b63769cd","snapshot_version":1}}]}

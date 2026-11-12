@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/soft-serve/pkg/db"
 	"github.com/charmbracelet/soft-serve/pkg/events"
 	"github.com/charmbracelet/soft-serve/pkg/forge"
+	"github.com/charmbracelet/soft-serve/pkg/openshell"
 	"github.com/matryer/is"
 )
 
@@ -95,4 +96,45 @@ func TestServerNotifications(t *testing.T) {
 		t.Fatal("no notification")
 	}
 	shutdown(t, srv)
+}
+
+func TestServerSessionMonitor(t *testing.T) {
+	is := is.New(t)
+
+	// Off with OpenShell.
+	srv := newTestServer(t, nil)
+	is.True(srv.Monitor == nil)
+	is.True(openshell.MonitorFromContext(srv.ctx) == nil)
+	_, ok := srv.startMonitor()
+	is.True(!ok)
+	shutdown(t, srv)
+
+	srv = newTestServer(t, func(ctx context.Context) {
+		cfg := config.FromContext(ctx)
+		cfg.OpenShell.Enabled = true
+		cfg.OpenShell.GatewayAddress = "http://127.0.0.1:1" // nothing listens
+		cfg.OpenShell.Image = "sandbox:latest"
+		cfg.Sessions.Status.PollInterval = time.Hour
+	})
+	is.True(srv.Monitor != nil)
+	// The SSH server is built from this context.
+	is.True(openshell.MonitorFromContext(srv.ctx) == srv.Monitor)
+
+	run, ok := srv.startMonitor()
+	is.True(ok)
+	_, again := srv.startMonitor()
+	is.True(!again) // once
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		run()
+	}()
+	shutdown(t, srv) // stops the monitor before closing the bus
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("monitor still running after shutdown")
+	}
+	_, ok = srv.startMonitor()
+	is.True(!ok) // not after shutdown
 }

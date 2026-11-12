@@ -221,6 +221,16 @@ for every `config.forges[].token_file`: the check reads each one. And for
   for every message, so a rotated Secret needs no restart. The chart refuses
   an inline `notifications.ntfy.token`. Soft Serve needs egress to the ntfy
   server.
+- **Session status and parking.** Soft Serve polls every running session's
+  sandbox (`osewa local ls`, one exec each, every
+  `sessions.status.poll_interval`) and parks idle sessions after
+  `sessions.suspend.after` (semantics in the top-level README, "Session
+  status" and "Parking idle sessions"). Parking needs a compute driver with
+  OpenShell's suspend-resume capability. The OpenShell 0.1.8 Kubernetes driver
+  does not have it (`openshell-driver-kubernetes/src/grpc.rs`,
+  `suspend_sandbox`), so with this deployment the gateway refuses, Soft Serve
+  logs that once and leaves the sandboxes running. Set
+  `config.sessions.suspend.enabled: false` to skip the attempt.
 - **The data volume outlives the release.** `hf destroy` keeps the
   `data-soft-serve-0` claim and the Agent Sandbox CRDs. Its size cannot be
   changed through helmfile after the first install.
@@ -262,6 +272,12 @@ Not checked, because it needs an image build or a live cluster:
   (0.1.6) works against a 0.1.8 gateway.
 - Whether sandboxes can reach Soft Serve's HTTP Service, and how the sandbox
   egress policy is supplied.
+- Session status polling and parking against a gateway: that `osewa local
+  ls` by exec answers within the poll timeout in a sandbox, what the gateway
+  answers to a suspend (expected: FailedPrecondition, "compute driver does
+  not support sandbox suspend", from the 0.1.8 source), and, with a driver
+  that can suspend, a resume that keeps the osewa session or a clean restart
+  that loses it. The poll was run against a native osewa 0.1.4 build.
 - Notifications against a real ntfy server from the cluster (egress, and an
   access-controlled topic with a token). The publish format was checked
   against an `httptest` server.

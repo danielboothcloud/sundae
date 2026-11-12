@@ -1,12 +1,14 @@
 // Package openshell launches and resumes OpenShell agent sessions for Soft
 // Serve repositories.
 //
-// Soft Serve keeps no session state: sandbox names are derived from the user,
-// repository and session name (see SessionSandboxName), the OpenShell gateway
-// is the source of truth for which sessions exist, and each sandbox carries
-// its user, repository, session name and profile as annotations. Inside the
-// sandbox, an osewa session holds the session's program, so it outlives the
-// SSH connection that started it.
+// Soft Serve stores no session state: sandbox names are derived from the
+// user, repository and session name (see SessionSandboxName), the OpenShell
+// gateway is the source of truth for which sessions exist, and each sandbox
+// carries its user, repository, session name and profile as annotations.
+// Inside the sandbox, an osewa session holds the session's program, so it
+// outlives the SSH connection that started it. The server's Monitor keeps
+// what it reads of each session's status, and the open bridges, in memory
+// only.
 package openshell
 
 import (
@@ -68,6 +70,37 @@ const (
 // belongs to someone else.
 var ErrNotOwned = errors.New("openshell: sandbox name is in use by another owner")
 
+// ErrSuspendUnsupported is returned by SuspendSandbox when the client has no
+// way to suspend sandboxes. IsSuspendUnsupported also recognises the
+// gateway's own refusals.
+var ErrSuspendUnsupported = errors.New("openshell: sandbox suspend is not supported")
+
+// resumeRestartIfRestoreFails is the RestartIfRestoreFails option every
+// resume of a suspended sandbox uses. When the isolation backend cannot
+// restore the sandbox's memory, true boots it cleanly instead of failing:
+// the session stays usable with whatever the backend kept of /sandbox (the
+// checkout, unpushed work), and Start finds the osewa session gone and starts
+// the program again, telling the user. With false the session could only be
+// ended, losing more than the clean restart does.
+const resumeRestartIfRestoreFails = true
+
+// IsSuspendUnsupported reports whether err means the gateway cannot suspend
+// sandboxes: ErrSuspendUnsupported, an Unimplemented status, or the
+// FailedPrecondition the OpenShell gateway (0.1.8, compute/mod.rs
+// require_suspend_resume) returns when its compute driver lacks the
+// suspend-resume capability, which the SDK reports as a Conflict.
+func IsSuspendUnsupported(err error) bool {
+	if errors.Is(err, ErrSuspendUnsupported) || v1.IsUnimplemented(err) {
+		return true
+	}
+	var se *v1.StatusError
+	if !errors.As(err, &se) || se.Code != v1.ErrorConflict {
+		return false
+	}
+	msg := strings.ToLower(se.Message)
+	return strings.Contains(msg, "not support") || strings.Contains(msg, "unsupported")
+}
+
 // SandboxRequest describes the sandbox to create when none exists.
 type SandboxRequest struct {
 	// Image is the sandbox base image.
@@ -101,6 +134,12 @@ type Client interface {
 	// DeleteSandbox deletes the named sandbox. An absent sandbox is not an
 	// error.
 	DeleteSandbox(ctx context.Context, name string) error
+	// SuspendSandbox parks the named sandbox: it suspends it, which keeps
+	// its memory where the compute driver supports that, and waits until it
+	// is Suspended. A gateway that cannot suspend returns an error for which
+	// IsSuspendUnsupported returns true. EnsureSandbox and ResumeSandbox
+	// resume a suspended sandbox.
+	SuspendSandbox(ctx context.Context, name string) (*Sandbox, error)
 	// Upload copies the local file at localPath to remotePath in the
 	// sandbox, replacing it. Missing parent directories are created.
 	Upload(ctx context.Context, name, localPath, remotePath string) error
@@ -141,13 +180,18 @@ func New(cfg config.OpenShellConfig) (Client, error) {
 		return nil, fmt.Errorf("openshell: create client: %w", err)
 	}
 
-	return newSDKClient(cfg.Workspace, c.Sandboxes(), c.Exec(), c.Files(), c), nil
+	sc := newSDKClient(cfg.Workspace, c.Sandboxes(), c.Exec(), c.Files(), c)
+	sc.suspender = c.SandboxSuspendResume()
+	return sc, nil
 }
 
 // sdkClient implements Client on top of the SDK sub-clients.
 type sdkClient struct {
 	workspace string
 	sandboxes v1.SandboxInterface
+	// suspender suspends and resumes sandboxes; nil when the sandbox
+	// sub-client cannot.
+	suspender v1.SandboxSuspendResumeInterface
 	exec      v1.ExecInterface
 	files     v1.FileInterface
 	closer    io.Closer
@@ -155,11 +199,15 @@ type sdkClient struct {
 
 var _ Client = (*sdkClient)(nil)
 
+// newSDKClient builds the client. The sandbox sub-client also suspends and
+// resumes when it implements v1.SandboxSuspendResumeInterface, as the SDK's
+// and its fake's do.
 func newSDKClient(workspace string, sandboxes v1.SandboxInterface, exec v1.ExecInterface, files v1.FileInterface, closer io.Closer) *sdkClient {
 	if workspace == "" {
 		workspace = "default"
 	}
-	return &sdkClient{workspace: workspace, sandboxes: sandboxes, exec: exec, files: files, closer: closer}
+	sr, _ := sandboxes.(v1.SandboxSuspendResumeInterface)
+	return &sdkClient{workspace: workspace, sandboxes: sandboxes, suspender: sr, exec: exec, files: files, closer: closer}
 }
 
 func (c *sdkClient) EnsureSandbox(ctx context.Context, name string, req SandboxRequest) (*Sandbox, bool, error) {
@@ -230,9 +278,52 @@ func (c *sdkClient) resume(ctx context.Context, sb *Sandbox) (*Sandbox, error) {
 		return c.waitReady(ctx, sb.Name)
 	case v1.SandboxProvisioning, v1.SandboxStarting, v1.SandboxUnknown, "":
 		return c.waitReady(ctx, sb.Name)
+	case v1.SandboxSuspending:
+		// Parked a moment ago: let the suspend finish, then resume.
+		if _, err := c.waitSuspended(ctx, sb.Name); err != nil {
+			return nil, err
+		}
+		return c.unsuspend(ctx, sb.Name)
+	case v1.SandboxSuspended:
+		return c.unsuspend(ctx, sb.Name)
 	default:
 		return nil, fmt.Errorf("openshell: sandbox %q is %s; end the session and start a new one", sb.Name, sb.Status.Phase)
 	}
+}
+
+// unsuspend resumes a Suspended sandbox and waits until it is Ready.
+func (c *sdkClient) unsuspend(ctx context.Context, name string) (*Sandbox, error) {
+	if c.suspender == nil {
+		return nil, fmt.Errorf("openshell: sandbox %q is suspended and cannot be resumed: %w", name, ErrSuspendUnsupported)
+	}
+	if _, err := c.suspender.Resume(ctx, c.workspace, name, v1.ResumeOptions{RestartIfRestoreFails: resumeRestartIfRestoreFails}); err != nil {
+		return nil, fmt.Errorf("openshell: resume sandbox %q: %w", name, err)
+	}
+	return c.waitReady(ctx, name)
+}
+
+// waitSuspended waits until the sandbox is Suspended.
+func (c *sdkClient) waitSuspended(ctx context.Context, name string) (*Sandbox, error) {
+	if c.suspender == nil {
+		return nil, fmt.Errorf("openshell: wait for sandbox %q to suspend: %w", name, ErrSuspendUnsupported)
+	}
+	ctx, cancel := context.WithTimeout(ctx, readyTimeout)
+	defer cancel()
+	sb, err := c.suspender.WaitSuspended(ctx, c.workspace, name)
+	if err != nil {
+		return nil, fmt.Errorf("openshell: wait for sandbox %q to suspend: %w", name, err)
+	}
+	return sb, nil
+}
+
+func (c *sdkClient) SuspendSandbox(ctx context.Context, name string) (*Sandbox, error) {
+	if c.suspender == nil {
+		return nil, fmt.Errorf("openshell: suspend sandbox %q: %w", name, ErrSuspendUnsupported)
+	}
+	if _, err := c.suspender.Suspend(ctx, c.workspace, name); err != nil {
+		return nil, fmt.Errorf("openshell: suspend sandbox %q: %w", name, err)
+	}
+	return c.waitSuspended(ctx, name)
 }
 
 func (c *sdkClient) waitReady(ctx context.Context, name string) (*Sandbox, error) {

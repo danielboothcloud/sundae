@@ -36,6 +36,21 @@ type fakeOpenShell struct {
 	interactive [][]string
 	exitCode    int
 	output      string
+	// status maps a sandbox to the `osewa local ls` session its status
+	// poll reports for the running osewa session.
+	status map[string]map[string]any
+	// suspends and resumes count parks and resumes of parked sandboxes.
+	suspends, resumes int
+	suspendErr        error
+	// cleanRestart makes a resume lose the osewa session, as a sandbox
+	// whose memory could not be restored.
+	cleanRestart bool
+	// onInteractive runs when the attach client starts; interactiveErr
+	// makes it fail.
+	onInteractive  func(sandbox string)
+	interactiveErr error
+	// ensureErr makes EnsureSandbox fail.
+	ensureErr error
 }
 
 var _ openshell.Client = (*fakeOpenShell)(nil)
@@ -45,15 +60,33 @@ func newFakeOpenShell() *fakeOpenShell {
 		sandboxes: map[string]*openshell.Sandbox{},
 		cloned:    map[string]bool{},
 		osewa:     map[string]string{},
+		status:    map[string]map[string]any{},
 	}
 }
 
 func notFound() error { return &types.StatusError{Code: types.ErrorNotFound, Message: "not found"} }
 
+// unpark resumes a parked sandbox, as the SDK client does. Call with mu
+// held.
+func (f *fakeOpenShell) unpark(sb *openshell.Sandbox) {
+	if sb.Status.Phase != types.SandboxSuspended {
+		return
+	}
+	sb.Status.Phase = types.SandboxReady
+	f.resumes++
+	if f.cleanRestart {
+		delete(f.osewa, sb.Name)
+	}
+}
+
 func (f *fakeOpenShell) EnsureSandbox(_ context.Context, name string, req openshell.SandboxRequest) (*openshell.Sandbox, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.ensureErr != nil {
+		return nil, false, f.ensureErr
+	}
 	if sb, ok := f.sandboxes[name]; ok {
+		f.unpark(sb)
 		return sb, false, nil
 	}
 	sb := &openshell.Sandbox{Name: name, Labels: req.Labels, Annotations: req.Annotations}
@@ -72,7 +105,45 @@ func (f *fakeOpenShell) ResumeSandbox(_ context.Context, name string, labels map
 	if sb.Labels[openshell.LabelUserID] != labels[openshell.LabelUserID] {
 		return nil, openshell.ErrNotOwned
 	}
+	f.unpark(sb)
 	return sb, nil
+}
+
+func (f *fakeOpenShell) SuspendSandbox(_ context.Context, name string) (*openshell.Sandbox, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.suspendErr != nil {
+		return nil, f.suspendErr
+	}
+	sb, ok := f.sandboxes[name]
+	if !ok {
+		return nil, notFound()
+	}
+	f.suspends++
+	sb.Status.Phase = types.SandboxSuspended
+	return sb, nil
+}
+
+// phase returns a sandbox's phase.
+func (f *fakeOpenShell) phase(name string) types.SandboxPhase {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if sb, ok := f.sandboxes[name]; ok {
+		return sb.Status.Phase
+	}
+	return ""
+}
+
+// setStatus sets the OSC 7501 record the sandbox's status poll reports; nil
+// for none.
+func (f *fakeOpenShell) setStatus(sandbox string, attached int, record map[string]any) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s := map[string]any{"attached": attached}
+	if record != nil {
+		s["status"] = record
+	}
+	f.status[sandbox] = s
 }
 
 func (f *fakeOpenShell) GetSandbox(_ context.Context, name string) (*openshell.Sandbox, error) {
@@ -131,6 +202,18 @@ func (f *fakeOpenShell) Run(_ context.Context, name string, command []string, _ 
 			id := f.osewa[name]
 			ls, _ := json.Marshal(map[string]any{"sessions": []map[string]any{{"id": id, "exited": false}}})
 			out = id + "\n" + string(ls) + "\n"
+		case "soft-serve-osewa-status":
+			id := f.osewa[name]
+			sessions := []map[string]any{}
+			if id != "" {
+				s := map[string]any{"id": id, "exited": false}
+				for k, v := range f.status[name] {
+					s[k] = v
+				}
+				sessions = append(sessions, s)
+			}
+			ls, _ := json.Marshal(map[string]any{"id": 0, "sessions": sessions})
+			out = id + "\n" + string(ls) + "\n"
 		case "soft-serve-osewa-new":
 			f.nextID++
 			f.osewa[name] = "id" + strconv.Itoa(f.nextID)
@@ -140,7 +223,16 @@ func (f *fakeOpenShell) Run(_ context.Context, name string, command []string, _ 
 	return &openshell.ExecResult{Stdout: []byte(out)}, nil
 }
 
-func (f *fakeOpenShell) Interactive(_ context.Context, _ string, command []string, _, _ uint32, _ openshell.ExecOptions) (openshell.InteractiveSession, error) {
+func (f *fakeOpenShell) Interactive(_ context.Context, name string, command []string, _, _ uint32, _ openshell.ExecOptions) (openshell.InteractiveSession, error) {
+	f.mu.Lock()
+	onInteractive, err := f.onInteractive, f.interactiveErr
+	f.mu.Unlock()
+	if onInteractive != nil {
+		onInteractive(name)
+	}
+	if err != nil {
+		return nil, err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.interactive = append(f.interactive, command)

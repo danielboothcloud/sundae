@@ -166,6 +166,19 @@ mv -f "$1/hosts.json.part" "$1/hosts.json"`
 	osewaListScript = `printf '%s\n' "$(cat "$2" 2>/dev/null)"
 exec "$1" local ls`
 
+	osewaStatusName = "soft-serve-osewa-status"
+	// $1: the uploaded binary's path, $2: the session id file. The status
+	// poll: prints the recorded id on the first line, then, when there is
+	// one, `osewa local ls` JSON. It finds osewa itself (the uploaded build,
+	// else the image's), so a poll is one exec. Exits 3 when the sandbox has
+	// no osewa although a session was recorded.
+	osewaStatusScript = `id=$(cat "$2" 2>/dev/null)
+printf '%s\n' "$id"
+[ -n "$id" ] || exit 0
+bin=$1
+if [ ! -x "$bin" ]; then bin=$(command -v osewa 2>/dev/null) || { echo "no osewa in the sandbox" >&2; exit 3; }; fi
+exec "$bin" local ls`
+
 	osewaNewName = "soft-serve-osewa-new"
 	// $1: the binary, $2: the session id file, $3: the id the caller saw
 	// there, $4: the working directory, then the program's argv. Creates
@@ -315,11 +328,59 @@ func newOsewaKey() (pub, keyPEM string, err error) {
 }
 
 // osewaSessionInfo is the part of an `osewa local ls` session Soft Serve
-// reads.
+// reads. In osewa 0.1.4, `osewa local ls` (crates/server/src/local.rs, main)
+// prints one line, a wire::Response with only `id` (0) and `sessions` set;
+// each session is a wire::SessionInfo (crates/wire/src/messages.rs), whose
+// `status` is the holder's latest root OSC 7501 record, a
+// wire::ProgramStatus, absent when the program never reported one or
+// cleared it. Title and msg in it are already base64-decoded by the holder.
 type osewaSessionInfo struct {
 	ID           string `json:"id"`
+	Created      int64  `json:"created"`
 	Exited       bool   `json:"exited"`
-	Incompatible string `json:"incompatible"`
+	ExitCode     int64  `json:"exit_code"`
+	Attached     int64  `json:"attached"`
+	IdleSeconds  int64  `json:"idle_seconds"`
+	Incompatible string `json:"incompatible,omitempty"`
+	// Status is nil when the program has no root record.
+	Status *osewaProgramStatus `json:"status,omitempty"`
+}
+
+// osewaProgramStatus is an osewa wire::ProgramStatus.
+type osewaProgramStatus struct {
+	State    string `json:"state"`
+	Kind     string `json:"kind,omitempty"`
+	App      string `json:"app,omitempty"`
+	Title    string `json:"title,omitempty"`
+	Msg      string `json:"msg,omitempty"`
+	Progress *int64 `json:"progress,omitempty"`
+}
+
+// osewaList is the output of `osewa local ls`.
+type osewaList struct {
+	Sessions []osewaSessionInfo `json:"sessions"`
+}
+
+// parseOsewaList parses the output of `osewa local ls`.
+func parseOsewaList(out string) (osewaList, error) {
+	var ls osewaList
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &ls); err != nil {
+		return osewaList{}, fmt.Errorf("openshell: osewa local ls: unexpected output %q", trimOutput([]byte(out)))
+	}
+	return ls, nil
+}
+
+// find returns the session with the given id.
+func (ls osewaList) find(id string) (osewaSessionInfo, bool) {
+	if id == "" {
+		return osewaSessionInfo{}, false
+	}
+	for _, s := range ls.Sessions {
+		if s.ID == id {
+			return s, true
+		}
+	}
+	return osewaSessionInfo{}, false
 }
 
 // ensureOsewaSession returns the id of the osewa session running the
@@ -333,18 +394,12 @@ func (m *Manager) ensureOsewaSession(ctx context.Context, sandbox, bin, workDir 
 	}
 	seen, list, _ := strings.Cut(out, "\n")
 	seen = strings.TrimSpace(seen)
-	var ls struct {
-		Sessions []osewaSessionInfo `json:"sessions"`
+	ls, err := parseOsewaList(list)
+	if err != nil {
+		return "", false, err
 	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(list)), &ls); err != nil {
-		return "", false, fmt.Errorf("openshell: osewa local ls: unexpected output %q", trimOutput([]byte(list)))
-	}
-	if seen != "" {
-		for _, s := range ls.Sessions {
-			if s.ID == seen && !s.Exited && s.Incompatible == "" {
-				return seen, false, nil
-			}
-		}
+	if s, ok := ls.find(seen); ok && !s.Exited && s.Incompatible == "" {
+		return seen, false, nil
 	}
 
 	return m.newOsewaSession(ctx, sandbox, bin, workDir, command, seen)
@@ -385,10 +440,15 @@ func OsewaAttachCommand(bin, id string) []string {
 // env and returns its standard output. A non-zero exit is an error carrying
 // the end of its standard error.
 func (m *Manager) script(ctx context.Context, sandbox, name, script string, env map[string]string, args ...string) (string, error) {
+	return runScript(ctx, m.client, sandbox, name, script, env, args...)
+}
+
+// runScript is Manager.script for any client.
+func runScript(ctx context.Context, client Client, sandbox, name, script string, env map[string]string, args ...string) (string, error) {
 	e := osewaEnv()
 	maps.Copy(e, env)
 	command := append([]string{"sh", "-c", script, name}, args...)
-	res, err := m.client.Run(ctx, sandbox, command, ExecOptions{
+	res, err := client.Run(ctx, sandbox, command, ExecOptions{
 		Env:          e,
 		WorkDir:      SandboxRoot,
 		NoLoginShell: true,

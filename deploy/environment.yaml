@@ -125,4 +125,17 @@ softServe:
   #         repos:
   #           "infra/*":
   #             profile: claude
+  #
+  # Session status and parking: how often Soft Serve reads each session's
+  # status, and when it suspends an idle one. The OpenShell 0.1.8 Kubernetes
+  # compute driver cannot suspend; Soft Serve logs that once and leaves
+  # sandboxes running, so `enabled: false` only silences the attempt:
+  #   chartValues:
+  #     config:
+  #       sessions:
+  #         status:
+  #           poll_interval: 10s
+  #         suspend:
+  #           enabled: true
+  #           after: 30m
   chartValues: {}

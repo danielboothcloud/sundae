@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"charm.land/log/v2"
@@ -21,6 +22,7 @@ import (
 	"github.com/charmbracelet/soft-serve/pkg/forge"
 	"github.com/charmbracelet/soft-serve/pkg/jobs"
 	"github.com/charmbracelet/soft-serve/pkg/notify"
+	"github.com/charmbracelet/soft-serve/pkg/openshell"
 	"github.com/charmbracelet/soft-serve/pkg/proto"
 	sshsrv "github.com/charmbracelet/soft-serve/pkg/ssh"
 	"github.com/charmbracelet/soft-serve/pkg/stats"
@@ -44,9 +46,18 @@ type Server struct {
 	Events *events.Bus
 	// Notifier publishes notifications; nil when notifications are off.
 	Notifier *notify.Notifier
+	// Monitor collects session status and parks idle sessions; nil when
+	// OpenShell is disabled.
+	Monitor *openshell.Monitor
 
 	logger *log.Logger
 	ctx    context.Context
+
+	// monitorMu guards the running Monitor's cancel and done channel.
+	monitorMu      sync.Mutex
+	monitorCancel  context.CancelFunc
+	monitorDone    chan struct{}
+	monitorStopped bool
 }
 
 // NewServer returns a new *Server configured to serve Soft Serve. The SSH
@@ -66,6 +77,16 @@ func NewServer(ctx context.Context) (*Server, error) {
 	bus := events.New(events.WithLogger(log.FromContext(ctx)))
 	ctx = events.WithContext(ctx, bus)
 
+	// The session monitor, like the bus, reaches the SSH server through
+	// the context. It runs from Start until Shutdown.
+	var monitor *openshell.Monitor
+	if cfg.OpenShell.Enabled {
+		monitor = openshell.NewMonitor(func() (openshell.Client, error) {
+			return openshell.New(cfg.OpenShell)
+		}, cfg, openshell.WithMonitorEvents(bus), openshell.WithMonitorLogger(log.FromContext(ctx)))
+		ctx = openshell.ContextWithMonitor(ctx, monitor)
+	}
+
 	// Forges are declared in the config file only. The service goes into
 	// the context the cron jobs and the SSH server are built from.
 	if len(cfg.Forges) > 0 {
@@ -82,6 +103,7 @@ func NewServer(ctx context.Context) (*Server, error) {
 		Backend: be,
 		DB:      db,
 		Events:  bus,
+		Monitor: monitor,
 		logger:  log.FromContext(ctx).WithPrefix("server"),
 		ctx:     ctx,
 	}
@@ -260,7 +282,52 @@ func (s *Server) Start() error {
 		s.Cron.Start()
 		return nil
 	})
+
+	if run, ok := s.startMonitor(); ok {
+		errg.Go(func() error {
+			s.logger.Print("Starting session monitor",
+				"poll_interval", s.Config.Sessions.Status.PollInterval,
+				"suspend", s.Config.Sessions.Suspend.Enabled,
+				"suspend_after", s.Config.Sessions.Suspend.After)
+			run()
+			return nil
+		})
+	}
 	return errg.Wait()
+}
+
+// startMonitor prepares the session monitor to run, once, unless there is
+// none or the server is shutting down. run runs it until stopMonitor.
+func (s *Server) startMonitor() (run func(), ok bool) {
+	s.monitorMu.Lock()
+	defer s.monitorMu.Unlock()
+	if s.Monitor == nil || s.monitorStopped || s.monitorCancel != nil {
+		return nil, false
+	}
+	ctx, cancel := context.WithCancel(s.ctx)
+	done := make(chan struct{})
+	s.monitorCancel, s.monitorDone = cancel, done
+	return func() {
+		defer close(done)
+		s.Monitor.Run(ctx)
+	}, true
+}
+
+// stopMonitor stops the session monitor and waits, within ctx, for it to
+// finish: polls in flight are abandoned, parks in flight are cancelled.
+func (s *Server) stopMonitor(ctx context.Context) {
+	s.monitorMu.Lock()
+	s.monitorStopped = true
+	cancel, done := s.monitorCancel, s.monitorDone
+	s.monitorMu.Unlock()
+	if cancel == nil {
+		return
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
 }
 
 // Shutdown lets the server gracefully shutdown.
@@ -284,6 +351,10 @@ func (s *Server) Shutdown(ctx context.Context) error {
 			s.Cron.Remove(j.ID)
 		}
 		s.Cron.Stop()
+		return nil
+	})
+	errg.Go(func() error {
+		s.stopMonitor(ctx)
 		return nil
 	})
 	// defer s.DB.Close() // nolint: errcheck
@@ -314,6 +385,10 @@ func (s *Server) Close() error {
 	errg.Go(s.StatsServer.Close)
 	errg.Go(func() error {
 		s.Cron.Stop()
+		return nil
+	})
+	errg.Go(func() error {
+		s.stopMonitor(ctx)
 		return nil
 	})
 	// defer s.DB.Close() // nolint: errcheck

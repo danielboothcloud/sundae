@@ -682,6 +682,13 @@ func DefaultConfig() *Config {
 				BinaryDir: DefaultOsewaBinaryDir,
 				Port:      DefaultOsewaPort,
 			},
+			Status: SessionStatusConfig{
+				PollInterval: DefaultStatusPollInterval,
+			},
+			Suspend: SessionSuspendConfig{
+				Enabled: true,
+				After:   DefaultSuspendAfter,
+			},
 		},
 		Notifications: NotificationsConfig{
 			On:       append([]string(nil), DefaultTriggers...),

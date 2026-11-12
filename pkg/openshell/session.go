@@ -57,6 +57,8 @@ type Manager struct {
 	osewaSHA256 map[string]string
 	// bus receives lifecycle events. nil drops them.
 	bus *events.Bus
+	// monitor tracks bridges and parks sessions; nil when there is none.
+	monitor *Monitor
 }
 
 // ManagerOption configures a Manager.
@@ -67,6 +69,13 @@ type ManagerOption func(*Manager)
 // published.
 func WithEvents(bus *events.Bus) ManagerOption {
 	return func(m *Manager) { m.bus = bus }
+}
+
+// WithMonitor makes the Manager coordinate with the server's Monitor:
+// parking goes through it (so a session with an open bridge is not parked),
+// and starting a session tells it. nil is allowed.
+func WithMonitor(mon *Monitor) ManagerOption {
+	return func(m *Manager) { m.monitor = mon }
 }
 
 // NewManager returns a Manager using client for sandboxes and tokens for git
@@ -157,6 +166,8 @@ type Session struct {
 	// Started reports whether this call started the program, rather than
 	// finding it running.
 	Started bool
+	// Unparked reports whether this call resumed the session from parked.
+	Unparked bool
 	// Osewa is the path of the osewa binary in the sandbox.
 	Osewa string
 	// OsewaID is the id of the osewa session holding the program.
@@ -259,6 +270,13 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 		}
 	}()
 
+	// A parked session is resumed by EnsureSandbox and ResumeSandbox; look
+	// first, to say so.
+	unparked := m.isParked(ctx, sandbox)
+	if unparked {
+		fmt.Fprintf(progress, "Session %s was parked; resuming it...\n", name) //nolint:errcheck
+	}
+
 	var (
 		sb      *Sandbox
 		created bool
@@ -291,6 +309,7 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 			return nil, err
 		}
 	}
+	m.monitor.noteReady(sandbox)
 	if created {
 		m.lifecycle(opts.User, opts.Repo, name, sandbox, events.LifecycleCreated, "", nil)
 	} else {
@@ -311,13 +330,14 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 	}
 
 	s := &Session{
-		Name:    name,
-		Repo:    opts.Repo,
-		Sandbox: sandbox,
-		Profile: profile,
-		Created: created,
-		WorkDir: path.Join(SandboxRoot, opts.Repo),
-		Command: command,
+		Name:     name,
+		Repo:     opts.Repo,
+		Sandbox:  sandbox,
+		Profile:  profile,
+		Created:  created,
+		Unparked: unparked && !created,
+		WorkDir:  path.Join(SandboxRoot, opts.Repo),
+		Command:  command,
 	}
 
 	// Seam: restoring a /sandbox snapshot belongs here, before the clone
@@ -361,7 +381,13 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 	if err != nil {
 		return nil, err
 	}
-	if s.Started && !created {
+	switch {
+	case s.Started && s.Unparked:
+		// The sandbox's memory was not restored (it restarted cleanly,
+		// see resumeRestartIfRestoreFails), or the program had exited
+		// before the session was parked.
+		fmt.Fprintf(progress, "Started %s again: it was not running when the session resumed (it had exited, or the sandbox could not restore its memory and restarted cleanly)\n", strings.Join(command, " ")) //nolint:errcheck
+	case s.Started && !created:
 		fmt.Fprintf(progress, "Started %s again: it was not running\n", strings.Join(command, " ")) //nolint:errcheck
 	}
 
@@ -372,6 +398,58 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 
 	m.lifecycle(opts.User, opts.Repo, name, sandbox, events.LifecycleReady, "", nil)
 	return s, nil
+}
+
+// isParked reports whether the sandbox exists and is suspended. Lookup
+// errors count as not parked: the start that follows reports them.
+func (m *Manager) isParked(ctx context.Context, sandbox string) bool {
+	sb, err := m.client.GetSandbox(ctx, sandbox)
+	return err == nil && sb != nil && isParkedPhase(sb.Status.Phase)
+}
+
+// Park suspends the sandbox of the user's named session for the repository
+// (`session park`). It reports whether it parked it: a session that is
+// parked already is a successful no-op. It refuses a session with an open
+// bridge, one that is not running, and sandboxes Soft Serve did not create,
+// and publishes parked (Op ParkManual) on success. start and attach resume
+// the session.
+func (m *Manager) Park(ctx context.Context, user proto.User, repo, name string) (bool, error) {
+	if user == nil {
+		return false, proto.ErrUnauthorized
+	}
+	name, err := sessionName(name)
+	if err != nil {
+		return false, err
+	}
+	sandbox := SessionSandboxName(user.Username(), repo, name)
+	sb, err := m.client.GetSandbox(ctx, sandbox)
+	switch {
+	case IsNotFound(err):
+		return false, fmt.Errorf("%w: %q for %s", ErrNoSession, name, repo)
+	case err != nil:
+		return false, fmt.Errorf("openshell: get sandbox %q: %w", sandbox, err)
+	case !owns(sb, ownerLabels(user)):
+		return false, ErrNotOwned
+	}
+	if _, ok := managedSandbox(sb); !ok {
+		return false, fmt.Errorf("openshell: sandbox %q was not created by Soft Serve; not parking it", sandbox)
+	}
+	switch sb.Status.Phase {
+	case v1.SandboxReady:
+	case v1.SandboxSuspended, v1.SandboxSuspending:
+		return false, nil
+	default:
+		return false, fmt.Errorf("session %s of %s is %s; only a running session can be parked", name, repo, sb.Status.Phase)
+	}
+
+	if err := m.monitor.Park(ctx, m.client, sandbox); err != nil {
+		if IsSuspendUnsupported(err) {
+			return false, fmt.Errorf("the OpenShell gateway cannot suspend this sandbox: %w", err)
+		}
+		return false, err
+	}
+	m.lifecycle(user, repo, name, sandbox, events.LifecycleParked, ParkManual, nil)
+	return true, nil
 }
 
 // nameFlag returns the --name flag selecting session name, or "" for the

@@ -68,6 +68,8 @@ A phone notification matters most when I am away, so status cannot come from par
 - **Heavy to run.** API server, node DaemonSet, controller, network stack, Postgres and an object store, built for millions of mostly-idle actors. I have a handful.
 - **What it would buy:** memory and filesystem snapshot with sub-second resume (replaces workstream F), and credentials injected outside the sandbox (removes the token-in-sandbox risk accepted in the OpenShell spec).
 
+**F11. OpenShell 0.1.8's Kubernetes driver does not support suspend** (found 2026-11-12 in `openshell-driver-kubernetes/src/grpc.rs`, `suspend_sandbox`; not yet seen on a live gateway). Parking (B4) is built and degrades to "log once, keep running". Until a driver with memory-retaining suspend exists, idle sessions are not parked, and S3 snapshots (F1) are the only way to free an idle sandbox without losing work.
+
 **F10. What OpenShell would do** (from the Go SDK v0.1.6 in `go.mod`; only the first two rows are used by the code today, none run against a live gateway).
 
 | Capability | SDK surface | Use here |

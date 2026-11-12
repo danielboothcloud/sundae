@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anmitsu/go-shlex"
 	"github.com/gobwas/glob"
@@ -21,6 +22,15 @@ const (
 	// DefaultOsewaPort is the loopback port of the osewa server in each
 	// sandbox. It is osewa's own default.
 	DefaultOsewaPort = 7322
+	// DefaultStatusPollInterval is how often Soft Serve reads each running
+	// session's status by default.
+	DefaultStatusPollInterval = 10 * time.Second
+	// MinStatusPollInterval is the shortest sessions.status.poll_interval:
+	// each poll is one exec per running sandbox.
+	MinStatusPollInterval = time.Second
+	// DefaultSuspendAfter is how long a session must sit unattached and not
+	// working before it is parked, by default.
+	DefaultSuspendAfter = 30 * time.Minute
 )
 
 // SessionsConfig configures agent sessions beyond the OpenShell connection:
@@ -33,6 +43,14 @@ type SessionsConfig struct {
 	// Osewa configures osewa, which keeps each session's program running
 	// after the SSH client disconnects.
 	Osewa OsewaConfig `envPrefix:"OSEWA_" yaml:"osewa"`
+
+	// Status configures how Soft Serve collects each session's OSC 7501
+	// status from its sandbox.
+	Status SessionStatusConfig `envPrefix:"STATUS_" yaml:"status"`
+
+	// Suspend configures parking: suspending the sandbox of a session that
+	// nobody is attached to and that is not working.
+	Suspend SessionSuspendConfig `envPrefix:"SUSPEND_" yaml:"suspend"`
 
 	// Profiles are named presets a session starts from (session start
 	// --profile NAME). A profile's empty fields fall back to openshell.image
@@ -58,6 +76,26 @@ type OsewaConfig struct {
 	// Port is the loopback TCP port the osewa server in each sandbox listens
 	// on. Nothing outside the sandbox connects to it.
 	Port int `env:"PORT" yaml:"port"`
+}
+
+// SessionStatusConfig configures status collection.
+type SessionStatusConfig struct {
+	// PollInterval is how often Soft Serve runs `osewa local ls` in every
+	// running session's sandbox to read its status. 0 means
+	// DefaultStatusPollInterval; at least MinStatusPollInterval otherwise.
+	PollInterval time.Duration `env:"POLL_INTERVAL" yaml:"poll_interval"`
+}
+
+// SessionSuspendConfig configures parking idle sessions.
+type SessionSuspendConfig struct {
+	// Enabled turns automatic parking on. Default true. Parking needs an
+	// OpenShell compute driver that supports suspend; where the gateway
+	// reports it unsupported, the sandbox is left running.
+	Enabled bool `env:"ENABLED" yaml:"enabled"`
+
+	// After is how long a session must have had nobody attached and no
+	// working status before it is parked. 0 means DefaultSuspendAfter.
+	After time.Duration `env:"AFTER" yaml:"after"`
 }
 
 // SessionProfile is a named session preset.
@@ -138,6 +176,21 @@ func (c *Config) validateSessions() error {
 		fail("osewa.port %d must be between 1 and 65535", sc.Osewa.Port)
 	}
 
+	switch {
+	case sc.Status.PollInterval == 0:
+		sc.Status.PollInterval = DefaultStatusPollInterval
+	case sc.Status.PollInterval < MinStatusPollInterval:
+		fail("status.poll_interval %s must be at least %s", sc.Status.PollInterval, MinStatusPollInterval)
+	}
+	switch {
+	case sc.Suspend.After == 0:
+		sc.Suspend.After = DefaultSuspendAfter
+	case sc.Suspend.After < 0:
+		fail("suspend.after %s must not be negative", sc.Suspend.After)
+	case sc.Suspend.After < sc.Status.PollInterval:
+		fail("suspend.after %s must not be shorter than status.poll_interval %s", sc.Suspend.After, sc.Status.PollInterval)
+	}
+
 	for _, name := range sortedKeys(sc.Profiles) {
 		p := sc.Profiles[name]
 		key := fmt.Sprintf("profiles.%s", name)
@@ -193,5 +246,8 @@ func (c *Config) sessionsEnviron() []string {
 	return []string{
 		"SOFT_SERVE_SESSIONS_OSEWA_BINARY_DIR=" + c.Sessions.Osewa.BinaryDir,
 		fmt.Sprintf("SOFT_SERVE_SESSIONS_OSEWA_PORT=%d", c.Sessions.Osewa.Port),
+		"SOFT_SERVE_SESSIONS_STATUS_POLL_INTERVAL=" + c.Sessions.Status.PollInterval.String(),
+		fmt.Sprintf("SOFT_SERVE_SESSIONS_SUSPEND_ENABLED=%t", c.Sessions.Suspend.Enabled),
+		"SOFT_SERVE_SESSIONS_SUSPEND_AFTER=" + c.Sessions.Suspend.After.String(),
 	}
 }
