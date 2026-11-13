@@ -228,13 +228,13 @@ func TestRepositoriesNewSessionKey(t *testing.T) {
 		t.Fatalf("s did not open the form:\n%s", s)
 	}
 	// The repository is the selected one, picked; others can be added.
-	if !strings.Contains(s, "‹ [x] sundae ›") {
+	if !strings.Contains(s, "▸ [x] sundae") {
 		t.Fatalf("repository not picked:\n%s", s)
 	}
 	uiKey(ui, "esc", "1")
 	found := false
 	for _, b := range ui.ShortHelp() {
-		found = found || b.Help().Key == "s" && b.Help().Desc == "new session"
+		found = found || b.Help().Key == "s" && b.Help().Desc == "session"
 	}
 	if !found {
 		t.Fatal("no s in the Repositories help")
@@ -306,7 +306,7 @@ func waitPushes(t *testing.T, ff *fakeForges, n int) {
 
 func TestHomeForgesHiddenWithoutSource(t *testing.T) {
 	ui := newTestUI(t, 80, 24, &fakeSource{rows: frameRows()})
-	if s := screenText(ui); strings.Contains(s, "Forges") || !strings.Contains(s, "1-3 tab") {
+	if s := screenText(ui); strings.Contains(s, "Forges") || !strings.Contains(s, "? more") {
 		t.Fatalf("tabs:\n%s", s)
 	}
 }
@@ -348,17 +348,22 @@ func TestRepoSessionsKeys(t *testing.T) {
 		t.Fatal("esc left the repository while the filter was open")
 	}
 	// The end confirm shows in the tab.
-	uiKey(ui, "x")
+	uiKey(ui, "d")
 	if s := screenText(ui); !strings.Contains(s, "End sundae / forge-sync?") {
 		t.Fatalf("confirm:\n%s", s)
 	}
 	uiKey(ui, "esc")
 	// e shows the repository's signals.
 	uiKey(ui, "e")
-	if s := screenText(ui); !strings.Contains(s, "‹ Signals ›") {
+	if s := screenText(ui); !strings.Contains(s, "‹ Signal history ›") {
 		t.Fatalf("signals:\n%s", s)
 	}
-	uiKey(ui, "e", "esc")
+	// esc goes back to the sessions, then home.
+	uiKey(ui, "esc")
+	if ui.activePage != repoPage {
+		t.Fatal("esc left the repository from the signal history")
+	}
+	uiKey(ui, "esc")
 	if ui.activePage != selectionPage {
 		t.Fatal("esc did not go back home")
 	}

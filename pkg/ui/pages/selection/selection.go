@@ -14,6 +14,7 @@ import (
 	"github.com/danielboothcloud/sundae/pkg/access"
 	"github.com/danielboothcloud/sundae/pkg/backend"
 	"github.com/danielboothcloud/sundae/pkg/ui/common"
+	"github.com/danielboothcloud/sundae/pkg/ui/components/actionmenu"
 	"github.com/danielboothcloud/sundae/pkg/ui/components/code"
 	"github.com/danielboothcloud/sundae/pkg/ui/components/prompt"
 	"github.com/danielboothcloud/sundae/pkg/ui/components/selector"
@@ -63,12 +64,17 @@ type Selection struct {
 	newSession key.Binding
 	// newRepo is the Repositories tab's n key: the new-repository form.
 	newRepo key.Binding
-	// deleteRepo is the Repositories tab's D key: delete the selected
+	// deleteRepo is the Repositories tab's d key: delete the selected
 	// repository, after a confirm.
 	deleteRepo key.Binding
 	// deleting is the delete confirm while it is open, and deleteTarget
 	// the repository it asks about.
-	deleting     *prompt.Confirm
+	deleting *prompt.Confirm
+	// menu is the selected row's action menu (space or .) while it is
+	// open.
+	menu *actionmenu.Menu
+	// palette is the command palette (:) while it is open.
+	palette      *palette
 	deleteTarget string
 
 	// repoForm is the new-repository form while it is open; creating
@@ -101,7 +107,7 @@ func New(c common.Common) *Selection {
 		cancel:     cancel,
 		newSession: key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "new session")),
 		newRepo:    key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new repository")),
-		deleteRepo: key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "delete repository")),
+		deleteRepo: key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete repository")),
 	}
 
 	// The home tabs, in order. A feature's tab is added here and left out
@@ -142,7 +148,7 @@ func New(c common.Common) *Selection {
 		keys = append(keys, strconv.Itoa(i+1))
 	}
 	sel.tabKeys = key.NewBinding(key.WithKeys(keys...),
-		key.WithHelp(fmt.Sprintf("1-%d", len(sel.panes)), "tab"))
+		key.WithHelp(fmt.Sprintf("tab/1-%d", len(sel.panes)), "tab"))
 
 	readme := code.New(c, "", "")
 	readme.UseGlamour = true
@@ -222,6 +228,9 @@ func (s *Selection) IsFiltering() bool {
 // Capturing reports whether the active tab takes every key, so the frame
 // leaves q, ?, tab and the digits to it.
 func (s *Selection) Capturing() bool {
+	if s.menu != nil || s.palette != nil {
+		return true
+	}
 	switch s.activePane {
 	case selectorPane:
 		return s.repoForm != nil || s.deleting != nil
@@ -235,6 +244,12 @@ func (s *Selection) Capturing() bool {
 
 // capturingHelp is the help of the tab that takes every key.
 func (s *Selection) capturingHelp() []key.Binding {
+	if s.palette != nil {
+		return paletteHelp()
+	}
+	if s.menu != nil {
+		return s.menu.ShortHelp()
+	}
 	switch s.activePane {
 	case selectorPane:
 		if s.creating != "" {
@@ -327,55 +342,40 @@ func (s *Selection) shown() tea.Cmd {
 	return nil
 }
 
-// ShortHelp implements help.KeyMap.
+// ShortHelp implements help.KeyMap. Outside a form or filter it is the
+// tab's few most common actions; ? shows FullHelp with every key.
 func (s *Selection) ShortHelp() []key.Binding {
 	if s.Capturing() {
 		return s.capturingHelp()
 	}
-	k := s.selector.KeyMap
-	kb := make([]key.Binding, 0)
-	kb = append(kb,
-		s.common.KeyMap.UpDown,
-		s.tabKeys,
-	)
 	switch s.activePane {
 	case selectorPane:
-		copyKey := s.common.KeyMap.Copy
-		copyKey.SetHelp("c", "copy command")
-		kb = append(kb,
-			s.common.KeyMap.Select,
-			k.Filter,
-			k.ClearFilter,
-			copyKey,
-		)
-		if s.sessions != nil {
-			kb = append(kb, s.newSession)
-		}
+		open := s.common.KeyMap.Select
+		open.SetHelp("enter", "open")
+		kb := []key.Binding{open, s.selector.KeyMap.Filter}
 		if s.canCreate() {
-			kb = append(kb, s.newRepo)
+			n := s.newRepo
+			n.SetHelp("n", "new")
+			kb = append(kb, n)
 		}
-		if s.canDelete(s.SelectedRepo()) {
-			kb = append(kb, s.deleteRepo)
+		if s.sessions != nil {
+			ns := s.newSession
+			ns.SetHelp("s", "session")
+			kb = append(kb, ns)
 		}
+		if len(kb) < 4 {
+			copyKey := s.common.KeyMap.Copy
+			copyKey.SetHelp("c", "copy")
+			kb = append(kb, copyKey)
+		}
+		return kb
 	case forgesPane:
-		kb = kb[1:]
-		sh := s.forges.ShortHelp()
-		if len(sh) > 0 && sh[0].Help().Desc == s.common.KeyMap.UpDown.Help().Desc {
-			kb = append([]key.Binding{sh[0]}, kb...)
-			sh = sh[1:]
-		}
-		kb = append(kb, sh...)
+		return s.forges.ShortHelp()
 	case sessionsPane:
 		s.bindSessions()
-		kb = kb[1:]
-		sh := s.sessions.ShortHelp()
-		if len(sh) > 0 && sh[0].Help().Desc == s.common.KeyMap.UpDown.Help().Desc {
-			kb = append([]key.Binding{sh[0]}, kb...)
-			sh = sh[1:]
-		}
-		kb = append(kb, sh...)
+		return s.sessions.ShortHelp()
 	}
-	return kb
+	return nil
 }
 
 // FullHelp implements help.KeyMap.
@@ -388,12 +388,21 @@ func (s *Selection) FullHelp() [][]key.Binding {
 			s.tabKeys,
 		},
 	}
+	if len(s.rowActions()) > 0 {
+		b[0] = append(b[0], actionmenu.OpenKey)
+	}
+	// On About the palette joins the paging column, which is wide
+	// enough for it, so the frame's keys still fit at 80 columns.
+	if s.activePane != readmePane && (s.activePane != selectorPane || s.FilterState() != list.Filtering) {
+		b[0] = append(b[0], PaletteKey)
+	}
 	switch s.activePane {
 	case readmePane:
 		k := s.readme.KeyMap
 		b = append(b, []key.Binding{
 			k.PageDown,
 			k.PageUp,
+			PaletteKey,
 		})
 		b = append(b, []key.Binding{
 			k.HalfPageDown,
@@ -565,6 +574,12 @@ func (s *Selection) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 		if s.activePane == selectorPane {
 			s.repoNotice = ""
 		}
+		if s.palette != nil {
+			return s, s.onPaletteKey(msg)
+		}
+		if s.menu != nil {
+			return s, s.onMenuKey(msg)
+		}
 		if s.Capturing() {
 			// A form, confirm or filter of the tab has the keys.
 			if s.activePane == selectorPane {
@@ -582,6 +597,14 @@ func (s *Selection) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 			return s, cmd
 		}
 		repoFiltering := s.activePane == selectorPane && s.FilterState() == list.Filtering
+		if !repoFiltering && key.Matches(msg, PaletteKey) {
+			s.openPalette()
+			return s, nil
+		}
+		if !repoFiltering && key.Matches(msg, actionmenu.OpenKey) {
+			s.openMenu()
+			return s, nil
+		}
 		if s.activePane == selectorPane && !repoFiltering && key.Matches(msg, s.newRepo) && s.canCreate() {
 			s.openNewRepo()
 			return s, nil
@@ -605,10 +628,12 @@ func (s *Selection) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 		if key.Matches(msg, s.common.KeyMap.Back) && s.activePane == selectorPane {
 			cmds = append(cmds, s.selector.Init())
 		}
-		t, cmd := s.tabs.Update(msg)
-		s.tabs = t.(*tabs.Tabs)
-		if cmd != nil {
-			cmds = append(cmds, cmd)
+		if !repoFiltering {
+			t, cmd := s.tabs.Update(msg)
+			s.tabs = t.(*tabs.Tabs)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
 	case tea.MouseMsg:
 		t, cmd := s.tabs.Update(msg)
@@ -617,6 +642,8 @@ func (s *Selection) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case tabs.ActiveTabMsg:
+		s.menu = nil
+		s.palette = nil
 		if i := int(msg); i >= 0 && i < len(s.panes) {
 			s.activePane = s.panes[i]
 		}
@@ -716,6 +743,14 @@ func (s *Selection) View() string {
 			s.readme.View(),
 			readmeStatus,
 		))
+	}
+	if s.menu != nil {
+		w, h := s.common.Width-wm, s.common.Height-hm
+		view = actionmenu.Overlay(view, s.menu.View(min(w, 40)), w, h)
+	}
+	if s.palette != nil {
+		w, h := s.common.Width-wm, s.common.Height-hm
+		view = actionmenu.Overlay(view, s.palette.view(s.common, min(w, 60)), w, h)
 	}
 	if s.activePane != selectorPane || s.FilterState() != list.Filtering {
 		tabs := s.common.Styles.Tabs.Render(s.tabs.View())

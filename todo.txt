@@ -1,0 +1,11 @@
+x 2026-11-13 2026-10-31 enable openshell integration
+x 2026-11-13 2026-10-31 use s3 to backup entire working directory+subfolders of a project, used for when resuming sessions with openshell
+x 2026-11-13 2026-11-01 add options for intialising new projects with choice of source control and agents etc
+x 2026-11-13 2026-11-05 somehow add zellij to the mix for managing sessions plus web sever
+x 2026-11-13 2026-11-06 use herdr core to manage sessions on the remote?
+x 2026-11-13 2026-11-08 configure so it can run scans/ci locally without pushing via woodpecker or another ci tool, scan mounts to rwx volume or rsync to new volume
+x 2026-11-13 2026-11-08 containers will need permissions to run skaffold etc for integration tests in a mounted context
+x 2026-11-13 2026-11-08 perhaps use a global service in cilium to bridge to dev cluster for skaffold/ci pods whilst woodpecker is hosted in prod
+x 2026-11-13 2026-11-11 maybe add an agents menu with program status protocol, so you can monitor and ssh into agent sessions, pass via command to ssh command maybe?
+2026-11-13 add webserver which just serves the ssh which can be accessed via browser
+2026-11-13 per-profile network policies: sessions.profiles[].additional_network_policies (same schema as openshell.network_policies), merged with built-ins + global; open: key name, name clashes (error vs override), re-apply on start/resume, per-profile sandbox_policy, YAML-only

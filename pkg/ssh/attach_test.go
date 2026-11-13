@@ -309,7 +309,7 @@ func TestTUIAttachRoundTrip(t *testing.T) {
 	// the end confirm fills the 100-column line (94 inside the margins and
 	// the footer's padding), its answers at the right end.
 	mark = out.len()
-	send("x")
+	send("d")
 	out.waitFor(t, mark, "End r / main?")
 	out.waitFor(t, mark, "y yes • N no")
 	// 100 - 2 (margin) - 1 (padding) - 12 ("y yes • N no") + 1 = 86; an

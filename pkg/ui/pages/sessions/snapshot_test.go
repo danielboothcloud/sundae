@@ -17,7 +17,7 @@ func TestEndWithSnapshot(t *testing.T) {
 	src := newFakeSource()
 	src.snapshots = true
 	m := loaded(t, 120, 30, src)
-	keys(m, "x")
+	keys(m, "d")
 	if line := ansi.Strip(m.FooterLine(120)); !strings.HasPrefix(line, "End infra / claude-1?  /sandbox is saved to S3, then the sandbox is deleted.") {
 		t.Fatalf("confirm line %q", line)
 	}
@@ -41,7 +41,7 @@ func TestEndWithSnapshot(t *testing.T) {
 
 	// n leaves it.
 	src.ended = nil
-	run(m, keys(m, "x", "y"), 2)
+	run(m, keys(m, "d", "y"), 2)
 	keys(m, "n")
 	if len(src.ended) != 0 || m.confirm != nil {
 		t.Fatalf("ended %v", src.ended)
@@ -65,7 +65,7 @@ func TestParkedToSnapshotRow(t *testing.T) {
 	if !r.Parked() || !r.ParkedToSnapshot() {
 		t.Fatal("not parked")
 	}
-	keys(m, "x")
+	keys(m, "d")
 	if line := ansi.Strip(m.FooterLine(100)); !strings.HasPrefix(line, "End dotfiles / main?  It is parked to an S3 snapshot, which is kept.") {
 		t.Fatalf("confirm %q", line)
 	}

@@ -4,7 +4,7 @@
   Readme │ Files │ Commits │ Bookmarks │ Tags │ Sessions
 
 
-   ‹ Sessions ›   Signals                                          2 sessions
+   Sessions                                                        2 sessions
 
   ┃ ✓ forge-sync                                                     done   5m
   ┃   Implemented GitHub discovery
@@ -13,7 +13,7 @@
       Running go test ./pkg/ui/...
 
 
-
-
+   Signals · forge-sync
+     No signals from this session yet.
 
    sundae  forge-sync                             1 of 2  *  ? Help  ▲1 ✓1 ●2

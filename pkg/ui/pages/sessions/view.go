@@ -93,7 +93,7 @@ func (m *Sessions) View() string {
 		if m.pane == signalsPane {
 			lines = append(lines, m.signalsView(w, body)...)
 		} else {
-			lines = append(lines, m.sessionsView(w, body)...)
+			lines = append(lines, m.stackedView(w, body)...)
 		}
 	}
 	if m.inlineConfirm() {
@@ -154,19 +154,14 @@ func (m *Sessions) paneHeader(w int) string {
 		m.filter.SetWidth(max(w-4, 8))
 		return " " + m.filter.View()
 	}
-	names := []string{"Sessions", "Signals"}
-	var parts []string
-	for i, n := range names {
-		switch {
-		case m.collapsed() && m.pane == sessionsPane:
-			// The collapsed tabs already read ‹ Sessions ›.
-		case pane(i) == m.pane:
-			parts = append(parts, st.TopLevelActiveTab.UnsetMarginRight().Render("‹ "+n+" ›"))
-		case !m.narrow():
-			parts = append(parts, n)
-		}
+	left := " "
+	switch {
+	case m.pane == signalsPane:
+		left += st.TopLevelActiveTab.UnsetMarginRight().Render("‹ Signal history ›")
+	case !m.collapsed():
+		// The collapsed tabs already read ‹ Sessions ›.
+		left += st.TopLevelActiveTab.UnsetMarginRight().Render("Sessions")
 	}
-	left := " " + strings.Join(parts, "   ")
 	right := m.paneInfo()
 	gap := w - lipgloss.Width(left) - lipgloss.Width(right) - 1
 	if gap < 2 {
@@ -237,7 +232,99 @@ func (m *Sessions) perPage() int {
 	if m.pane == signalsPane {
 		return max(body/m.signalRowHeight(), 1)
 	}
-	return max((body+1)/m.sessionRowHeight(), 1)
+	sessH, _, _ := m.stackLayout(body)
+	return max((sessH+1)/m.sessionRowHeight(), 1)
+}
+
+// Signals section sizes of the stacked view: about a third of the
+// height, within these bounds; under minStackSessions lines left for the
+// sessions it collapses to one line. It never takes more rows than the
+// session has signals.
+const (
+	minSignalRows    = 3
+	maxSignalRows    = 8
+	minStackSessions = 5
+)
+
+// stackLayout splits h lines between the sessions and the selected
+// session's signals: the sessions' lines, the signal rows, and whether
+// the signals collapse to one line. With no session selected the
+// sessions get all of it.
+func (m *Sessions) stackLayout(h int) (sessH, sigRows int, compact bool) {
+	if _, ok := m.selected(); !ok || m.listErr != nil {
+		return h, 0, false
+	}
+	sigRows = min(max(h/3, minSignalRows), maxSignalRows)
+	// Rows the session has no signals for go to the sessions.
+	sigRows = min(sigRows, max(len(m.sessionSignals()), 1))
+	// A blank line and the title come before the rows.
+	if !m.narrow() && h-2-sigRows >= minStackSessions {
+		return h - 2 - sigRows, sigRows, false
+	}
+	// One blank line and the signal line.
+	return max(h-2, 1), 0, true
+}
+
+// stackedView is the default view: the sessions, and below them the
+// selected session's latest signals, newest first.
+func (m *Sessions) stackedView(w, h int) []string {
+	sessH, sigRows, compact := m.stackLayout(h)
+	lines := m.sessionsView(w, sessH)
+	r, ok := m.selected()
+	if !ok || m.listErr != nil {
+		return lines
+	}
+	for len(lines) < sessH {
+		lines = append(lines, "")
+	}
+	st := m.common.Styles
+	desc := st.RepoSelector.Normal.Desc
+	name := m.where(r.Info.Name, rowRepos(r))
+	sigs := m.sessionSignals()
+	if compact {
+		title := "Signals · "
+		if len(sigs) == 0 {
+			return append(lines, "", " "+desc.Render(common.TruncateString(title+name+": none yet", w-1)))
+		}
+		s := sigs[0]
+		glyph, words, _ := strings.Cut(s.Label(), " ")
+		ss := m.sigStyle(s)
+		head := " " + desc.Render(signals.FormatTime(s.Time, m.now())) + " " + ss.Render(glyph+" "+words) + "  "
+		return append(lines, "", head+desc.Render(common.TruncateString(s.Message(0), max(w-lipgloss.Width(head)-1, 0))))
+	}
+	title := " " + st.TopLevelActiveTab.UnsetMarginRight().Render(common.TruncateString("Signals · "+name, w-4))
+	if n := len(sigs); n > 0 {
+		info := fmt.Sprintf("e full history · %d", n)
+		if gap := w - lipgloss.Width(title) - len(info) - 1; gap >= 2 {
+			title += strings.Repeat(" ", gap) + desc.Render(info)
+		}
+	}
+	lines = append(lines, "", title)
+	if len(sigs) == 0 {
+		return append(lines, "   "+desc.Render("No signals from this session yet."))
+	}
+	wordsW := 6
+	for _, s := range sigs[:min(sigRows, len(sigs))] {
+		_, words, _ := strings.Cut(s.Label(), " ")
+		wordsW = max(wordsW, ansi.StringWidth(words))
+	}
+	wordsW = min(wordsW, sigWordsMaxWidth)
+	for _, s := range sigs[:min(sigRows, len(sigs))] {
+		glyph, words, _ := strings.Cut(s.Label(), " ")
+		ss := m.sigStyle(s)
+		row := "   " + desc.Render(pad(signals.FormatTime(s.Time, m.now()), sigTimeWidth)) + sigGap +
+			ss.Render(glyph) + " " + ss.Render(pad(truncate(words, wordsW), wordsW)) + sigGap
+		lines = append(lines, row+desc.Render(common.TruncateString(s.Message(0), max(w-lipgloss.Width(row)-1, 0))))
+	}
+	return lines
+}
+
+// sigStyle is the colour of a signal's state; missed signals are not one.
+func (m *Sessions) sigStyle(s signals.Signal) lipgloss.Style {
+	if s.IsGap() {
+		return m.common.Styles.RepoSelector.Normal.Desc
+	}
+	return stateStyle(m.common.Styles, s.State())
 }
 
 func (m *Sessions) sessionsView(w, h int) []string {
@@ -437,7 +524,6 @@ func (m *Sessions) FooterLine(width int) string {
 
 // ShortHelp implements help.KeyMap.
 func (m *Sessions) ShortHelp() []key.Binding {
-	km := m.common.KeyMap
 	switch {
 	case m.form != nil:
 		return m.form.ShortHelp()
@@ -449,16 +535,24 @@ func (m *Sessions) ShortHelp() []key.Binding {
 		return []key.Binding{m.keys.Apply, m.keys.Cancel}
 	}
 	pane := m.keys.Pane
+	pane.SetHelp("e", "history")
 	if m.pane == signalsPane {
-		pane.SetHelp("e", "sessions")
-		return []key.Binding{km.UpDown, m.keys.Attach, pane, m.keys.Attention, m.keys.Filter}
+		return []key.Binding{m.keys.Attach, m.keys.Filter, m.keys.Attention, m.backKey()}
 	}
 	if m.listErr != nil {
 		retry := m.keys.Retry
 		retry.SetHelp("r", "retry")
 		return []key.Binding{retry, pane}
 	}
-	return []key.Binding{km.UpDown, m.keys.Attach, m.keys.New, m.keys.End, m.keys.Filter, pane}
+	return []key.Binding{m.keys.Attach, m.keys.New, m.keys.Filter, m.keys.End, pane}
+}
+
+// backKey is esc in the signal history: it clears the filter first.
+func (m *Sessions) backKey() key.Binding {
+	if m.sigQuery != "" {
+		return m.keys.Clear
+	}
+	return m.keys.Back
 }
 
 // FullHelp implements help.KeyMap.
@@ -473,7 +567,7 @@ func (m *Sessions) FullHelp() [][]key.Binding {
 		pane.SetHelp("e", "sessions")
 		return [][]key.Binding{
 			nav,
-			{m.keys.Attach, pane, m.keys.Attention},
+			{m.keys.Attach, m.backKey(), pane, m.keys.Attention},
 			{m.keys.Filter, m.keys.Clear, m.keys.Retry},
 		}
 	}
@@ -483,4 +577,52 @@ func (m *Sessions) FullHelp() [][]key.Binding {
 		{m.keys.AddRepo, m.keys.DropRepo},
 		{m.keys.Copy, m.keys.Filter, m.keys.Clear, pane, m.keys.Retry},
 	}
+}
+
+// Actions are the keys that act on the selected row, for the home page's
+// action menu: only those enabled for it now. None while a form, confirm,
+// filter or operation has the keys, or there is no row.
+func (m *Sessions) Actions() []key.Binding {
+	if m.src == nil || m.Capturing() || m.op != nil {
+		return nil
+	}
+	if m.pane == signalsPane {
+		if m.sigCursor >= len(m.visibleSignals()) {
+			return nil
+		}
+		open := m.keys.Attach
+		open.SetHelp("enter", "open session")
+		return []key.Binding{open}
+	}
+	r, ok := m.selected()
+	if !ok || m.listErr != nil {
+		return nil
+	}
+	busy := m.busy[r.Info.Sandbox] != ""
+	attach := m.keys.Attach
+	park := m.keys.Park
+	park.SetHelp("z", "park")
+	if r.Parked() {
+		attach.SetHelp("enter", "resume & attach")
+		park.SetHelp("z", "resume")
+	}
+	as := []key.Binding{attach}
+	if !busy {
+		as = append(as, park, m.keys.AddRepo)
+		if len(rowRepos(r)) >= 2 {
+			as = append(as, m.keys.DropRepo)
+		}
+	}
+	return append(as, m.keys.Copy, m.keys.End)
+}
+
+// ActionsTitle names the selected row for the action menu.
+func (m *Sessions) ActionsTitle() string {
+	if m.pane == signalsPane {
+		return "Signal"
+	}
+	if r, ok := m.selected(); ok {
+		return sessionLabel(r.Info.Name, rowRepos(r))
+	}
+	return ""
 }

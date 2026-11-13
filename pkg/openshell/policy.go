@@ -21,7 +21,9 @@ const anyBinary = "/**"
 // has one: version 1, the working directory (/sandbox) and /tmp writable,
 // the system directories read-only, Landlock where the kernel has it, and
 // no network access. It mirrors restrictive_default_policy() in OpenShell
-// 0.1.8, crates/openshell-policy/src/lib.rs. The process identity is left
+// 0.1.8, crates/openshell-policy/src/lib.rs, plus read-write /dev/pts,
+// /dev/ptmx and /dev/tty: osewa's holder opens a pseudo-terminal for each
+// session, which Landlock otherwise denies (EACCES). The process identity is left
 // unset, as there: the compute driver fills it in (sandbox:sandbox on
 // Kubernetes).
 func restrictiveDefaultPolicy() *SandboxPolicy {
@@ -30,7 +32,7 @@ func restrictiveDefaultPolicy() *SandboxPolicy {
 		Filesystem: &v1.FilesystemPolicy{
 			IncludeWorkdir: true,
 			ReadOnly:       []string{"/bin", "/usr", "/lib", "/proc", "/dev/urandom", "/etc", "/var/log"},
-			ReadWrite:      []string{"/tmp", "/dev/null"},
+			ReadWrite:      []string{"/tmp", "/dev/null", "/dev/pts", "/dev/ptmx", "/dev/tty"},
 		},
 		Landlock:        &v1.LandlockPolicy{Compatibility: "best_effort"},
 		NetworkPolicies: map[string]v1.NetworkPolicyRule{},

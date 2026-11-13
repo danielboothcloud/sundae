@@ -1,6 +1,6 @@
 // Package sessions is the home page's Sessions tab: the user's OpenShell
-// agent sessions, with what their agents last reported, and the signals
-// feed, in two panes. It starts, attaches to, parks, resumes and ends
+// agent sessions, with what their agents last reported, the selected
+// session's latest signals below them, and, on e, the full signal history. It starts, attaches to, parks, resumes and ends
 // sessions, as the `session` commands do, and follows the signals History
 // for live updates. See _bmad-output/planning-artifacts/tui-screens.md,
 // sections 5 and 7.
@@ -58,6 +58,7 @@ type KeyMap struct {
 	Filter    key.Binding
 	Clear     key.Binding
 	Pane      key.Binding
+	Back      key.Binding
 	Retry     key.Binding
 	Attention key.Binding
 	Follow    key.Binding
@@ -72,14 +73,15 @@ func DefaultKeyMap() KeyMap {
 	return KeyMap{
 		Attach:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "attach")),
 		New:       key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new")),
-		AddRepo:   key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add repos")),
+		AddRepo:   key.NewBinding(key.WithKeys("A"), key.WithHelp("A", "add repos")),
 		DropRepo:  key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "remove repos")),
-		End:       key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "end")),
+		End:       key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "end")),
 		Park:      key.NewBinding(key.WithKeys("z"), key.WithHelp("z", "park/resume")),
 		Copy:      key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "copy attach command")),
 		Filter:    key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
 		Clear:     key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear filter")),
-		Pane:      key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "signals")),
+		Pane:      key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "signal history")),
+		Back:      key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 		Retry:     key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 		Attention: key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "attention only")),
 		Follow:    key.NewBinding(key.WithKeys("g", "home"), key.WithHelp("g", "top / follow")),
@@ -305,6 +307,10 @@ func (m *Sessions) SetScope(repo string) {
 	m.notice = notice{}
 	m.sortRows()
 }
+
+// History reports whether the full signal history shows: esc goes back
+// to the sessions.
+func (m *Sessions) History() bool { return m.pane == signalsPane }
 
 // Scope returns the repository the tab is narrowed to; "" for none.
 func (m *Sessions) Scope() string { return m.scope }
@@ -604,6 +610,29 @@ func (m *Sessions) visibleSignals() []signals.Signal {
 	return out
 }
 
+// sessionSignals returns the signals of the selected session, newest
+// first.
+func (m *Sessions) sessionSignals() []signals.Signal {
+	r, ok := m.selected()
+	if !ok {
+		return nil
+	}
+	var out []signals.Signal
+	for _, s := range m.sigs {
+		var sb string
+		switch {
+		case s.Status != nil:
+			sb = s.Status.Session.Sandbox
+		case s.Lifecycle != nil:
+			sb = s.Lifecycle.Session.Sandbox
+		}
+		if sb != "" && sb == r.Info.Sandbox {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // scopedRows returns the sessions of the scope.
 func (m *Sessions) scopedRows() []sessionctl.Row {
 	if m.scope == "" {
@@ -723,6 +752,10 @@ func (m *Sessions) onKey(msg tea.KeyPressMsg) tea.Cmd {
 	case key.Matches(msg, m.keys.Pane):
 		m.pane = 1 - m.pane
 		return nil
+	case m.pane == signalsPane && m.sigQuery == "" && key.Matches(msg, m.keys.Back):
+		// esc leaves the signal history for the sessions.
+		m.pane = sessionsPane
+		return nil
 	case key.Matches(msg, m.keys.Filter):
 		m.typing = true
 		m.filter.SetValue(m.query())
@@ -747,7 +780,8 @@ func (m *Sessions) onKey(msg tea.KeyPressMsg) tea.Cmd {
 	case key.Matches(msg, km.PrevPage):
 		m.move(-m.perPage())
 		return nil
-	case key.Matches(msg, km.NextPage):
+	case key.Matches(msg, km.NextPage) && !key.Matches(msg, m.keys.End):
+		// d ends a session here, so it does not page.
 		m.move(m.perPage())
 		return nil
 	case key.Matches(msg, m.keys.Follow):
@@ -839,7 +873,7 @@ func (m *Sessions) onSessionsKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		if len(rowRepos(r)) < 2 {
-			m.notice = notice{text: label + " has one repository; a session keeps at least one (x ends it)."}
+			m.notice = notice{text: label + " has one repository; a session keeps at least one (d ends it)."}
 			return nil
 		}
 		m.form = m.editReposForm(nil, prefill{edit: "remove", target: r})

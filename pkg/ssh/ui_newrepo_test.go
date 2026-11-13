@@ -158,7 +158,7 @@ func TestNewRepoFormValidation(t *testing.T) {
 	ui, _, be, _ := newRepoUI(t, 80, true)
 	found := false
 	for _, b := range ui.ShortHelp() {
-		found = found || b.Help().Key == "n" && b.Help().Desc == "new repository"
+		found = found || b.Help().Key == "n" && b.Help().Desc == "new"
 	}
 	if !found {
 		t.Fatal("no n in the Repositories help")

@@ -386,8 +386,11 @@ func TestSessionsGolden(t *testing.T) {
 	for _, w := range []int{80, 50} {
 		t.Run(fmt.Sprint(w), func(t *testing.T) {
 			// The tab gets the terminal width less the frame's margins.
-			m := loaded(t, w-4, 22, newFakeSource())
-			keys(m, "j")
+			src := newFakeSource()
+			src.snap = mockSignals()
+			m := loaded(t, w-4, 22, src)
+			snap, feed := src.Follow()
+			m.Update(followMsg{snap: snap, feed: feed})
 			golden(t, fmt.Sprintf("sessions-%d", w), view(m))
 		})
 	}
@@ -650,7 +653,7 @@ func TestLiveFeedEndsOnClose(t *testing.T) {
 func TestEndConfirm(t *testing.T) {
 	src := newFakeSource()
 	m := loaded(t, 76, 30, src)
-	keys(m, "x")
+	keys(m, "d")
 	if !m.Capturing() {
 		t.Fatal("the confirm does not capture keys")
 	}
@@ -662,7 +665,7 @@ func TestEndConfirm(t *testing.T) {
 	if m.confirm != nil || len(src.ended) != 0 {
 		t.Fatal("n did not cancel")
 	}
-	cmd := keys(m, "x", "y")
+	cmd := keys(m, "d", "y")
 	if m.words(m.rows[0]) != "blocked · permission · ending" {
 		t.Fatalf("busy words %q", m.words(m.rows[0]))
 	}
@@ -719,16 +722,54 @@ func TestCopyAttachCommand(t *testing.T) {
 
 func TestPaneSwitch(t *testing.T) {
 	m := loaded(t, 76, 30, newFakeSource())
-	keys(m, "e")
-	if m.pane != signalsPane || !strings.Contains(view(m), "‹ Signals ›") {
-		t.Fatal("e did not switch to Signals")
-	}
-	if h := m.ShortHelp(); h[2].Help().Desc != "sessions" {
-		t.Fatalf("help %v", h[2].Help())
+	if v := view(m); !strings.Contains(v, "Signals · ") {
+		t.Fatalf("stacked view has no signals section:\n%s", v)
 	}
 	keys(m, "e")
+	if m.pane != signalsPane || !strings.Contains(view(m), "‹ Signal history ›") {
+		t.Fatal("e did not open the signal history")
+	}
+	if h := m.ShortHelp(); h[3].Help().Key != "esc" || h[3].Help().Desc != "back" {
+		t.Fatalf("help %v", h[3].Help())
+	}
+	keys(m, "esc")
 	if m.pane != sessionsPane {
-		t.Fatal("e did not switch back")
+		t.Fatal("esc did not go back")
+	}
+	keys(m, "e", "e")
+	if m.pane != sessionsPane {
+		t.Fatal("e did not go back")
+	}
+}
+
+func TestStackedFollowsCursor(t *testing.T) {
+	src := newFakeSource()
+	src.snap = mockSignals()
+	m := loaded(t, 76, 30, src)
+	snap, feed := src.Follow()
+	m.Update(followMsg{snap: snap, feed: feed})
+	if n := len(m.sessionSignals()); n != 2 {
+		t.Fatalf("infra / claude-1 has %d signals, want 2", n)
+	}
+	for i := range m.visibleRows() {
+		r, _ := m.selected()
+		for _, s := range m.sessionSignals() {
+			if s.Status != nil && s.Status.Session.Sandbox != r.Info.Sandbox {
+				t.Fatalf("row %d shows another session's signal", i)
+			}
+		}
+		if !strings.Contains(view(m), "Signals · "+m.where(r.Info.Name, rowRepos(r))) {
+			t.Fatalf("row %d: title does not name the session:\n%s", i, view(m))
+		}
+		keys(m, "down")
+		if m.pane != sessionsPane {
+			t.Fatal("down switched pane")
+		}
+	}
+	// Short: one line.
+	m.SetSize(76, 12)
+	if v := view(m); strings.Contains(v, "e full history") {
+		t.Fatalf("short view kept the full section:\n%s", v)
 	}
 }
 
@@ -763,13 +804,19 @@ func TestNewSessionForm(t *testing.T) {
 	}
 	golden(t, "new-session-80", view(m))
 
-	// Pick a second repository: ← to infra, space.
-	keys(m, "left", " ")
-	if strings.Join(repos.Values(), ",") != "sundae,infra" || !strings.Contains(view(m), "sundae, infra") {
+	// Pick a second repository: ↓ to infra, space; it joins the picked
+	// ones at the top.
+	keys(m, "down", "down", "down", " ")
+	if strings.Join(repos.Values(), ",") != "sundae,infra" || !strings.Contains(view(m), "▸ [x] infra") {
 		t.Fatalf("picked %v:\n%s", repos.Values(), view(m))
 	}
+	// Leaving the field shows a summary.
+	keys(m, "tab")
+	if !strings.Contains(view(m), "Repositories   sundae, infra") {
+		t.Fatalf("summary:\n%s", view(m))
+	}
 	// Changing the profile does not rename.
-	keys(m, "down", "down", "right")
+	keys(m, "down", "right")
 	if f.Field("profile").Value() != "shell" || f.Field("name").Value() != "sundae" {
 		t.Fatalf("after profile change: %s %s", f.Field("profile").Value(), f.Field("name").Value())
 	}
@@ -846,12 +893,12 @@ func TestEditSessionRepos(t *testing.T) {
 	src := newFakeSource()
 	m := loaded(t, 76, 30, src)
 	// infra / claude-1 is selected: add sundae to it.
-	run(m, keys(m, "a"), 1)
+	run(m, keys(m, "A"), 1)
 	if m.form == nil || !strings.Contains(view(m), "Add repositories to infra / claude-1") {
 		t.Fatalf("view:\n%s", view(m))
 	}
 	// Only repositories it lacks are offered.
-	if strings.Contains(m.form.View(76), "‹ [ ] infra ›") {
+	if strings.Contains(m.form.View(76), "[ ] infra") {
 		t.Fatal("infra offered again")
 	}
 	typeText(m, "sund")
@@ -1041,8 +1088,8 @@ func TestScopeKeys(t *testing.T) {
 		t.Fatal("n did not open the form for the repository")
 	}
 	keys(m, "esc")
-	// x asks in the tab: the repository page's footer is the help.
-	keys(m, "j", "x")
+	// d asks in the tab: the repository page's footer is the help.
+	keys(m, "j", "d")
 	if m.FooterLine(80) != "" || !strings.Contains(view(m), "End sundae / tui?") || !strings.Contains(view(m), "y yes • N no") {
 		t.Fatalf("confirm:\n%s", view(m))
 	}

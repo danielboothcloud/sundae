@@ -15,9 +15,9 @@
       working  5m
       bash
 
-    ● sundae / tui
-      working  5m
-      Running go test ./pkg/ui/...
 
 
-   ↑↓ navigate • 1-3 tab • enter attach • n ne…
+
+   Signals · infra / claude-1: none yet
+
+   enter attach • n new • / filter … • ? more

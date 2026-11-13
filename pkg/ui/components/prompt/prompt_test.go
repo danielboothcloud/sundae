@@ -295,50 +295,95 @@ func TestMultiField(t *testing.T) {
 	opts := []Option{{Value: "app"}, {Value: "infra"}, {Value: "lib"}, {Value: "gone"}}
 	// Values not among the options are dropped.
 	m := MultiField("repos", "Repositories", opts, []string{"lib", "nope"})
-	f := NewForm(newCommon(), "Pick", "go", m)
+	f := NewForm(newCommon(), "Pick", "go", m, ToggleField("t", "T", false))
 	var changes int
 	f.OnChange = func(*Form, string) { changes++ }
 	if m.Kind() != Multi || strings.Join(m.Values(), ",") != "lib" || m.Value() != "lib" {
 		t.Fatalf("initial %v", m.Values())
 	}
-	// The shown option starts on the first picked one.
-	if o, _ := m.Selected(); o.Value != "lib" {
-		t.Fatalf("shown %s", o.Value)
+	// Picked first, then the rest; the cursor starts on the top row.
+	view := ansi.Strip(f.View(80))
+	for _, want := range []string{"filter: type to filter█", "1 of 4 picked", "▸ [x] lib", "  [ ] app", "  [ ] infra", "  [ ] gone"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("no %q in:\n%s", want, view)
+		}
 	}
-	// ←→ move, space toggles, in the order picked.
-	f.Update(press("left"))
+	if strings.Index(view, "[x] lib") > strings.Index(view, "[ ] app") {
+		t.Fatalf("picked not first:\n%s", view)
+	}
+	// ↓ moves, space toggles; the cursor follows the option.
+	f.Update(press("down")) // app
+	f.Update(press("down")) // infra
 	f.Update(press(" "))
-	f.Update(press("right"))
-	f.Update(press("right"))
-	f.Update(press(" "))
-	if strings.Join(m.Values(), ",") != "lib,infra,gone" || changes != 2 {
+	if strings.Join(m.Values(), ",") != "lib,infra" || changes != 1 {
 		t.Fatalf("values %v changes %d", m.Values(), changes)
 	}
-	// Space again unpicks.
-	f.Update(press(" "))
-	if strings.Join(m.Values(), ",") != "lib,infra" {
-		t.Fatalf("values %v", m.Values())
+	if o, _ := m.Selected(); o.Value != "infra" {
+		t.Fatalf("cursor on %s", o.Value)
 	}
-	// Typing filters; backspace and esc clear the filter, not the form.
+	// ctrl+p moves up; ↑ at the top stays in the form's first field.
+	f.Update(press("ctrl+p"))
+	if o, _ := m.Selected(); o.Value != "lib" {
+		t.Fatalf("cursor on %s", o.Value)
+	}
+	// Typing filters; picked options hidden by it stay, marked.
 	for _, k := range []string{"a", "p"} {
 		f.Update(press(k))
 	}
 	if o, ok := m.Selected(); !ok || o.Value != "app" {
 		t.Fatalf("filtered %v %v", o, ok)
 	}
-	view := ansi.Strip(f.View(80))
-	if !strings.Contains(view, "‹ [ ] app ›") || !strings.Contains(view, "/ap") || !strings.Contains(view, "lib, infra") {
-		t.Fatalf("view:\n%s", view)
+	view = ansi.Strip(f.View(80))
+	for _, want := range []string{"filter: ap█", "[x] lib  (hidden by filter)", "▸ [ ] app"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("no %q in:\n%s", want, view)
+		}
 	}
-	if res, _ := f.Update(press("esc")); res != Pending {
+	if strings.Contains(view, "gone") {
+		t.Fatalf("filter shows gone:\n%s", view)
+	}
+	helps := func() string {
+		var s []string
+		for _, b := range f.ShortHelp() {
+			s = append(s, b.Help().Key+" "+b.Help().Desc)
+		}
+		return strings.Join(s, ",")
+	}
+	if h := helps(); !strings.Contains(h, "space pick") || !strings.Contains(h, "esc clear filter") || !strings.Contains(h, "↑↓ move") {
+		t.Fatalf("help %s", h)
+	}
+	// backspace edits, esc clears the filter, not the form.
+	f.Update(press("backspace"))
+	if !strings.Contains(ansi.Strip(f.View(80)), "filter: a█") {
+		t.Fatalf("backspace:\n%s", ansi.Strip(f.View(80)))
+	}
+	if res, _ := f.Update(press("esc")); res != Pending || m.filter != "" {
 		t.Fatal("esc with a filter cancelled the form")
 	}
-	// Three or more picked: two shown and a count.
-	f.Update(press(" ")) // app (the filter is gone; the shown option stays)
-	f.Update(press("left"))
-	f.Update(press(" ")) // gone, before app when wrapping left
-	if strings.Join(m.Values(), ",") != "lib,infra,app,gone" || !strings.Contains(ansi.Strip(f.View(80)), "lib, infra, +2") {
-		t.Fatalf("values %v view:\n%s", m.Values(), ansi.Strip(f.View(80)))
+	// ↓ at the bottom moves to the next field; tab does too, from anywhere.
+	for range 4 {
+		f.Update(press("down"))
+	}
+	if f.Focused() == m {
+		t.Fatal("down at the bottom stayed")
+	}
+	// Unfocused, the field is a short summary.
+	view = ansi.Strip(f.View(80))
+	if !strings.Contains(view, "Repositories   lib, infra") || strings.Contains(view, "[ ]") {
+		t.Fatalf("blurred:\n%s", view)
+	}
+	f.Update(press("up"))
+	if f.Focused() != m {
+		t.Fatal("up did not return")
+	}
+	f.Update(press("tab"))
+	if f.Focused() == m {
+		t.Fatal("tab stayed")
+	}
+	m.toggle("app", true)
+	m.toggle("gone", true)
+	if s := m.summary(); s != "lib, infra +2" {
+		t.Fatalf("summary %s", s)
 	}
 	// Nothing picked is refused at submit.
 	for _, v := range m.Values() {
@@ -347,12 +392,29 @@ func TestMultiField(t *testing.T) {
 	if res, _ := f.Update(press("enter")); res != Pending || f.Err() == nil || !strings.Contains(f.Err().Error(), "pick at least one") {
 		t.Fatalf("empty submit: %v", f.Err())
 	}
-	// The help names space.
-	found := false
-	for _, b := range f.ShortHelp() {
-		found = found || b.Help().Key == "space"
+}
+
+// TestMultiFieldScrolls checks a long list shows a bounded window with
+// more-indicators that follows the cursor.
+func TestMultiFieldScrolls(t *testing.T) {
+	var opts []Option
+	for i := range 20 {
+		opts = append(opts, Option{Value: "repo" + itoa(i)})
 	}
-	if !found {
-		t.Fatal("no space in the help")
+	m := MultiField("repos", "Repositories", opts, nil)
+	f := NewForm(newCommon(), "Pick", "go", m)
+	view := ansi.Strip(f.View(80))
+	if !strings.Contains(view, "↓ 13 more") || strings.Contains(view, "↑") || strings.Contains(view, "repo7 ") {
+		t.Fatalf("top:\n%s", view)
+	}
+	for range 10 {
+		f.Update(press("down"))
+	}
+	view = ansi.Strip(f.View(80))
+	if !strings.Contains(view, "▸ [ ] repo10") || !strings.Contains(view, "↑ 4 more") || !strings.Contains(view, "↓ 9 more") {
+		t.Fatalf("scrolled:\n%s", view)
+	}
+	if n := strings.Count(view, "[ ]"); n != multiRows {
+		t.Fatalf("%d rows:\n%s", n, view)
 	}
 }

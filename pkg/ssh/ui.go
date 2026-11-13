@@ -146,11 +146,10 @@ func (ui *UI) ShortHelp() []key.Binding {
 	case readyState:
 		b = append(b, ui.pages[ui.activePage].ShortHelp()...)
 	}
-	if !ui.IsFiltering() {
-		b = append(b, ui.common.KeyMap.Quit)
-	}
 	if !ui.capturing() {
-		b = append(b, ui.common.KeyMap.Help)
+		more := ui.common.KeyMap.Help
+		more.SetHelp("?", "more")
+		b = append(b, more)
 	}
 	return b
 }
@@ -164,9 +163,9 @@ func (ui *UI) FullHelp() [][]key.Binding {
 	case readyState:
 		b = append(b, ui.pages[ui.activePage].FullHelp()...)
 	}
-	h := []key.Binding{
-		ui.common.KeyMap.Help,
-	}
+	less := ui.common.KeyMap.Help
+	less.SetHelp("?", "less")
+	h := []key.Binding{less}
 	if !ui.IsFiltering() {
 		h = append(h, ui.common.KeyMap.Quit)
 	}

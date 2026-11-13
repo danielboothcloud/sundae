@@ -39,7 +39,7 @@ func TestDeleteRepoConfirmsAndDeletes(t *testing.T) {
 	selectRepo(t, ui, "mine")
 
 	// Any key but y cancels.
-	uiKey(ui, "D")
+	uiKey(ui, "d")
 	waitScreen(t, ui, "Delete mine?")
 	checkFooterLine(t, ui, "confirm", confirmLine(ui,
 		"Delete mine? Its history, collaborators and webhooks are removed for good."))
@@ -48,7 +48,7 @@ func TestDeleteRepoConfirmsAndDeletes(t *testing.T) {
 		t.Fatalf("deleted after no: %v", err)
 	}
 
-	uiKey(ui, "D")
+	uiKey(ui, "d")
 	uiKey(ui, "y")
 	waitScreen(t, ui, "Deleted mine.")
 	checkFooterLine(t, ui, "notice", ui.common.Styles.Prompt.Notice.Render("Deleted mine."))
@@ -66,11 +66,11 @@ func TestDeleteRepoNeedsWriteAccess(t *testing.T) {
 	runUI(ui, ui.pages[selectionPage].Init(), 2)
 	selectRepo(t, ui, "scratch") // the admin's; alice may only read it
 	for _, b := range ui.ShortHelp() {
-		if b.Help().Key == "D" {
+		if b.Help().Key == "d" {
 			t.Fatal("D offered without write access")
 		}
 	}
-	uiKey(ui, "D")
+	uiKey(ui, "d")
 	waitScreen(t, ui, "✗ scratch: unauthorized")
 	checkFooterLine(t, ui, "error", ui.common.Styles.Prompt.Error.Render("✗ scratch: unauthorized"))
 	if _, err := be.Repository(ctx, "scratch"); err != nil {

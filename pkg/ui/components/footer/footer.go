@@ -67,6 +67,9 @@ func (f *Footer) View() string {
 		Width(f.common.Width)
 	helpView := f.help.View(f.keymap)
 	if !f.help.ShowAll {
+		helpView = f.shortView()
+	}
+	if !f.help.ShowAll {
 		// The help model adds items past its width when no "…" fits
 		// after the last one that does; keep the short help on its line.
 		helpView = ansi.Truncate(helpView, max(f.common.Width-f.common.Styles.Footer.GetHorizontalFrameSize(), 0), "…")
@@ -75,6 +78,29 @@ func (f *Footer) View() string {
 		"footer",
 		s.Render(helpView),
 	)
+}
+
+// shortView renders the short help, keeping a final "?" entry visible when
+// the actions before it do not all fit.
+func (f *Footer) shortView() string {
+	kb := f.keymap.ShortHelp()
+	n := len(kb)
+	if n < 2 || kb[n-1].Help().Key != "?" {
+		return f.help.ShortHelpView(kb)
+	}
+	h := f.help
+	last := h.ShortHelpView(kb[n-1:])
+	sep := h.Styles.ShortSeparator.Render(h.ShortSeparator)
+	rest := h.ShortHelpView(kb[:n-1])
+	room := h.Width() - lipgloss.Width(sep) - lipgloss.Width(last)
+	if lipgloss.Width(rest) > room {
+		h.SetWidth(max(room, 1))
+		rest = h.ShortHelpView(kb[:n-1])
+	}
+	if rest == "" {
+		return last
+	}
+	return rest + sep + last
 }
 
 // ShortHelp returns the short help key bindings.

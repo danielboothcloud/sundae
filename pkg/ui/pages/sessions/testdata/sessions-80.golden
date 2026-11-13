@@ -1,11 +1,11 @@
 
- ‹ Sessions ›   Signals                                          6 sessions
+ Sessions                                                        6 sessions
 
-  ▲ infra / claude-1                               blocked · permission   4m
-    Apply 3 to add, 1 to change, 0 to destroy?
+┃ ▲ infra / claude-1                               blocked · permission   4m
+┃   Apply 3 to add, 1 to change, 0 to destroy?
 
-┃ ✓ sundae / forge-sync                                            done  12m
-┃   Implemented GitHub discovery; 14 tests pass
+  ✓ sundae / forge-sync                                            done  12m
+    Implemented GitHub discovery; 14 tests pass
 
   ● sundae / tui                                            working 40%  now
     Running go test ./pkg/ui/...
@@ -16,5 +16,7 @@
   ○ dotfiles / main                                       idle · parked   3h
     bash
 
-  · scratch / shell                                                none
-    bash
+
+ Signals · infra / claude-1                             e full history · 2
+   14:02:11  ▲ blocked · permission  Apply 3 to add, 1 to change, 0 to des…
+   14:02:03  ● working               Planning

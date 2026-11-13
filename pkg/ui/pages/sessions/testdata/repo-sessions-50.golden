@@ -6,3 +6,7 @@
   ● tui
     working 40%  now
     Running go test ./pkg/ui/...
+
+
+
+ 13:58:30 ✓ done  Implemented GitHub discovery

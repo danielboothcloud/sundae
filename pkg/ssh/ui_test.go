@@ -154,6 +154,12 @@ func uiKeyDepth(ui *UI, depth int, keys ...string) {
 			msg = tea.KeyPressMsg{Code: tea.KeyEscape}
 		case "tab":
 			msg = tea.KeyPressMsg{Code: tea.KeyTab}
+		case "space":
+			msg = tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
+		case "up":
+			msg = tea.KeyPressMsg{Code: tea.KeyUp}
+		case "down":
+			msg = tea.KeyPressMsg{Code: tea.KeyDown}
 		default:
 			r := []rune(k)
 			msg = tea.KeyPressMsg{Code: r[0], Text: k}
@@ -231,15 +237,20 @@ func TestHomeWithoutSessions(t *testing.T) {
 	if s := screenText(ui); !strings.Contains(s, "No readme found") {
 		t.Fatalf("2 did not open About:\n%s", s)
 	}
-	if !strings.Contains(s, "1-2 tab") {
+	if !strings.Contains(s, "? more") || strings.Contains(s, "1-2 tab") {
 		t.Fatalf("footer:\n%s", s)
+	}
+	// ? shows every key, the tab keys too.
+	uiKey(ui, "?")
+	if s := screenText(ui); !strings.Contains(s, "1-2 tab") || !strings.Contains(s, "? less") {
+		t.Fatalf("full help:\n%s", s)
 	}
 }
 
 func TestHomeSessionsKeys(t *testing.T) {
 	ui := newTestUI(t, 80, 24, &fakeSource{rows: frameRows()})
 	uiKey(ui, "2")
-	if s := screenText(ui); !strings.Contains(s, "1-3 tab") || !strings.Contains(s, "enter attach") {
+	if s := screenText(ui); !strings.Contains(s, "? more") || !strings.Contains(s, "enter attach") {
 		t.Fatalf("footer:\n%s", s)
 	}
 	// While the filter is typed, q, ? and the digits are text.
@@ -249,7 +260,7 @@ func TestHomeSessionsKeys(t *testing.T) {
 	}
 	uiKey(ui, "esc")
 	// The end confirm takes the footer's place.
-	uiKey(ui, "x")
+	uiKey(ui, "d")
 	s := screenText(ui)
 	last := s[strings.LastIndex(s, "\n")+1:]
 	if !strings.Contains(last, "End infra / claude-1?") || !strings.HasSuffix(last, "y yes • N no") {

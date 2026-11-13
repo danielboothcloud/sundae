@@ -39,7 +39,7 @@ func TestBuildSandboxPolicyDefault(t *testing.T) {
 		Filesystem: &v1.FilesystemPolicy{
 			IncludeWorkdir: true,
 			ReadOnly:       []string{"/bin", "/usr", "/lib", "/proc", "/dev/urandom", "/etc", "/var/log"},
-			ReadWrite:      []string{"/tmp", "/dev/null"},
+			ReadWrite:      []string{"/tmp", "/dev/null", "/dev/pts", "/dev/ptmx", "/dev/tty"},
 		},
 		Landlock: &v1.LandlockPolicy{Compatibility: "best_effort"},
 		NetworkPolicies: map[string]v1.NetworkPolicyRule{

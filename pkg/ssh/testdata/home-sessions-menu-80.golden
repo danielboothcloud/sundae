@@ -1,0 +1,23 @@
+
+    Sundae                                  ▲ 1 blocked  ✓ 1 done  ● 2 working
+
+    Repositories  • Sessions    About
+
+   Sessions                                                        5 sessions
+
+  ┃ ▲ infra / claude-1                                            blocked   5m
+  ┃   Apply 3 to add, 1 ╭──────────────────────────────╮
+                        │ infra / claude-1             │
+    ✓ sundae / forge-syn│ > enter  Attach              │             done   5m
+      Implemented GitHub│   z      Park                │
+                        │   A      Add repos           │
+    ● gateway / main    │   c      Copy attach command │          working   5m
+      bash              │   d      End                 │
+                        ╰──────────────────────────────╯
+    ● sundae / tui                                                working   5m
+      Running go test ./pkg/ui/...
+
+   Signals · infra / claude-1
+     No signals from this session yet.
+
+   ↑↓ move • enter run • esc close

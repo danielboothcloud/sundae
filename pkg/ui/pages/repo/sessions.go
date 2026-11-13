@@ -106,10 +106,10 @@ func (s *Sessions) TabName() string { return "Sessions" }
 
 // Path implements common.TabComponent. It is not empty while esc has
 // something to do in the tab (close a form or confirm, clear a filter,
-// cancel a start), so esc does not leave the repository.
+// cancel a start, leave the signal history), so esc does not leave the repository.
 func (s *Sessions) Path() string {
 	s.bind()
-	if s.model.Capturing() || s.model.Busy() || s.model.Filtered() {
+	if s.model.Capturing() || s.model.Busy() || s.model.Filtered() || s.model.History() {
 		return "sessions"
 	}
 	return ""

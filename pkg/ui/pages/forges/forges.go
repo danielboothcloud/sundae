@@ -987,7 +987,7 @@ func (m *Forges) ShortHelp() []key.Binding {
 		retry.SetHelp("r", "retry")
 		return []key.Binding{retry}
 	}
-	return []key.Binding{m.common.KeyMap.UpDown, m.keys.Open, m.keys.Import, m.keys.ImportAll, m.keys.Sync, m.keys.Push, m.keys.Filter}
+	return []key.Binding{m.keys.Open, m.keys.Import, m.keys.Sync, m.keys.Filter}
 }
 
 // FullHelp implements help.KeyMap.
@@ -1002,4 +1002,72 @@ func (m *Forges) FullHelp() [][]key.Binding {
 		{m.keys.Sync, m.keys.Push, m.keys.Copy},
 		{m.keys.Filter, m.keys.Clear},
 	}
+}
+
+// Actions are the keys that act on the selected row, for the home page's
+// action menu: only those that do something for it now. None while a
+// confirm, form or filter has the keys, or the forges are not listed.
+func (m *Forges) Actions() []key.Binding {
+	if m.src == nil || m.Capturing() || m.statusErr != nil || !m.loaded {
+		return nil
+	}
+	it, ok := m.selected()
+	if !ok {
+		return nil
+	}
+	g := m.groups[it.g]
+	sync := m.keys.Sync
+	if it.kind == headerRow {
+		sync.SetHelp("r", "sync forge")
+		return []key.Binding{sync, m.keys.ImportAll}
+	}
+	r := g.repos[it.r]
+	busy := m.busy[rowKey(g.status.Name, r.Path)] != ""
+	if !r.Imported {
+		sync.SetHelp("r", "sync forge")
+		if busy {
+			return []key.Binding{sync}
+		}
+		return []key.Binding{m.keys.Import, sync}
+	}
+	as := []key.Binding{m.keys.Open, sync}
+	if !busy {
+		as = append(as, m.keys.Push)
+	}
+	return append(as, m.keys.Copy)
+}
+
+// ActionsTitle names the selected row for the action menu.
+func (m *Forges) ActionsTitle() string {
+	it, ok := m.selected()
+	if !ok {
+		return ""
+	}
+	g := m.groups[it.g]
+	if it.kind == headerRow {
+		return g.status.Name
+	}
+	return g.repos[it.r].Path
+}
+
+// ForgeNames are the forges listed, for the home page's command palette;
+// none until the tab has listed them.
+func (m *Forges) ForgeNames() []string {
+	if m.src == nil || m.statusErr != nil || !m.loaded {
+		return nil
+	}
+	names := make([]string, len(m.groups))
+	for i, g := range m.groups {
+		names[i] = g.status.Name
+	}
+	return names
+}
+
+// SyncForge syncs every repository imported from the named forge, as r
+// on its header row does.
+func (m *Forges) SyncForge(name string) tea.Cmd {
+	if m.src == nil || m.Capturing() {
+		return nil
+	}
+	return m.syncForge(name)
 }

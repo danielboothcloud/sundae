@@ -1,7 +1,11 @@
 
  New session
 
-   Repositories   ‹ [x] sundae ›   sundae
+   Repositories   filter: type to filter█                     1 of 4 picked
+                  ▸ [x] sundae
+                    [ ] dotfiles
+                    [ ] gateway
+                    [ ] infra
    Name           sundae
    Profile        ‹ claude ›   ghcr.io/me/agent-claude:latest · claude
    Attach         yes

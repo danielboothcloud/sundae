@@ -14,3 +14,4 @@ sundae_ed25519*
 # Chart dependencies, fetched and packaged by `helm dependency build helm/sundae`
 # (Chart.lock pins them).
 /helm/sundae/charts/
+!todo.txt

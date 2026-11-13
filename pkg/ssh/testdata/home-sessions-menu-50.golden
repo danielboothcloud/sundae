@@ -1,0 +1,23 @@
+
+    Sundae                              ▲1 ✓1 ●2
+
+  ‹ Sessions ›
+
+  ┃ ▲ infra / claude-1
+  ┃   blocked  5m
+  ┃   Apply 3 to add, 1 to change, 0 to destroy…
+         ╭──────────────────────────────╮
+    ✓ sun│ infra / claude-1             │
+      don│ > enter  Attach              │
+      Imp│   z      Park                │
+         │   A      Add repos           │
+    ● gat│   c      Copy attach command │
+      wor│   d      End                 │
+      bas╰──────────────────────────────╯
+
+
+
+
+   Signals · infra / claude-1: none yet
+
+   ↑↓ move • enter run • esc close

@@ -1124,7 +1124,7 @@ keeps the snapshot. If the snapshot fails, the sandbox is left running and
 the park is not tried again for another `sessions.suspend.after`.
 
 **Events.** Snapshots and restores are lifecycle events in `session signals`,
-the TUI's Signals pane and notifications: `snapshotted` (`op` `end` or
+the TUI's signal history and notifications: `snapshotted` (`op` `end` or
 `park`, with the size), `restored`, `parked` with `snapshot: true`, and
 `failed` with `op` `snapshot` or `restore`, which the `session_failed`
 notification trigger covers.
@@ -1932,18 +1932,39 @@ You can copy text to your clipboard over SSH. For instance, you can press
 <kbd>c</kbd> on the highlighted repo in the menu to copy the clone command
 [^osc52].
 
-The home page has tabs: <kbd>1</kbd>–<kbd>n</kbd> jump to one, <kbd>tab</kbd>
-cycles. When OpenShell is enabled and you are signed in with a key, a
+The home page has tabs: <kbd>1</kbd>–<kbd>n</kbd> jump to one, <kbd>tab</kbd> and
+<kbd>shift+tab</kbd> cycle forward and back (while a form or filter is open,
+they stay with it). Keys mean the same on every tab: <kbd>n</kbd> new,
+<kbd>enter</kbd> open/attach, <kbd>d</kbd> delete/end (always confirmed),
+<kbd>r</kbd> refresh/sync, <kbd>c</kbd> copy a command, <kbd>/</kbd> filter.
+On a Repositories, Sessions or Forges row, <kbd>space</kbd> or <kbd>.</kbd>
+opens a menu of what you can do with it, each with its key, showing only the
+actions allowed for that row: <kbd>↑</kbd>/<kbd>↓</kbd> (or <kbd>j</kbd>/<kbd>k</kbd>)
+move, <kbd>enter</kbd> runs the highlighted action, an action's key runs it
+directly (exactly as pressing it on the row does, confirms included), and
+<kbd>esc</kbd>, <kbd>space</kbd> or <kbd>.</kbd> close it.
+<kbd>:</kbd> opens the command palette: every action of every tab in one
+list, e.g. `Sessions › End  d`, the tab switches (`Go to Forges`) and a sync
+of each listed forge (`Forges › Sync forge github`). Type to filter (every
+word must appear in the label), <kbd>↑</kbd>/<kbd>↓</kbd> move,
+<kbd>enter</kbd> switches to the action's tab and runs it as its key does
+(confirms included), <kbd>esc</kbd> closes. Row actions are for each tab's
+selected row; forges appear once the Forges tab has listed them. When OpenShell is enabled and you are signed in with a key, a
 **Sessions** tab lists your agent sessions, what needs you first, and the
 header counts the ones blocked, errored, done and working. In it:
 <kbd>enter</kbd> attaches (detach with <kbd>~.</kbd> to come back to the same
 row), <kbd>n</kbd> starts a session (pick any number of repositories with
-<kbd>space</kbd>, a name and a profile), <kbd>a</kbd> and <kbd>R</kbd> add
-repositories to the highlighted session or remove some, <kbd>x</kbd> ends it,
+<kbd>space</kbd>, a name and a profile), <kbd>A</kbd> and <kbd>R</kbd> add
+repositories to the highlighted session or remove some, <kbd>d</kbd> ends it
+after a confirm,
 <kbd>z</kbd> parks or resumes it, <kbd>c</kbd> copies its `session attach`
-command, <kbd>/</kbd> filters, and <kbd>e</kbd> switches to the **Signals**
-pane: the `session signals` feed, live, newest first (<kbd>a</kbd> shows only
-what needs you, <kbd>g</kbd> goes back to the top and follows new signals).
+command, and <kbd>/</kbd> filters. Below the list, **Signals · *session***
+shows the highlighted session's latest signals, newest first, and follows the
+cursor (on short or narrow terminals, just its latest signal on one line).
+<kbd>e</kbd> opens the full **Signal history**: the `session signals` feed,
+live, newest first (<kbd>/</kbd> filters, <kbd>a</kbd> shows only what needs
+you, <kbd>g</kbd> goes back to the top and follows new signals);
+<kbd>esc</kbd> goes back.
 When the OpenShell gateway is unreachable the tab says so and <kbd>r</kbd>
 retries; the other tabs keep working.
 
@@ -1953,7 +1974,7 @@ configured, where it comes from (`local`, or the forge with `↑n ↓n` commits
 ahead and behind its default branch as of the last sync). They follow status
 changes and forge syncs live and drop off on narrow terminals. <kbd>s</kbd>
 opens the new-session form with the highlighted repository picked,
-<kbd>D</kbd> deletes it after a confirm (with write access, as `repo
+<kbd>d</kbd> deletes it after a confirm (with write access, as `repo
 delete`), and <kbd>n</kbd> opens the
 new-repository form (for whoever may run `repo create`): name, description,
 VCS, template (those you can read), session profile, private, and whether to

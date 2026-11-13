@@ -15,6 +15,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/danielboothcloud/sundae/pkg/ui/common"
 	"github.com/danielboothcloud/sundae/pkg/ui/components/footer"
+	"github.com/danielboothcloud/sundae/pkg/ui/styles"
 )
 
 // Result is what a message did to a prompt.
@@ -43,9 +44,11 @@ const (
 	Choice
 	// Toggle is yes or no.
 	Toggle
-	// Multi picks any number of a list of options: ←→ move among them,
-	// space toggles the one shown, and typing narrows them to those
-	// containing what was typed. Values are in the order they were picked.
+	// Multi picks any number of a list of options, shown as a vertical
+	// checkbox list while focused: ↑↓ move the cursor (leaving the field at
+	// the list's ends), space toggles the option under it, and typing
+	// filters the list. Picked options stay at the top, even when the
+	// filter hides them. Values are in the order they were picked.
 	Multi
 )
 
@@ -87,6 +90,9 @@ type Field struct {
 
 	// picked are a Multi field's selected Values, in the order picked.
 	picked []string
+	// cursor is a Multi field's row under the cursor; offset is the
+	// first row shown.
+	cursor, offset int
 
 	on bool
 }
@@ -126,10 +132,73 @@ func MultiField(key, label string, opts []Option, picked []string) *Field {
 	for _, v := range picked {
 		f.toggle(v, true)
 	}
-	if len(f.picked) > 0 {
-		f.SetValue(f.picked[0])
-	}
 	return f
+}
+
+// multiRows is how many option rows a focused Multi field shows at most.
+const multiRows = 7
+
+// row is one line of a Multi field's list: an option, and whether the
+// filter hides it (only picked options are shown when hidden).
+type row struct {
+	opt    int
+	hidden bool
+}
+
+// rows returns a Multi field's list: the picked options in the order
+// picked, then the unpicked ones matching the filter.
+func (f *Field) rows() []row {
+	var rr []row
+	for _, v := range f.picked {
+		for i, o := range f.options {
+			if o.Value == v {
+				rr = append(rr, row{opt: i, hidden: !f.matches(o)})
+			}
+		}
+	}
+	for i, o := range f.options {
+		if !f.isPicked(o.Value) && f.matches(o) {
+			rr = append(rr, row{opt: i})
+		}
+	}
+	return rr
+}
+
+// clampCursor keeps a Multi field's cursor on a row and in view.
+func (f *Field) clampCursor() {
+	n := len(f.rows())
+	f.cursor = max(min(f.cursor, n-1), 0)
+	if f.cursor < f.offset {
+		f.offset = f.cursor
+	}
+	if f.cursor >= f.offset+multiRows {
+		f.offset = f.cursor - multiRows + 1
+	}
+	f.offset = max(min(f.offset, n-multiRows), 0)
+}
+
+// cursorTo puts a Multi field's cursor on the row of option i.
+func (f *Field) cursorTo(i int) {
+	for r, rw := range f.rows() {
+		if rw.opt == i {
+			f.cursor = r
+		}
+	}
+	f.clampCursor()
+}
+
+// setMultiFilter sets a Multi field's filter, putting the cursor on the
+// first unpicked match (else the first row).
+func (f *Field) setMultiFilter(s string) {
+	f.filter = s
+	f.cursor = 0
+	for r, rw := range f.rows() {
+		if !f.isPicked(f.options[rw.opt].Value) {
+			f.cursor = r
+			break
+		}
+	}
+	f.clampCursor()
 }
 
 // Values returns a Multi field's selected Values, in the order picked.
@@ -220,10 +289,16 @@ func (f *Field) SetValue(v string) {
 	case Text:
 		f.input.SetValue(v)
 		f.input.CursorEnd()
-	case Choice, Multi:
+	case Choice:
 		for i, o := range f.options {
 			if o.Value == v {
 				f.choice = i
+			}
+		}
+	case Multi:
+		for i, o := range f.options {
+			if o.Value == v {
+				f.cursorTo(i)
 			}
 		}
 	case Toggle:
@@ -237,6 +312,7 @@ func (f *Field) SetOptions(opts []Option, selected string) {
 	f.options = opts
 	f.choice = 0
 	f.filter = ""
+	f.cursor, f.offset = 0, 0
 	for i, o := range opts {
 		if o.Value == selected {
 			f.choice = i
@@ -247,6 +323,13 @@ func (f *Field) SetOptions(opts []Option, selected string) {
 // Selected returns a Choice field's chosen option; false when there is
 // none, or none matches the filter.
 func (f *Field) Selected() (Option, bool) {
+	if f.kind == Multi {
+		rr := f.rows()
+		if f.cursor < 0 || f.cursor >= len(rr) {
+			return Option{}, false
+		}
+		return f.options[rr[f.cursor].opt], true
+	}
 	if (f.kind != Choice && f.kind != Multi) || len(f.options) == 0 || !f.matches(f.options[f.choice]) {
 		return Option{}, false
 	}
@@ -406,8 +489,14 @@ func (f *Form) move(d int) {
 // ShortHelp returns the form's keys for the help line.
 func (f *Form) ShortHelp() []key.Binding {
 	if cur := f.Focused(); cur != nil && cur.kind == Multi {
+		move := key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑↓", "move"))
 		toggle := key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "pick"))
-		return []key.Binding{f.KeyMap.Field, f.KeyMap.Change, toggle, f.KeyMap.Submit, f.KeyMap.Cancel}
+		filter := key.NewBinding(key.WithKeys("backspace"), key.WithHelp("type", "filter"))
+		cancel := f.KeyMap.Cancel
+		if cur.filter != "" {
+			cancel = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear filter"))
+		}
+		return []key.Binding{move, toggle, filter, f.KeyMap.Submit, cancel}
 	}
 	return []key.Binding{f.KeyMap.Field, f.KeyMap.Change, f.KeyMap.Submit, f.KeyMap.Cancel}
 }
@@ -427,9 +516,33 @@ func (f *Form) Update(msg tea.Msg) (Result, tea.Cmd) {
 		return Pending, nil
 	}
 	cur := f.Focused()
+	if cur != nil && cur.kind == Multi {
+		switch km.String() {
+		case "up", "ctrl+p":
+			if cur.cursor > 0 {
+				cur.cursor--
+				cur.clampCursor()
+			} else {
+				f.move(-1)
+			}
+			return Pending, nil
+		case "down", "ctrl+n":
+			if cur.cursor < len(cur.rows())-1 {
+				cur.cursor++
+				cur.clampCursor()
+			} else {
+				f.move(1)
+			}
+			return Pending, nil
+		}
+	}
 	switch km.String() {
 	case "esc":
-		if cur != nil && (cur.kind == Choice || cur.kind == Multi) && cur.filter != "" {
+		if cur != nil && cur.kind == Multi && cur.filter != "" {
+			cur.setMultiFilter("")
+			return Pending, nil
+		}
+		if cur != nil && cur.kind == Choice && cur.filter != "" {
 			cur.setFilter("")
 			return Pending, nil
 		}
@@ -474,23 +587,25 @@ func (f *Form) Update(msg tea.Msg) (Result, tea.Cmd) {
 		}
 	case Multi:
 		switch km.String() {
-		case "left":
-			cur.step(-1)
-		case "right":
-			cur.step(1)
 		case "space", " ":
-			if o, ok := cur.Selected(); ok {
-				cur.toggle(o.Value, !cur.isPicked(o.Value))
+			if rr := cur.rows(); cur.cursor < len(rr) {
+				i := rr[cur.cursor].opt
+				v := cur.options[i].Value
+				cur.toggle(v, !cur.isPicked(v))
+				// The cursor follows the option to its new row; an
+				// unpicked option the filter hides leaves the list.
+				cur.cursorTo(i)
+				cur.clampCursor()
 				changed = true
 			}
 		case "backspace":
 			if cur.filter != "" {
 				r := []rune(cur.filter)
-				cur.setFilter(string(r[:len(r)-1]))
+				cur.setMultiFilter(string(r[:len(r)-1]))
 			}
 		default:
 			if km.Text != "" && km.Text != " " {
-				cur.setFilter(cur.filter + km.Text)
+				cur.setMultiFilter(cur.filter + km.Text)
 			}
 		}
 	case Toggle:
@@ -596,29 +711,11 @@ func (f *Form) View(width int) string {
 				value += "   " + ps.Detail.Render(strings.Join(extra, "  "))
 			}
 		case Multi:
-			o, ok := fd.Selected()
-			name := "(no match)"
-			if ok {
-				mark := "[ ] "
-				if fd.isPicked(o.Value) {
-					mark = "[x] "
-				}
-				name = mark + o.label()
+			if focused {
+				lines = append(lines, fd.multiView(f.common.Styles, label, labelW, width)...)
+				continue
 			}
-			value = valueStyle.Render("‹ " + name + " ›")
-			var extra []string
-			if fd.filter != "" {
-				extra = append(extra, "/"+fd.filter)
-			}
-			switch n := len(fd.picked); {
-			case n == 0:
-				extra = append(extra, "none picked")
-			case n <= 2:
-				extra = append(extra, strings.Join(fd.picked, ", "))
-			default:
-				extra = append(extra, fd.picked[0]+", "+fd.picked[1]+", +"+itoa(n-2))
-			}
-			value += "   " + ps.Detail.Render(strings.Join(extra, "  "))
+			value = valueStyle.Render(fd.summary())
 		case Toggle:
 			v := "no"
 			if fd.on {
@@ -675,4 +772,71 @@ func (c *Confirm) View(width int) string {
 	q := common.TruncateString(c.Question, max(width-aw-2, 1))
 	gap := max(width-lipgloss.Width(q)-aw, 2)
 	return c.common.Styles.Prompt.Question.Render(q) + strings.Repeat(" ", gap) + answer
+}
+
+// summary is a Multi field's picked options, shortened: "a, b +2".
+func (f *Field) summary() string {
+	n := len(f.picked)
+	switch {
+	case n == 0:
+		return "none picked"
+	case n <= 2:
+		return strings.Join(f.picked, ", ")
+	}
+	return f.picked[0] + ", " + f.picked[1] + " +" + itoa(n-2)
+}
+
+// multiView renders a focused Multi field: the label with the filter and
+// the picked count, then the list's visible rows, with more-indicators.
+func (f *Field) multiView(st *styles.Styles, label string, labelW, width int) []string {
+	ps := st.Prompt
+	w := max(width, 1)
+	filter := ps.Detail.Render("type to filter")
+	if f.filter != "" {
+		filter = ps.ActiveValue.Render(f.filter)
+	}
+	head := "  " + label + ps.Detail.Render("filter: ") + filter + ps.ActiveValue.Render("█")
+	count := ps.Detail.Render(itoa(len(f.picked)) + " of " + itoa(len(f.options)) + " picked")
+	if gap := w - 1 - lipgloss.Width(head) - lipgloss.Width(count); gap >= 2 {
+		head += strings.Repeat(" ", gap) + count
+	} else {
+		head += "  " + count
+	}
+	lines := []string{common.TruncateString(head, w)}
+	indent := strings.Repeat(" ", 2+labelW)
+	rr := f.rows()
+	f.clampCursor()
+	more := func(s string) string {
+		return common.TruncateString(indent+ps.Detail.Render(s), w)
+	}
+	if f.offset > 0 {
+		lines = append(lines, more("  ↑ "+itoa(f.offset)+" more"))
+	}
+	if len(rr) == 0 {
+		lines = append(lines, more("  (no match)"))
+	}
+	end := min(f.offset+multiRows, len(rr))
+	for r := f.offset; r < end; r++ {
+		rw := rr[r]
+		o := f.options[rw.opt]
+		mark := "[ ] "
+		if f.isPicked(o.Value) {
+			mark = "[x] "
+		}
+		pointer, style := "  ", ps.Value
+		if r == f.cursor {
+			pointer, style = "▸ ", ps.ActiveValue
+		}
+		line := indent + style.Render(pointer+mark+o.label())
+		if rw.hidden {
+			line += "  " + ps.Detail.Render("(hidden by filter)")
+		} else if o.Detail != "" {
+			line += "  " + ps.Detail.Render(o.Detail)
+		}
+		lines = append(lines, common.TruncateString(line, w))
+	}
+	if rest := len(rr) - end; rest > 0 {
+		lines = append(lines, more("  ↓ "+itoa(rest)+" more"))
+	}
+	return lines
 }

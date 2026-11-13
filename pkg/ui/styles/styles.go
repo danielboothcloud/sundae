@@ -182,6 +182,19 @@ type Styles struct {
 		Error       lipgloss.Style
 	}
 
+	// ActionMenu styles the selected row's action menu (space or .) and
+	// the lists that reuse it: a bordered box over the tab, its rows read
+	// like the help, the highlighted one like the selected repository.
+	ActionMenu struct {
+		Box          lipgloss.Style
+		Title        lipgloss.Style
+		Key          lipgloss.Style
+		Action       lipgloss.Style
+		ActiveKey    lipgloss.Style
+		ActiveAction lipgloss.Style
+		Cursor       lipgloss.Style
+	}
+
 	// State colours the session status vocabulary: blocked amber, error
 	// red, done green, working teal (the active tab's colour), idle and
 	// none grey. Only agent states use them.
@@ -566,6 +579,17 @@ func DefaultStyles() *Styles {
 	s.Prompt.Notice = s.HelpKey
 	s.Prompt.Error = lipgloss.NewStyle().
 		Foreground(s.ErrorTitle.GetBackground())
+
+	s.ActionMenu.Box = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(s.ActiveBorderColor).
+		Padding(0, 1)
+	s.ActionMenu.Title = s.Prompt.Title
+	s.ActionMenu.Key = s.HelpKey
+	s.ActionMenu.Action = s.HelpValue
+	s.ActionMenu.ActiveKey = s.RepoSelector.Active.Title
+	s.ActionMenu.ActiveAction = s.RepoSelector.Active.Title
+	s.ActionMenu.Cursor = s.RepoSelector.Active.Title
 
 	s.State.Blocked = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
 	s.State.Error = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
