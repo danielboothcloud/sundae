@@ -100,7 +100,8 @@ stdout 'peer'
 # Webhook deliveries must be scoped to the named repository. The attacker has
 # admin access to their own repo "user1", which must not expose the webhook
 # deliveries of "shared" (these include full request URLs, headers, bodies).
-new-webhook WH_SHARED
+# A public URL is enough: nothing is delivered in this script.
+env WH_SHARED=https://example.com/sundae-webhook
 sundae repo webhook create shared $WH_SHARED -e push
 sundae repo webhook list shared
 stdout '1.*'
