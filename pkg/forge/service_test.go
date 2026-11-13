@@ -99,6 +99,7 @@ func (ff *fakeForge) add(path, cloneURL string, private bool) {
 
 type serviceFixture struct {
 	ctx   context.Context
+	cfg   *config.Config
 	be    *backend.Backend
 	svc   *Service
 	ff    *fakeForge
@@ -109,6 +110,13 @@ type serviceFixture struct {
 }
 
 func newServiceFixture(t *testing.T) *serviceFixture {
+	t.Helper()
+	return newServiceFixtureWith(t, t.TempDir(), nil)
+}
+
+// newServiceFixtureWith is newServiceFixture with the upstream root given
+// and the config changed by mutate, if not nil, before validation.
+func newServiceFixtureWith(t *testing.T, root string, mutate func(*config.Config, *fakeForge)) *serviceFixture {
 	t.Helper()
 	hermeticGit(t)
 	ff := newFakeForge(t)
@@ -122,6 +130,9 @@ func newServiceFixture(t *testing.T) *serviceFixture {
 		Include:   []string{"me/*", "org/*"},
 		Exclude:   []string{"org/*"},
 	}}
+	if mutate != nil {
+		mutate(cfg, ff)
+	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -136,14 +147,14 @@ func newServiceFixture(t *testing.T) *serviceFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fx := &serviceFixture{ctx: ctx, be: be, svc: svc, ff: ff, user: user, ups: map[string]*upstream{}, root: t.TempDir(), event: rec}
+	fx := &serviceFixture{ctx: ctx, cfg: cfg, be: be, svc: svc, ff: ff, user: user, ups: map[string]*upstream{}, root: root, event: rec}
 	// The test seam: let git reach the local upstreams this test made, and
 	// nothing else that the production check would refuse.
 	svc.checkRemote = func(f *Forge, remote string) error {
 		if strings.HasPrefix(remote, fx.root+string(filepath.Separator)) {
 			return nil
 		}
-		return f.CheckCloneURL(remote)
+		return f.CheckRemote(remote)
 	}
 	return fx
 }
@@ -399,7 +410,7 @@ func TestServicePushNotLinked(t *testing.T) {
 func TestServiceProductionCheck(t *testing.T) {
 	fx := newServiceFixture(t)
 	fx.upstream(t, "me/proj", false)
-	fx.svc.checkRemote = (*Forge).CheckCloneURL
+	fx.svc.checkRemote = (*Forge).CheckRemote
 
 	listing, err := fx.svc.Discover(fx.ctx, "gh")
 	if err != nil {

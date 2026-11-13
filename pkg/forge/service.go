@@ -58,10 +58,10 @@ type Service struct {
 	logger *log.Logger
 	client *http.Client
 
-	// checkRemote guards every URL git is pointed at; it is
-	// Forge.CheckCloneURL. Tests in this package replace it to reach local
-	// upstream repositories. It cannot be changed from outside the package,
-	// so the production check is never weakened.
+	// checkRemote guards every URL git is pointed at, and the clone URLs
+	// discovery returns; it is Forge.CheckRemote. Tests in this package
+	// replace it to reach local upstream repositories. It cannot be changed
+	// from outside the package, so the production check is never weakened.
 	checkRemote func(f *Forge, remote string) error
 
 	mu       sync.Mutex
@@ -91,7 +91,7 @@ func NewService(cfg *config.Config, be Backend, logger *log.Logger, opts ...Opti
 		be:          be,
 		logger:      logger.WithPrefix("forge"),
 		client:      newAPIClient(),
-		checkRemote: (*Forge).CheckCloneURL,
+		checkRemote: (*Forge).CheckRemote,
 		notifier:    nopNotifier{},
 		states:      map[string]*forgeState{},
 		locks:       map[string]*sync.Mutex{},
@@ -241,9 +241,9 @@ func (s *Service) links(ctx context.Context, forge string) ([]*Link, error) {
 // (url, fetch refspecs into the forge's namespace, no tag following), a
 // receive.hideRefs entry so pushes to Sundae cannot write the namespace,
 // and the [forge] section.
-func writeLink(ctx context.Context, dir string, f *Forge, rr RemoteRepo) error {
+func writeLink(ctx context.Context, dir string, f *Forge, rr RemoteRepo, remoteURL string) error {
 	remote := "remote." + f.Name()
-	if err := gitConfigSet(ctx, dir, remote+".url", rr.CloneURL); err != nil {
+	if err := gitConfigSet(ctx, dir, remote+".url", remoteURL); err != nil {
 		return err
 	}
 	if err := gitConfigReplaceAll(ctx, dir, remote+".fetch", fetchRefspecs(f.Name())...); err != nil {
@@ -292,6 +292,10 @@ type ForgeStatus struct {
 	URL      string `json:"url"`
 	Prefix   string `json:"prefix"`
 	Interval string `json:"sync_interval"`
+	// Transport is how git reaches the forge: "https" or "ssh".
+	Transport string `json:"transport"`
+	// SSHURL is the SSH endpoint when Transport is "ssh".
+	SSHURL string `json:"ssh_url,omitempty"`
 	// Imported counts repositories linked to the forge.
 	Imported int `json:"imported"`
 	// Listed counts the repositories the last discovery returned, and
@@ -318,11 +322,13 @@ func (s *Service) Status(ctx context.Context) ([]ForgeStatus, error) {
 	var out []ForgeStatus
 	for _, f := range s.forges {
 		st := ForgeStatus{
-			Name:     f.Name(),
-			Kind:     f.Kind(),
-			URL:      f.URL(),
-			Prefix:   f.Prefix(),
-			Interval: f.Interval().String(),
+			Name:      f.Name(),
+			Kind:      f.Kind(),
+			URL:       f.URL(),
+			Prefix:    f.Prefix(),
+			Interval:  f.Interval().String(),
+			Transport: f.Transport(),
+			SSHURL:    f.SSHURL(),
 		}
 		var newest time.Time
 		for _, l := range links {
@@ -718,15 +724,17 @@ func (s *Service) importOne(ctx context.Context, user proto.User, f *Forge, rr R
 		return res
 	}
 
-	if err := s.checkRemote(f, rr.CloneURL); err != nil {
+	remote := f.remoteFor(rr.Path, "", rr.CloneURL)
+	if err := s.checkRemote(f, remote); err != nil {
 		res.Error = err.Error()
 		return res
 	}
-	env, err := f.gitEnv()
+	env, cleanup, err := f.gitEnv()
 	if err != nil {
 		res.Error = err.Error()
 		return res
 	}
+	defer cleanup()
 
 	repo, err := s.be.CreateRepository(ctx, name, user, proto.RepositoryOptions{
 		Private:     rr.Private,
@@ -752,10 +760,10 @@ func (s *Service) importOne(ctx context.Context, user proto.User, f *Forge, rr R
 	if err != nil {
 		return fail(err)
 	}
-	if err := writeLink(ctx, gr.Path, f, rr); err != nil {
+	if err := writeLink(ctx, gr.Path, f, rr, remote); err != nil {
 		return fail(err)
 	}
-	sr, err := syncRepo(ctx, gr.Path, f.Name(), rr.CloneURL, env)
+	sr, err := syncRepo(ctx, gr.Path, f.Name(), remote, env)
 	if err != nil {
 		return fail(err)
 	}
@@ -881,24 +889,24 @@ func (s *Service) syncLink(ctx context.Context, f *Forge, l *Link, listing *List
 }
 
 func (s *Service) syncLinkLocked(ctx context.Context, f *Forge, l *Link, listing *Listing) (*SyncResult, error) {
-	if l.Remote == "" {
-		return nil, fmt.Errorf("remote.%s.url is not set", f.Name())
-	}
-	if err := s.checkRemote(f, l.Remote); err != nil {
-		return nil, err
-	}
-	env, err := f.gitEnv()
+	rr, listed := listing.Find(l.Path)
+	remote, err := s.linkRemote(ctx, f, l, rr.CloneURL)
 	if err != nil {
 		return nil, err
 	}
+	env, cleanup, err := f.gitEnv()
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
 	branch := l.DefaultBranch
-	if rr, ok := listing.Find(l.Path); ok && rr.DefaultBranch != "" && rr.DefaultBranch != branch {
+	if listed && rr.DefaultBranch != "" && rr.DefaultBranch != branch {
 		branch = rr.DefaultBranch
 		if err := gitConfigSet(ctx, l.Dir, "forge.defaultbranch", branch); err != nil {
 			s.logger.Warn("could not record default branch", "repo", l.Repo, "err", err)
 		}
 	}
-	sr, err := syncRepo(ctx, l.Dir, f.Name(), l.Remote, env)
+	sr, err := syncRepo(ctx, l.Dir, f.Name(), remote, env)
 	if err != nil {
 		return nil, err
 	}
@@ -906,6 +914,30 @@ func (s *Service) syncLinkLocked(ctx context.Context, f *Forge, l *Link, listing
 		s.logger.Warn("could not point HEAD at the default branch", "repo", l.Repo, "err", err)
 	}
 	return sr, nil
+}
+
+// linkRemote returns the URL git uses for an imported repository, after
+// checking it. When the forge's transport or SSH endpoint changed since the
+// remote was written (ssh_key_file or ssh_url added, changed or removed),
+// remote.<forge>.url is updated first. listed is the clone URL of the
+// latest listing, "" when unknown. The ref namespace is not touched.
+func (s *Service) linkRemote(ctx context.Context, f *Forge, l *Link, listed string) (string, error) {
+	if l.Remote == "" {
+		return "", fmt.Errorf("remote.%s.url is not set", f.Name())
+	}
+	want := f.remoteFor(l.Path, l.Remote, listed)
+	if err := s.checkRemote(f, want); err != nil {
+		return "", err
+	}
+	if want != l.Remote {
+		if err := gitConfigSet(ctx, l.Dir, "remote."+f.Name()+".url", want); err != nil {
+			return "", err
+		}
+		s.logger.Info("updated forge remote", "forge", f.Name(), "repo", l.Repo, "transport", f.Transport(),
+			"from", redactArgs([]string{l.Remote})[0], "to", redactArgs([]string{want})[0])
+		l.Remote = want
+	}
+	return want, nil
 }
 
 // PushBranch returns the branch Push pushes when given none: the branch
@@ -966,17 +998,19 @@ func (s *Service) pushLocked(ctx context.Context, f *Forge, l *Link, branch stri
 	if err := checkBranchName(ctx, l.Dir, branch); err != nil {
 		return nil, err
 	}
-	if l.Remote == "" {
-		return nil, fmt.Errorf("remote.%s.url is not set", f.Name())
-	}
-	if err := s.checkRemote(f, l.Remote); err != nil {
-		return nil, err
-	}
-	env, err := f.gitEnv()
+	s.mu.Lock()
+	rr, _ := s.states[f.Name()].listing.Find(l.Path)
+	s.mu.Unlock()
+	remote, err := s.linkRemote(ctx, f, l, rr.CloneURL)
 	if err != nil {
 		return nil, err
 	}
-	return pushBranch(ctx, l.Dir, f.Name(), l.Remote, branch, lease, env)
+	env, cleanup, err := f.gitEnv()
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	return pushBranch(ctx, l.Dir, f.Name(), remote, branch, lease, env)
 }
 
 // checkBranchName refuses anything that is not a valid branch name, so a

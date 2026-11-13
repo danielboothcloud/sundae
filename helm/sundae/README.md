@@ -207,7 +207,8 @@ reads that file, as `sundae serve` does at startup. Outside the pod it fails
 with `openshell: read token_file: ... no such file or directory`; to check the
 rest, point it at a local file with `--set
 config.openshell.token_file=/tmp/token`. The same goes
-for every `config.forges[].token_file`: the check reads each one. And for
+for every `config.forges[].token_file`, `ssh_key_file` and
+`ssh_known_hosts_file`: the check reads each one. And for
 `config.notifications.ntfy.token_file` when ntfy is enabled (set to
 `/etc/sundae-ntfy/token` when
 `notifications.ntfyToken.secretName` is set), and for
@@ -241,6 +242,12 @@ is set).
   `secretMounts` and named by `token_file`; Sundae
   rejects an inline `token`. Sundae needs egress to each forge's HTTPS
   host. Adding or changing a forge rolls the pod like any config change.
+  For git over SSH, put the key (and, unless the SSH host is github.com or
+  gitlab.com, a `known_hosts`) in a Secret, mount it with `secretMounts`
+  (the default mode 0440 works: Sundae gives ssh a private 0600 copy per
+  operation) and set `ssh_key_file`, `ssh_known_hosts_file` and, if SSH is
+  on another host or port, `ssh_url` (example in `values.yaml`). Sundae
+  then also needs egress to the SSH host and port.
   An optional `git_identity` (`name`, `email`) per forge, and
   `config.sessions.git_identity` for other repositories, set who commits in
   agent sessions (top-level README, "Git identity"). They are plain config,

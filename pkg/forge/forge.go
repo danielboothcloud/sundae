@@ -60,6 +60,9 @@ type Forge struct {
 	base    *url.URL
 	include []glob.Glob
 	exclude []glob.Glob
+
+	// ssh is the normalized SSH endpoint when git uses SSH, else nil.
+	ssh *url.URL
 }
 
 // New returns the forge for a validated forge configuration.
@@ -69,6 +72,13 @@ func New(fc config.ForgeConfig) (*Forge, error) {
 		return nil, fmt.Errorf("forge %s: invalid url %q", fc.Name, fc.URL)
 	}
 	f := &Forge{cfg: fc, base: base}
+	if fc.UsesSSH() {
+		ep, err := fc.SSHEndpoint()
+		if err != nil {
+			return nil, err
+		}
+		f.ssh = ep
+	}
 	for _, p := range fc.Include {
 		g, err := glob.Compile(strings.ToLower(p), '/')
 		if err != nil {
@@ -154,9 +164,10 @@ func (f *Forge) RepoName(path string) (string, error) {
 }
 
 // CheckCloneURL checks that a clone URL is an http(s) URL on the forge's
-// configured host, under its base path. It is the guard for every URL that
-// git is pointed at: clone URLs come from API responses, and a forge host is
-// trusted because the admin declared it, not because of what the API says.
+// configured host, under its base path. It guards the clone URLs discovery
+// returns and, through CheckRemote, every HTTP(S) URL git is pointed at:
+// clone URLs come from API responses, and a forge host is trusted because
+// the admin declared it, not because of what the API says.
 func (f *Forge) CheckCloneURL(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -224,7 +235,22 @@ func (f *Forge) gitUser() string {
 	return "oauth2"
 }
 
-// gitEnv returns the environment for a git command that talks to the forge.
+// gitEnv returns the environment for a git command that talks to the forge,
+// and a cleanup to call once the command is done: sshGitEnv over SSH,
+// httpsGitEnv otherwise.
+func (f *Forge) gitEnv() ([]string, func(), error) {
+	if f.ssh != nil {
+		return f.sshGitEnv()
+	}
+	env, err := f.httpsGitEnv()
+	if err != nil {
+		return nil, nil, err
+	}
+	return env, func() {}, nil
+}
+
+// httpsGitEnv returns the environment for a git command that talks to the
+// forge over HTTP(S).
 //
 // The token travels as an Authorization header scoped to the forge's base
 // URL through GIT_CONFIG_* variables, like the OpenShell session clone: it is
@@ -232,7 +258,7 @@ func (f *Forge) gitUser() string {
 // for every other remote Sundae fetches (ssrf.GitEnv), credential
 // helpers are reset so nothing stores or substitutes a credential, and git
 // never prompts.
-func (f *Forge) gitEnv() ([]string, error) {
+func (f *Forge) httpsGitEnv() ([]string, error) {
 	token, err := f.cfg.Token()
 	if err != nil {
 		return nil, err

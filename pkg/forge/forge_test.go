@@ -170,10 +170,11 @@ func TestGitEnv(t *testing.T) {
 		{"gitlab", "https://gitlab.example.com/gl", "oauth2", "http.https://gitlab.example.com/gl/.extraHeader"},
 	} {
 		f := newTestForge(t, config.ForgeConfig{Name: "f", Kind: tc.kind, URL: tc.url, TokenFile: writeToken(t, "s3cret")})
-		env, err := f.gitEnv()
+		env, cleanup, err := f.gitEnv()
 		if err != nil {
 			t.Fatal(err)
 		}
+		cleanup()
 		entries := configEntries(env)
 		want := "Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte(tc.user+":s3cret"))
 		if entries[tc.scope] != want {
@@ -200,10 +201,11 @@ func TestGitEnv(t *testing.T) {
 
 	// No token: no header, still no redirects.
 	f := newTestForge(t, config.ForgeConfig{Name: "f", Kind: "github"})
-	env, err := f.gitEnv()
+	env, cleanup, err := f.gitEnv()
 	if err != nil {
 		t.Fatal(err)
 	}
+	cleanup()
 	for k := range configEntries(env) {
 		if strings.HasSuffix(k, "extraHeader") {
 			t.Errorf("header set without a token: %v", env)

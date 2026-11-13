@@ -59,6 +59,22 @@ type ForgeConfig struct {
 	// picked up without a restart.
 	TokenFile string `env:"TOKEN_FILE" yaml:"token_file"`
 
+	// SSHKeyFile is the path of a private key (no passphrase). When set,
+	// git operations (import, sync, push) go over SSH with this key instead
+	// of HTTPS with the token; the API still uses TokenFile. It is read again
+	// for every git operation, so a rotated key is picked up without a
+	// restart.
+	SSHKeyFile string `env:"SSH_KEY_FILE" yaml:"ssh_key_file"`
+
+	// SSHKnownHostsFile is a known_hosts file with the forge's SSH host
+	// keys. Optional for github.com and gitlab.com, whose keys are built in;
+	// required for any other SSH host. Host keys are always checked.
+	SSHKnownHostsFile string `env:"SSH_KNOWN_HOSTS_FILE" yaml:"ssh_known_hosts_file"`
+
+	// SSHURL is the SSH endpoint, ssh://[user@]host[:port], when it is not
+	// ssh://git@<url host>:22, e.g. ssh://git@ssh.github.com:443.
+	SSHURL string `env:"SSH_URL" yaml:"ssh_url"`
+
 	// Include lists glob patterns matched against the forge path
 	// ("owner/repo", or "group/subgroup/project" on GitLab). Empty includes
 	// everything. "*" does not cross "/"; "**" does.
@@ -183,6 +199,8 @@ func (c *Config) validateForges() error {
 			}
 		}
 
+		validateForgeSSH(f, c.DataPath, fail)
+
 		for _, list := range []struct {
 			key      string
 			patterns []string
@@ -269,7 +287,7 @@ func validateRepoPrefix(p string) error {
 }
 
 // forgeEnviron returns the forges as SUNDAE_FORGES_<i>_* environment
-// variables. Token values are never included, only token_file paths.
+// variables. Token and key values are never included, only file paths.
 func (c *Config) forgeEnviron() []string {
 	var envs []string
 	for i, f := range c.Forges {
@@ -279,6 +297,9 @@ func (c *Config) forgeEnviron() []string {
 			p+"KIND="+f.Kind,
 			p+"URL="+f.URL,
 			p+"TOKEN_FILE="+f.TokenFile,
+			p+"SSH_KEY_FILE="+f.SSHKeyFile,
+			p+"SSH_KNOWN_HOSTS_FILE="+f.SSHKnownHostsFile,
+			p+"SSH_URL="+f.SSHURL,
 			p+"INCLUDE="+strings.Join(f.Include, ","),
 			p+"EXCLUDE="+strings.Join(f.Exclude, ","),
 			p+"SYNC="+f.Sync.String(),

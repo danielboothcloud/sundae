@@ -233,6 +233,7 @@ jobs:
 #  - name: github
 #    kind: github
 #    token_file: /etc/sundae/secrets/github-token
+#    ssh_key_file: /etc/sundae/secrets/github-ssh/ssh-privatekey  # git over SSH (optional)
 #    include: ["me/*"]
 #    sync: 10m
 #    git_identity:              # commits in sessions of this forge's repos
@@ -1381,6 +1382,10 @@ forges:
     url: https://gitlab.example.com # default https://github.com / https://gitlab.com
     token_file: /etc/sundae/secrets/gitlab-token
     prefix: work                    # import as work/<group>/<project> (default: name)
+    # Optional: git over SSH instead of HTTPS (see "Git over SSH" below).
+    ssh_key_file: /etc/sundae/secrets/gitlab-ssh/ssh-privatekey
+    ssh_known_hosts_file: /etc/sundae/secrets/gitlab-ssh/known_hosts
+    ssh_url: ssh://git@gitlab-ssh.example.com:2222   # default ssh://git@<url host>:22
 ```
 
 - `url` is the forge's web address. The API is derived from it:
@@ -1399,9 +1404,11 @@ forges:
   `sessions.git_identity`. It is server-wide like the token: every user's
   sessions of those repositories use it. See "Git identity" under
   [OpenShell Agent Sessions](#openshell-agent-sessions).
+- `ssh_key_file`, `ssh_known_hosts_file` and `ssh_url` (optional) switch git
+  operations to SSH; see "Git over SSH" below.
 - Changing forges means editing the file and restarting (the Helm chart rolls
   the pod when its ConfigMap changes). `sundae config check` validates them,
-  including that every token file is readable.
+  including that every token file, SSH key and known_hosts file is readable.
 
 The forge host you declare is trusted: Sundae's SSRF guard for
 user-supplied remotes (which refuses private addresses) does not apply to it,
@@ -1465,6 +1472,36 @@ There is no database table. The token is never written to the repository: git
 gets it as an `Authorization: Basic` header scoped to the forge URL through
 `GIT_CONFIG_*` environment variables (user name `x-access-token` for GitHub,
 `oauth2` for GitLab; both take the token as the password).
+
+**Git over SSH.** By default import, sync and push use HTTPS with the token.
+With `ssh_key_file` set they use SSH with that key instead (a deploy key, or
+a key on a user account); the API (discovery, `forge repos`) still uses
+`token_file`. The key must have no passphrase.
+
+- The remote is built from the forge path and the SSH endpoint,
+  `<ssh_url>/<owner>/<repo>.git`, never taken from the API. The endpoint is
+  `ssh_url` (`ssh://[user@]host[:port]`, no path; user `git` when omitted),
+  defaulting to `ssh://git@<url host>` on port 22. Use it when SSH is on
+  another host or port, e.g. `ssh://git@ssh.github.com:443`,
+  `ssh://git@altssh.gitlab.com:443`, or a self-hosted GitLab's SSH host.
+- Host keys are always checked strictly; an unknown or changed key fails the
+  operation. `ssh_known_hosts_file` is a known_hosts file for the SSH host
+  (`host` for port 22, `[host]:port` otherwise; hashed entries work). It is
+  optional for github.com, ssh.github.com, gitlab.com and altssh.gitlab.com,
+  whose published keys are built in, and required for any other host.
+- Every operation reads the key and known_hosts again (rotation needs no
+  restart), copies them into a private temporary directory (key mode
+  `0600`, so the original's owner and mode do not matter to ssh) and removes
+  it afterwards. git runs `ssh -F /dev/null` with only that key (no agent),
+  only that known_hosts, `StrictHostKeyChecking=yes` and `BatchMode=yes`;
+  no HTTP credentials are set.
+- Adding, changing or removing the SSH settings takes effect on the next sync
+  or push of each repository: `remote.<forge>.url` is rewritten to the new
+  transport or endpoint before fetching (back to HTTPS, it becomes the
+  listed clone URL, else `<url>/<path>.git`). The ref namespace is
+  unchanged.
+- `forge ls --json` shows each forge's `transport` (`https` or `ssh`) and
+  `ssh_url`. Sundae needs egress to the SSH host and port.
 
 Git LFS objects of forge repositories are not fetched.
 

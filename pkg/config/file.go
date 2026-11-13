@@ -310,6 +310,16 @@ projects:
 #               This host is trusted: a self-hosted forge on a private address
 #               is allowed by declaring it here.
 #   token_file  file holding the access token (never put a token in this file)
+#   ssh_key_file
+#               private key (no passphrase) for git over SSH. When set, import,
+#               sync and push use SSH with this key instead of HTTPS with the
+#               token; the API still uses token_file. Read for every operation.
+#   ssh_known_hosts_file
+#               known_hosts with the forge's SSH host keys. Optional for
+#               github.com and gitlab.com (keys built in), required for any
+#               other SSH host. Host keys are always checked strictly.
+#   ssh_url     SSH endpoint when it is not ssh://git@<url host>:22, e.g.
+#               ssh://git@ssh.github.com:443
 #   include     globs matched against "owner/repo"; empty includes everything.
 #               "*" does not cross "/", "**" does. Case-insensitive.
 #   exclude     globs removed from what include lets through
@@ -328,6 +338,15 @@ forges:
     kind: {{ printf "%q" .Kind }}
     url: {{ printf "%q" .URL }}
     token_file: {{ printf "%q" .TokenFile }}
+    {{- if .SSHKeyFile }}
+    ssh_key_file: {{ printf "%q" .SSHKeyFile }}
+    {{- end }}
+    {{- if .SSHKnownHostsFile }}
+    ssh_known_hosts_file: {{ printf "%q" .SSHKnownHostsFile }}
+    {{- end }}
+    {{- if .SSHURL }}
+    ssh_url: {{ printf "%q" .SSHURL }}
+    {{- end }}
     {{- if .Include }}
     include: [{{ range $i, $p := .Include }}{{ if $i }}, {{ end }}{{ printf "%q" $p }}{{ end }}]
     {{- end }}
@@ -357,6 +376,8 @@ forges:
 #    kind: gitlab
 #    url: https://gitlab.com
 #    token_file: /etc/sundae/secrets/gitlab-token
+#    # git over SSH instead of HTTPS (gitlab.com's host keys are built in)
+#    ssh_key_file: /etc/sundae/secrets/gitlab-ssh/ssh-privatekey
 {{- end }}
 
 # Notifications: agent session status changes, pushed to a phone through ntfy

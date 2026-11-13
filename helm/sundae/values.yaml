@@ -252,10 +252,10 @@ config:
     #    profile: claude
 
   # GitHub and GitLab accounts whose repositories Sundae discovers,
-  # imports and keeps in sync (ssh <server> forge --help). Tokens are only
-  # read from files: put each token in an existing Secret, mount it with
-  # `secretMounts` below, and point token_file at the mounted file. Do not
-  # put a token here; Sundae rejects a `token` key.
+  # imports and keeps in sync (ssh <server> forge --help). Tokens and SSH
+  # keys are only read from files: put each in an existing Secret, mount it
+  # with `secretMounts` below, and point token_file (ssh_key_file) at the
+  # mounted file. Do not put a token here; Sundae rejects a `token` key.
   forges: []
   #  - name: github
   #    kind: github
@@ -272,6 +272,18 @@ config:
   #    git_identity:
   #      name: Jane Doe
   #      email: 12345+jane@users.noreply.github.com
+  #  # Git over SSH instead of HTTPS (import, sync, push); the API still uses
+  #  # token_file. The key and known_hosts come from a Secret mounted with
+  #  # `secretMounts` below (see the "gitlab-ssh" example there).
+  #  - name: gitlab
+  #    kind: gitlab
+  #    url: https://gitlab.example.com
+  #    token_file: /etc/sundae-forges/gitlab/token
+  #    ssh_key_file: /etc/sundae-forges/gitlab-ssh/ssh-privatekey
+  #    # Required unless the SSH host is github.com or gitlab.com (built in).
+  #    ssh_known_hosts_file: /etc/sundae-forges/gitlab-ssh/known_hosts
+  #    # Default ssh://git@<url host>:22.
+  #    ssh_url: ssh://git@gitlab-ssh.example.com:2222
 
   # Notifications about agent sessions, pushed to a phone through ntfy
   # (https://ntfy.sh or a self-hosted server). Off by default; while
@@ -400,6 +412,17 @@ secretMounts: []
 #  - name: github-token
 #    secretName: sundae-github-token
 #    mountPath: /etc/sundae-forges/github
+#  # A forge SSH key, for config.forges[].ssh_key_file and
+#  # ssh_known_hosts_file: a Secret with keys `ssh-privatekey` and,
+#  # optionally, `known_hosts`, e.g.
+#  #   kubectl create secret generic sundae-gitlab-ssh \
+#  #     --from-file=ssh-privatekey=./id_ed25519 \
+#  #     --from-file=known_hosts=./known_hosts
+#  # (or `type: kubernetes.io/ssh-auth`). The default mode 0440 is fine:
+#  # Sundae hands ssh a private 0600 copy of the key for every operation.
+#  - name: gitlab-ssh
+#    secretName: sundae-gitlab-ssh
+#    mountPath: /etc/sundae-forges/gitlab-ssh
 
 # Extra environment variables. SUNDAE_* variables override the config
 # file, so this is how a secret value without a *_file setting gets in
