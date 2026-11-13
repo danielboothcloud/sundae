@@ -23,6 +23,9 @@ const (
 	KindSessionLifecycle Kind = "session.lifecycle"
 	// KindForge is the outcome of a forge operation. Forge is set.
 	KindForge Kind = "forge"
+	// KindProvider is the outcome of syncing an OpenShell provider declared
+	// in openshell.providers. Provider is set.
+	KindProvider Kind = "openshell.provider"
 )
 
 // Event is one thing that happened. Exactly one payload field is set, as
@@ -45,6 +48,7 @@ type Event struct {
 	Status    *SessionStatus    `json:"status,omitempty"`
 	Lifecycle *SessionLifecycle `json:"lifecycle,omitempty"`
 	Forge     *ForgeOutcome     `json:"forge,omitempty"`
+	Provider  *ProviderOutcome  `json:"provider,omitempty"`
 }
 
 // payloadKind returns the Kind matching the payload that is set, or "" when
@@ -57,6 +61,8 @@ func (e Event) payloadKind() Kind {
 		return KindSessionLifecycle
 	case e.Forge != nil:
 		return KindForge
+	case e.Provider != nil:
+		return KindProvider
 	default:
 		return ""
 	}
@@ -259,6 +265,38 @@ type ForgeOutcome struct {
 	OK   bool   `json:"ok"`
 	// Error is set when OK is false.
 	Error string `json:"error,omitempty"`
+}
+
+// Provider sync actions.
+const (
+	// ProviderCreated: the provider was created on the gateway.
+	ProviderCreated = "created"
+	// ProviderUpdated: its credentials, config or both were updated.
+	ProviderUpdated = "updated"
+	// ProviderDeleted: a managed provider no longer declared was deleted
+	// (openshell.prune_providers).
+	ProviderDeleted = "deleted"
+	// ProviderFailed: the sync failed; Error says why.
+	ProviderFailed = "failed"
+)
+
+// ProviderOutcome is the outcome of syncing one declared OpenShell
+// provider. It is published when something changed or the sync failed,
+// not for every unchanged sync. It never holds a credential value.
+type ProviderOutcome struct {
+	// Provider is the provider's name.
+	Provider string `json:"provider"`
+	// Action is ProviderCreated, ProviderUpdated, ProviderDeleted or
+	// ProviderFailed.
+	Action string `json:"action"`
+	OK     bool   `json:"ok"`
+	// Error is set when OK is false.
+	Error string `json:"error,omitempty"`
+}
+
+// ProviderEvent returns a provider sync event. It belongs to no user.
+func ProviderEvent(p ProviderOutcome) Event {
+	return Event{Kind: KindProvider, Provider: &p}
 }
 
 // SessionStatusEvent returns a session status event owned by userID.

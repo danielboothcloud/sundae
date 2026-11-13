@@ -60,6 +60,9 @@ type Manager struct {
 	bus *events.Bus
 	// monitor tracks bridges and parks sessions; nil when there is none.
 	monitor *Monitor
+	// providerSync syncs the providers declared in openshell.providers;
+	// nil when there is none.
+	providerSync *ProviderReconciler
 	// snaps is the S3 snapshot store; nil when snapshots are off.
 	snaps *snapshotStore
 	// logger reports what does not fail a command.
@@ -81,6 +84,12 @@ func WithEvents(bus *events.Bus) ManagerOption {
 // and starting a session tells it. nil is allowed.
 func WithMonitor(mon *Monitor) ManagerOption {
 	return func(m *Manager) { m.monitor = mon }
+}
+
+// WithProviderReconciler makes a start fail when the session's profile
+// lists a declared provider that failed to sync. nil is allowed.
+func WithProviderReconciler(r *ProviderReconciler) ManagerOption {
+	return func(m *Manager) { m.providerSync = r }
 }
 
 // NewManager returns a Manager using client for sandboxes and tokens for git
@@ -355,6 +364,22 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 		p = m.sessions.Profiles[profile]
 	}
 
+	// A start fails when the session's profile lists a provider declared
+	// in openshell.providers whose last sync failed: its sandbox would get
+	// the provider's credentials as they were, or none. An attach only
+	// warns: the session keeps what the gateway has.
+	checkProfile, checkProviders := profile, p.Providers
+	if existing != nil {
+		checkProfile = existing.Annotations[AnnotationProfile]
+		checkProviders, _ = m.profileProviders(checkProfile)
+	}
+	if serr := m.providerSync.Check(checkProviders); serr != nil {
+		if op == "start" {
+			return nil, fmt.Errorf("session %s: %s lists a provider Sundae cannot sync: %w; an admin can see why with \"openshell providers\"", name, describeProfile(checkProfile), serr)
+		}
+		fmt.Fprintf(progress, "Warning: %v; session %s keeps the credentials the gateway already has for it\n", serr, name) //nolint:errcheck
+	}
+
 	// An existing sandbox's providers are made to match its profile
 	// before it is resumed, so a program that starts with the sandbox
 	// (after a park whose memory could not be restored) gets them. A
@@ -398,7 +423,7 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 		})
 		var missing *MissingProviderError
 		if errors.As(err, &missing) {
-			return nil, missingProviderError(profile, missing)
+			return nil, m.missingProviderError(profile, missing)
 		}
 		if err != nil {
 			return nil, err
@@ -590,7 +615,7 @@ func (m *Manager) syncProviders(ctx context.Context, sb *Sandbox, name string, p
 	var missing *MissingProviderError
 	switch {
 	case errors.As(err, &missing):
-		return changes, missingProviderError(profile, missing)
+		return changes, m.missingProviderError(profile, missing)
 	case err != nil:
 		m.logger.Warn("cannot update the providers of a sandbox", "sandbox", sb.Name, "profile", profile, "want", want, "err", err)
 		fmt.Fprintf(progress, "Warning: could not make the OpenShell providers of session %s match %s: %v; it keeps the providers it has\n", name, describeProfile(profile), err) //nolint:errcheck
@@ -614,8 +639,12 @@ func describeProfile(profile string) string {
 
 // missingProviderError explains a provider a profile lists that does not
 // exist on the gateway.
-func missingProviderError(profile string, err *MissingProviderError) error {
-	return fmt.Errorf("sessions.profiles.%s.providers lists OpenShell provider %q, which does not exist on the gateway: create it (openshell provider create --name %s ...) or remove it from the profile: %w",
+func (m *Manager) missingProviderError(profile string, err *MissingProviderError) error {
+	if m.providerSync.Declared(err.Provider) {
+		return fmt.Errorf("sessions.profiles.%s.providers lists OpenShell provider %q, which openshell.providers declares but Sundae has not created on the gateway yet; it is created on the next sync (an admin can see its state with \"openshell providers\"): %w",
+			profile, err.Provider, err)
+	}
+	return fmt.Errorf("sessions.profiles.%s.providers lists OpenShell provider %q, which does not exist on the gateway: declare it in openshell.providers, create it (openshell provider create --name %s ...) or remove it from the profile: %w",
 		profile, err.Provider, err.Provider, err)
 }
 

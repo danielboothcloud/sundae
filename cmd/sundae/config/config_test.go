@@ -177,6 +177,61 @@ forges:
 		}
 	})
 
+	t.Run("openshell providers", func(t *testing.T) {
+		is := is.New(t)
+		dir := filepath.Join(td, "providers", "my-github")
+		is.NoErr(os.MkdirAll(dir, 0o755))
+		writeFile(t, filepath.Join(dir, "GITHUB_TOKEN"), "ghp_secret\n")
+		p := filepath.Join(td, "providers.yaml")
+		writeFile(t, p, `openshell:
+  enabled: true
+  gateway_address: http://gateway:8080
+  image: sandbox:latest
+  providers:
+    - name: my-github
+      type: github
+      credentials_dir: providers/my-github
+  providers_sync: 30s
+sessions:
+  profiles:
+    claude:
+      providers: [my-github, manual-one]
+`)
+		is.NoErr(check(p))
+
+		// The credential files are read like token files, and every
+		// problem is reported without a credential value.
+		writeFile(t, filepath.Join(dir, "bad-key"), "ghp_secret\n")
+		writeFile(t, p, `openshell:
+  enabled: true
+  gateway_address: http://gateway:8080
+  image: sandbox:latest
+  providers:
+    - name: my-github
+      type: github
+      credentials_dir: providers/my-github
+    - name: my-claude
+      credentials_dir: providers/missing
+      config: {sundae.hash: x}
+      credential: x
+`)
+		err := check(p)
+		is.True(err != nil)
+		msg := err.Error()
+		for _, want := range []string{
+			"line 12: unknown key openshell.providers[].credential",
+			`openshell.providers[0] (my-github): credentials_dir ` + dir + `: file name "bad-key" is the credential key`,
+			"openshell.providers[1] (my-claude): type is required",
+			`openshell.providers[1] (my-claude): config key "sundae.hash" uses the "sundae." prefix`,
+			"openshell.providers[1] (my-claude): read credentials_dir",
+		} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("%q missing from:\n%s", want, msg)
+			}
+		}
+		is.True(!strings.Contains(msg, "ghp_secret"))
+	})
+
 	t.Run("sessions signals", func(t *testing.T) {
 		is := is.New(t)
 		p := filepath.Join(td, "signals.yaml")

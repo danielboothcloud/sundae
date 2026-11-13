@@ -37,7 +37,8 @@ var ErrSessionLost = errors.New("session ended without an exit status")
 func NewManager(ctx context.Context, client openshell.Client) *openshell.Manager {
 	return openshell.NewManager(client, backend.FromContext(ctx), config.FromContext(ctx),
 		openshell.WithEvents(events.FromContext(ctx)),
-		openshell.WithMonitor(openshell.MonitorFromContext(ctx)))
+		openshell.WithMonitor(openshell.MonitorFromContext(ctx)),
+		openshell.WithProviderReconciler(openshell.ProviderReconcilerFromContext(ctx)))
 }
 
 // Row is one of a user's sessions: what the gateway lists, and what the

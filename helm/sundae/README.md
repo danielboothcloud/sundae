@@ -252,6 +252,15 @@ is set).
   `config.sessions.git_identity` for other repositories, set who commits in
   agent sessions (top-level README, "Git identity"). They are plain config,
   not secrets, and server-wide: every user's sessions use them.
+- **OpenShell providers.** Declare them under `config.openshell.providers`
+  (example in `values.yaml`; semantics in the top-level README, "Declared
+  providers"): Sundae creates and updates them on the gateway. Put each
+  provider's credentials in a Secret whose keys are the credential names
+  (`GITHUB_TOKEN`, ...), e.g. synced by an `ExternalSecret` in
+  `extraObjects`, mount it as a directory with `secretMounts` and point
+  `credentials_dir` at it. Sundae reads the files again on every sync
+  (`providers_sync`, default 1m), so a rotated Secret needs no restart.
+  `ssh <host> openshell providers` (admins) shows their state.
 - **Notifications (ntfy).** Off by default. Turn them on under
   `config.notifications` (example in `values.yaml`; semantics in the top-level README, "Notifications").
   Quote the `"on":` key: Helm reads a bare `on:` as `true`, and the chart

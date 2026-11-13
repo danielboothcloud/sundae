@@ -52,6 +52,21 @@ extraObjects: []
 #      data:
 #        - secretKey: keys
 #          remoteRef: {key: sundae, property: admin-keys}
+#  # Credentials of the OpenShell provider my-github
+#  # (config.openshell.providers): each secretKey is a credential key, an
+#  # environment variable name. Mounted with the "provider-my-github"
+#  # example in `secretMounts`.
+#  - apiVersion: external-secrets.io/v1
+#    kind: ExternalSecret
+#    metadata:
+#      name: sundae-provider-my-github
+#    spec:
+#      refreshInterval: 1h
+#      secretStoreRef: {kind: ClusterSecretStore, name: my-store}
+#      target: {name: sundae-provider-my-github}
+#      data:
+#        - secretKey: GITHUB_TOKEN
+#          remoteRef: {key: sundae, property: github-token}
 
 # Where the data volume is mounted and where the read-only config is mounted.
 # The chart sets SUNDAE_DATA_PATH and SUNDAE_CONFIG_LOCATION to match.
@@ -181,6 +196,35 @@ config:
     # The program a session runs when no profile sets one. It runs in an osewa
     # session in the sandbox, so it outlives the SSH connection.
     command: "bash -l"
+    # OpenShell providers Sundae creates on the gateway and keeps up to date,
+    # for profiles to attach (sessions.profiles.<name>.providers). Each one's
+    # credentials are read from credentials_dir: one file per credential,
+    # named for its key (an environment variable name, e.g. GITHUB_TOKEN),
+    # holding the value. Mount a Secret there with `secretMounts` below
+    # (synced e.g. by the ExternalSecret in the `extraObjects` example); a
+    # rotated Secret reaches the gateway on the next sync. `config` is the
+    # provider's non-secret settings, `type` its provider profile ID
+    # (`openshell profile list`). Sundae labels the providers it creates
+    # sundae.managed=true and does not touch an existing provider of the same
+    # name unless `adopt: true`. Providers a profile lists that are not
+    # declared here are attached by name, as before. `ssh <host> openshell
+    # providers` (admins) shows their state. See the top-level README,
+    # "Providers".
+    providers: []
+    #  - name: my-github
+    #    type: github
+    #    credentials_dir: /etc/sundae-providers/my-github
+    #  - name: my-claude
+    #    type: anthropic
+    #    credentials_dir: /etc/sundae-providers/my-claude
+    #    config:
+    #      ANTHROPIC_BASE_URL: https://api.anthropic.com
+    # How often the declared providers are synced (their files read and the
+    # gateway updated when they changed). At least 10s.
+    providers_sync: 1m
+    # Delete providers Sundae created that are no longer declared. Off: they
+    # are kept and listed as undeclared.
+    prune_providers: false
 
   # What runs in the sandboxes: several named sessions per repository
   # (session start <repo> --name <name>), each from a profile.
@@ -215,7 +259,8 @@ config:
       keep: 1000
     # Named presets for `session start --profile <name>`. Empty image and
     # command fall back to openshell.image and openshell.command.
-    # `providers` names OpenShell providers (created on the gateway with
+    # `providers` names OpenShell providers (declared in
+    # config.openshell.providers, or created on the gateway with
     # `openshell provider create`) to attach to this profile's sandboxes
     # only; their programs get the credentials as placeholders the sandbox
     # proxy resolves. The provider profiles' binaries and endpoints, or the
@@ -430,6 +475,14 @@ secretMounts: []
 #  - name: gitlab-ssh
 #    secretName: sundae-gitlab-ssh
 #    mountPath: /etc/sundae-forges/gitlab-ssh
+#  # The credentials of an OpenShell provider, for
+#  # config.openshell.providers[].credentials_dir
+#  # (/etc/sundae-providers/my-github): every key of the Secret is a
+#  # credential, named for its key. The directory is mounted, not a subPath,
+#  # so a rotated Secret reaches the pod and the next sync.
+#  - name: provider-my-github
+#    secretName: sundae-provider-my-github
+#    mountPath: /etc/sundae-providers/my-github
 
 # Extra environment variables. SUNDAE_* variables override the config
 # file, so this is how a secret value without a *_file setting gets in

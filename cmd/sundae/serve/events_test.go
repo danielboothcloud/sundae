@@ -138,3 +138,47 @@ func TestServerSessionMonitor(t *testing.T) {
 	_, ok = srv.startMonitor()
 	is.True(!ok) // not after shutdown
 }
+
+func TestServerProviderReconciler(t *testing.T) {
+	is := is.New(t)
+
+	// None without declared providers.
+	srv := newTestServer(t, func(ctx context.Context) {
+		cfg := config.FromContext(ctx)
+		cfg.OpenShell.Enabled = true
+		cfg.OpenShell.GatewayAddress = "http://127.0.0.1:1"
+		cfg.OpenShell.Image = "sandbox:latest"
+	})
+	is.True(srv.Providers == nil)
+	is.True(openshell.ProviderReconcilerFromContext(srv.ctx) == nil)
+	shutdown(t, srv)
+
+	srv = newTestServer(t, func(ctx context.Context) {
+		cfg := config.FromContext(ctx)
+		cfg.OpenShell.Enabled = true
+		cfg.OpenShell.GatewayAddress = "http://127.0.0.1:1" // nothing listens
+		cfg.OpenShell.Image = "sandbox:latest"
+		cfg.OpenShell.Providers = []config.OpenShellProvider{{Name: "pypi", Type: "pypi"}}
+		cfg.OpenShell.ProvidersSync = time.Hour
+	})
+	is.True(srv.Providers != nil)
+	is.True(openshell.ProviderReconcilerFromContext(srv.ctx) == srv.Providers)
+
+	run, ok := srv.providers.start(srv.ctx, srv.Providers.Run)
+	is.True(ok)
+	_, again := srv.providers.start(srv.ctx, srv.Providers.Run)
+	is.True(!again) // once
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		run()
+	}()
+	shutdown(t, srv)
+	select {
+	case <-stopped:
+	case <-time.After(10 * time.Second):
+		t.Fatal("provider sync still running after shutdown")
+	}
+	_, ok = srv.providers.start(srv.ctx, srv.Providers.Run)
+	is.True(!ok) // not after shutdown
+}

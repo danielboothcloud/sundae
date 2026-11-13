@@ -181,6 +181,54 @@ openshell:
   # /sandbox/<repo>. It runs inside an osewa session, so it keeps running
   # after the SSH client disconnects.
   command: {{ printf "%q" .OpenShell.Command }}
+  # OpenShell providers Sundae creates on the gateway and keeps up to date,
+  # for profiles to attach (sessions.profiles.<name>.providers). Each
+  # provider's credentials are read from credentials_dir: one file per
+  # credential, named for its key (an environment variable name such as
+  # GITHUB_TOKEN), holding the value; e.g. a Kubernetes Secret mounted as a
+  # volume. The files are read again on every sync, so a rotated Secret
+  # reaches the gateway. config is the provider's non-secret settings.
+  # Sundae marks the providers it creates with the label
+  # sundae.managed=true; it leaves an existing provider of the same name
+  # alone unless adopt is true. Providers a profile lists but that are not
+  # declared here are attached by name, as before.
+{{- if .OpenShell.Providers }}
+  providers:
+{{- range .OpenShell.Providers }}
+    - name: {{ printf "%q" .Name }}
+      type: {{ printf "%q" .Type }}
+      {{- if .CredentialsDir }}
+      credentials_dir: {{ printf "%q" .CredentialsDir }}
+      {{- end }}
+      {{- if .Config }}
+      config:
+      {{- range $k, $v := .Config }}
+        {{ printf "%q" $k }}: {{ printf "%q" $v }}
+      {{- end }}
+      {{- end }}
+      {{- if .Adopt }}
+      adopt: true
+      {{- end }}
+{{- end }}
+{{- else }}
+  #providers:
+  #  - name: my-github
+  #    type: github
+  #    credentials_dir: /etc/sundae-providers/my-github
+  #  - name: my-claude
+  #    type: anthropic
+  #    credentials_dir: /etc/sundae-providers/my-claude
+  #    config:
+  #      ANTHROPIC_BASE_URL: https://api.anthropic.com
+{{- end }}
+  # How often the declared providers are synced to the gateway (and their
+  # credential files read). At least 10s. A provider is only rewritten when
+  # its credentials, config or type changed.
+  providers_sync: "{{ .OpenShell.ProvidersSync }}"
+  # Delete providers Sundae created (label sundae.managed=true) that are no
+  # longer declared above. Off: they are kept, and listed by
+  # "openshell providers".
+  prune_providers: {{ .OpenShell.PruneProviders }}
 
 # Sessions: what runs in the OpenShell sandboxes. Each user can have several
 # named sessions per repository (session start REPO --name NAME), one sandbox
@@ -218,9 +266,9 @@ sessions:
     keep: {{ .Sessions.Signals.Keep }}
   # Named presets for "session start --profile NAME". Empty image and
   # command fall back to openshell.image and openshell.command. providers
-  # names OpenShell providers (created on the gateway with "openshell
-  # provider create") to attach to the sandboxes of this profile's sessions
-  # only; the session's program gets their credentials as placeholders that
+  # names OpenShell providers (declared in openshell.providers, or created
+  # on the gateway with "openshell provider create") to attach to the
+  # sandboxes of this profile's sessions only; the session's program gets their credentials as placeholders that
   # the gateway's proxy resolves. The sandbox network policy must allow the
   # provider's endpoints.
 {{- if .Sessions.Profiles }}

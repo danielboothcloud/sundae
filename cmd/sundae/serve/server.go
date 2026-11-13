@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -53,6 +54,10 @@ type Server struct {
 	// Signals keeps the signals feed, recording from the bus from setup
 	// until Shutdown; nil when OpenShell is disabled.
 	Signals *signals.History
+	// Providers syncs the OpenShell providers declared in
+	// openshell.providers to the gateway from Start until Shutdown; nil
+	// when OpenShell is disabled or none are declared (and none pruned).
+	Providers *openshell.ProviderReconciler
 
 	logger *log.Logger
 	ctx    context.Context
@@ -62,6 +67,50 @@ type Server struct {
 	monitorCancel  context.CancelFunc
 	monitorDone    chan struct{}
 	monitorStopped bool
+
+	// providers runs the provider reconciler.
+	providers background
+}
+
+// background is a task that runs from Start until Shutdown, once.
+type background struct {
+	mu      sync.Mutex
+	cancel  context.CancelFunc
+	done    chan struct{}
+	stopped bool
+}
+
+// start prepares run to run, once, unless the server is shutting down.
+// The returned func runs it until stop.
+func (b *background) start(parent context.Context, run func(context.Context)) (func(), bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.stopped || b.cancel != nil {
+		return nil, false
+	}
+	ctx, cancel := context.WithCancel(parent)
+	done := make(chan struct{})
+	b.cancel, b.done = cancel, done
+	return func() {
+		defer close(done)
+		run(ctx)
+	}, true
+}
+
+// stop stops the task and waits, within ctx, for it to finish.
+func (b *background) stop(ctx context.Context) {
+	b.mu.Lock()
+	b.stopped = true
+	cancel, done := b.cancel, b.done
+	b.mu.Unlock()
+	if cancel == nil {
+		return
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
 }
 
 // NewServer returns a new *Server configured to serve Sundae. The SSH
@@ -91,6 +140,18 @@ func NewServer(ctx context.Context) (*Server, error) {
 		ctx = openshell.ContextWithMonitor(ctx, monitor)
 	}
 
+	// Declared OpenShell providers are synced to the gateway from Start.
+	// The reconciler reaches the session commands, which check it, and
+	// `openshell providers` through the context. It also runs with none
+	// declared when prune_providers is set, to delete the ones Sundae made.
+	var providers *openshell.ProviderReconciler
+	if cfg.OpenShell.Enabled && (len(cfg.OpenShell.Providers) > 0 || cfg.OpenShell.PruneProviders) {
+		providers = openshell.NewProviderReconciler(func() (openshell.ProviderAPI, io.Closer, error) {
+			return openshell.NewProviderAPI(cfg.OpenShell)
+		}, cfg, openshell.WithProviderEvents(bus), openshell.WithProviderLogger(log.FromContext(ctx)))
+		ctx = openshell.ContextWithProviderReconciler(ctx, providers)
+	}
+
 	// The signals feed records session events from now on, so it has
 	// what is published while the server starts. It reaches the SSH
 	// server through the context.
@@ -118,14 +179,15 @@ func NewServer(ctx context.Context) (*Server, error) {
 	jobs.RegisterForgeSync(cfg)
 
 	srv := &Server{
-		Config:  cfg,
-		Backend: be,
-		DB:      db,
-		Events:  bus,
-		Monitor: monitor,
-		Signals: sigs,
-		logger:  log.FromContext(ctx).WithPrefix("server"),
-		ctx:     ctx,
+		Config:    cfg,
+		Backend:   be,
+		DB:        db,
+		Events:    bus,
+		Monitor:   monitor,
+		Signals:   sigs,
+		Providers: providers,
+		logger:    log.FromContext(ctx).WithPrefix("server"),
+		ctx:       ctx,
 	}
 
 	// Notifications are off unless ntfy is enabled in the config file.
@@ -303,6 +365,19 @@ func (s *Server) Start() error {
 		return nil
 	})
 
+	if s.Providers != nil {
+		if run, ok := s.providers.start(s.ctx, s.Providers.Run); ok {
+			errg.Go(func() error {
+				s.logger.Print("Starting OpenShell provider sync",
+					"providers", len(s.Config.OpenShell.Providers),
+					"interval", s.Config.OpenShell.ProvidersSync,
+					"prune", s.Config.OpenShell.PruneProviders)
+				run()
+				return nil
+			})
+		}
+	}
+
 	if run, ok := s.startMonitor(); ok {
 		errg.Go(func() error {
 			s.logger.Print("Starting session monitor",
@@ -378,6 +453,10 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		return nil
 	})
 	errg.Go(func() error {
+		s.providers.stop(ctx)
+		return nil
+	})
+	errg.Go(func() error {
 		// Ends `session signals --follow`, which the SSH server would
 		// otherwise wait for.
 		s.Signals.Close()
@@ -415,6 +494,10 @@ func (s *Server) Close() error {
 	})
 	errg.Go(func() error {
 		s.stopMonitor(ctx)
+		return nil
+	})
+	errg.Go(func() error {
+		s.providers.stop(ctx)
 		return nil
 	})
 	errg.Go(func() error {

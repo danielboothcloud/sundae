@@ -232,6 +232,30 @@ func IsNotFound(err error) bool { return v1.IsNotFound(err) }
 // connection is established lazily on first use. A token_file is read here,
 // on every call, so a rotated token takes effect for the next client.
 func New(cfg config.OpenShellConfig) (Client, error) {
+	c, err := newSDK(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	sc := newSDKClient(cfg.Workspace, c.Sandboxes(), c.Exec(), c.Files(), c)
+	sc.suspender = c.SandboxSuspendResume()
+	return sc, nil
+}
+
+// NewProviderAPI returns the gateway's provider API for the given
+// configuration and the closer that releases it. Like New, it reads a
+// token_file on every call.
+func NewProviderAPI(cfg config.OpenShellConfig) (ProviderAPI, io.Closer, error) {
+	c, err := newSDK(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	return c.Providers(), c, nil
+}
+
+// newSDK returns an SDK client for the given configuration. The gRPC
+// connection is established lazily on first use.
+func newSDK(cfg config.OpenShellConfig) (*v1.Client, error) {
 	sdkCfg := v1.Config{Address: cfg.GatewayAddress}
 	token, err := cfg.GatewayToken()
 	if err != nil {
@@ -253,10 +277,7 @@ func New(cfg config.OpenShellConfig) (Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("openshell: create client: %w", err)
 	}
-
-	sc := newSDKClient(cfg.Workspace, c.Sandboxes(), c.Exec(), c.Files(), c)
-	sc.suspender = c.SandboxSuspendResume()
-	return sc, nil
+	return c, nil
 }
 
 // sdkClient implements Client on top of the SDK sub-clients.

@@ -197,6 +197,21 @@ type OpenShellConfig struct {
 	// runs inside an osewa session, so it keeps running after the SSH client
 	// disconnects.
 	Command string `env:"COMMAND" yaml:"command"`
+
+	// Providers are OpenShell providers Sundae creates on the gateway and
+	// keeps in sync with their credential files. Profiles attach them by
+	// name like any other provider. The environment form is
+	// SUNDAE_OPENSHELL_PROVIDERS_<index>_<KEY>.
+	Providers []OpenShellProvider `envPrefix:"PROVIDERS_" yaml:"providers"`
+
+	// ProvidersSync is how often the declared providers are synced to the
+	// gateway. Defaults to 1m; at least 10s.
+	ProvidersSync time.Duration `env:"PROVIDERS_SYNC" yaml:"providers_sync"`
+
+	// PruneProviders deletes providers Sundae created (they carry its
+	// managed label) that are no longer declared. Off by default: such
+	// providers are kept and reported.
+	PruneProviders bool `env:"PRUNE_PROVIDERS" yaml:"prune_providers"`
 }
 
 // Config is the configuration for Sundae.
@@ -344,6 +359,9 @@ func (c *Config) Environ() []string {
 		// handed to hook and git subprocesses, which never need the gateway
 		// credential.
 	}...)
+
+	// Provider credentials only ever live in their credentials_dir.
+	envs = append(envs, c.providersEnviron()...)
 
 	envs = append(envs, c.sessionsEnviron()...)
 
@@ -686,10 +704,11 @@ func DefaultConfig() *Config {
 			MirrorPull: "@every 10m",
 		},
 		OpenShell: OpenShellConfig{
-			Enabled:   false,
-			Workspace: "default",
-			TokenTTL:  24 * time.Hour,
-			Command:   "bash -l",
+			Enabled:       false,
+			Workspace:     "default",
+			TokenTTL:      24 * time.Hour,
+			Command:       "bash -l",
+			ProvidersSync: DefaultProvidersSync,
 		},
 		Sessions: SessionsConfig{
 			Osewa: OsewaConfig{
@@ -767,7 +786,7 @@ func (c *Config) Validate() error {
 
 	c.HTTP.CORS.AllowedOrigins = append([]string{c.HTTP.PublicURL}, c.HTTP.CORS.AllowedOrigins...)
 
-	return errors.Join(c.validateOpenShell(), c.validateSessions(), c.validateProjects(), c.validateForges(), c.validateGitIdentities(), c.validateNotifications(), c.validateSnapshots())
+	return errors.Join(c.validateOpenShell(), c.validateProviders(), c.validateSessions(), c.validateProjects(), c.validateForges(), c.validateGitIdentities(), c.validateNotifications(), c.validateSnapshots())
 }
 
 // validateOpenShell validates the OpenShell configuration and resolves its
@@ -813,6 +832,8 @@ func (c *Config) validateOpenShell() error {
 	if strings.TrimSpace(oc.Workspace) == "" {
 		errs = append(errs, errors.New("openshell: workspace must not be empty"))
 	}
+	// openshell.providers is checked in validateProviders, which also
+	// reads the credential files when OpenShell is enabled.
 	// Read the token file once now so a missing or unreadable file fails at
 	// startup. The value is not kept: GatewayToken reads the file again for
 	// every client, which picks up a rotated token. Skipped when both token

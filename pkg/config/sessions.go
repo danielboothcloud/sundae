@@ -157,8 +157,9 @@ type SessionProfile struct {
 	Command string `yaml:"command"`
 
 	// Providers names OpenShell providers to attach to the sandbox of
-	// every session of this profile. The providers are created on the
-	// gateway out of band (`openshell provider create`); the gateway keeps
+	// every session of this profile. The providers are declared in
+	// openshell.providers, which Sundae creates on the gateway, or created
+	// out of band (`openshell provider create`); the gateway keeps
 	// their credentials and gives the session opaque placeholders, which
 	// its proxy replaces with the real values on requests to the provider's
 	// endpoints. Sessions of other profiles get none of them.

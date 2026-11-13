@@ -210,6 +210,7 @@ func CommandMiddleware(sh ssh.Handler) ssh.Handler {
 		if cfg.OpenShell.Enabled {
 			rootCmd.AddCommand(
 				cmd.SessionCommand(),
+				cmd.OpenShellCommand(),
 			)
 		}
 

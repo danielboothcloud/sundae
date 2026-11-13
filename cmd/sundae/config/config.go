@@ -33,7 +33,8 @@ variables as overrides, then validation. Unknown keys are errors.
 It exits 0 when the configuration is valid. It never writes a file: where
 "sundae serve" would write a default config, check reports the file as missing.
 Files the config refers to and that are checked at startup, such as
-openshell.token_file when OpenShell is enabled, every forges[].token_file,
+openshell.token_file and every openshell.providers[].credentials_dir
+(each file in it) when OpenShell is enabled, every forges[].token_file,
 ssh_key_file and ssh_known_hosts_file, notifications.ntfy.token_file when
 ntfy is enabled and
 snapshots.s3.credentials_file when S3 snapshots are enabled, must be readable

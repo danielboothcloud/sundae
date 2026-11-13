@@ -442,6 +442,17 @@ openshell:
   token_ttl: "24h"
   # The program a session runs when no profile sets one, in /sandbox/<repo>.
   command: "bash -l"
+  # OpenShell providers Sundae creates and keeps up to date on the gateway
+  # (see "Declared providers" below).
+  providers:
+    - name: my-github
+      type: github
+      credentials_dir: /etc/sundae-providers/my-github  # GITHUB_TOKEN
+    - name: my-claude
+      type: anthropic
+      credentials_dir: /etc/sundae-providers/my-claude  # ANTHROPIC_API_KEY
+  providers_sync: 1m       # at least 10s
+  prune_providers: false   # delete undeclared providers Sundae created
 
 sessions:
   osewa:
@@ -485,7 +496,9 @@ be set with `SUNDAE_OPENSHELL_*` and `SUNDAE_SESSIONS_OSEWA_*`,
 `SUNDAE_SESSIONS_SIGNALS_*` and `SUNDAE_SESSIONS_GIT_IDENTITY_*`
 environment variables, for example
 `SUNDAE_OPENSHELL_ENABLED=true` or
-`SUNDAE_SESSIONS_SUSPEND_AFTER=1h`; `sessions.profiles` and
+`SUNDAE_SESSIONS_SUSPEND_AFTER=1h` (`openshell.providers` as
+`SUNDAE_OPENSHELL_PROVIDERS_<index>_<KEY>`, `CONFIG` holding `KEY=VALUE`
+lines); `sessions.profiles` and
 `sessions.repos` only in the file. `status.poll_interval` must be at least
 `1s`, and `suspend.after` must not be shorter than it. `signals.keep` is
 between 1 and 100000 (default 1000). When OpenShell is
@@ -509,8 +522,11 @@ warning, when it already exists. Profile names are DNS labels; every
 [OpenShell providers](https://github.com/NVIDIA/OpenShell/blob/v0.1.8/docs/how-it-works/providers/overview.mdx)
 to attach to the sandboxes of that profile's sessions, so a secret is
 available only to sessions of the profiles that list its provider. Sessions
-without a profile get none (there is no default list). Sundae attaches
-providers by name; create them on the gateway yourself, e.g.
+without a profile get none (there is no default list). Declare the
+providers in `openshell.providers` and Sundae creates and updates them on the
+gateway from credential files (see "Declared providers" below). A provider a
+profile lists that is not declared is attached by name, as before: create it
+on the gateway yourself, e.g.
 `openshell provider create --name my-claude --type anthropic --from-existing`.
 The gateway keeps the credentials: the sandbox only ever sees opaque
 placeholders (`openshell:resolve:env:...`) in its environment variables
@@ -550,6 +566,86 @@ profile; duplicates are dropped.
   placeholders, never credentials. Sessions without providers get exactly
   the environment they got before.
 - `session ls --json` lists each session's attached `providers`.
+
+**Declared providers.** Each `openshell.providers` entry is a provider
+Sundae creates on the gateway and keeps up to date, so credentials come from
+Kubernetes Secrets (synced e.g. by External Secrets) instead of a manual
+`openshell provider create`:
+
+- `name` is the provider's name, which profiles list; `type` its provider
+  profile ID (`anthropic`, `github`, an imported profile; `openshell profile
+  list`); unique names, same rules as above. `type` cannot change once the
+  provider exists: OpenShell refuses, and Sundae reports it until you delete
+  the provider (`openshell provider delete`) so it is created again.
+- `credentials_dir` is a directory with one file per credential: the file
+  name is the credential key, an environment variable name such as
+  `GITHUB_TOKEN` (not `v<digits>_...`, which OpenShell reserves), and its
+  content the value, less one trailing newline; at most 32 files of at most
+  8192 bytes. A Secret mounted as a volume is such a directory (its `..data`
+  link and `..<timestamp>` directory are skipped, links are followed). Omit
+  it only for a provider type that needs no credentials (`pypi`).
+- `config` is the provider's non-secret settings (`ANTHROPIC_BASE_URL: ...`),
+  one-line values; keys starting with `sundae.` are reserved.
+- `adopt: true` lets Sundae take over a provider of that name that it did not
+  create (see below).
+
+When OpenShell is enabled, the server and `sundae config check` read every
+`credentials_dir` at startup: a missing, empty or malformed one is a config
+error naming the provider and file, never a value. The server then syncs the
+declared providers at startup and every `openshell.providers_sync` (default
+`1m`, at least `10s`), reading the files again each time:
+
+- A missing provider is created with the label `sundae.managed=true`.
+- A provider is updated only when its type, credentials or config changed.
+  Sundae keeps its sync state in three provider config entries:
+  `sundae.sync-hash` (an HMAC-SHA256 of the type, credentials and config,
+  keyed with a secret Sundae keeps in `<data>/openshell/provider-sync.key`,
+  so the hash says nothing about the credentials), and
+  `sundae.credential-keys` and `sundae.config-keys` (the keys it set, so a
+  key removed from the directory or `config` is deleted: OpenShell merges an
+  update into the stored provider). OpenShell 0.1.8 sets labels only on
+  creation and never returns credentials, which is why the state is kept
+  in config. A change made out of band with `openshell provider update`
+  is not noticed until the files or config change.
+- An existing provider without the managed label (created by hand) is left
+  alone and reported as a `conflict`: delete it to let Sundae create it, or
+  set `adopt: true` to have Sundae update it in place (it keeps its labels
+  and any credential keys Sundae did not set).
+- A provider Sundae created that is no longer declared is kept and listed as
+  `undeclared`; with `openshell.prune_providers: true` Sundae deletes it.
+  OpenShell refuses to delete a provider attached to a sandbox; Sundae tries
+  again every sync.
+- Each provider is synced on its own: one failing does not hold up the
+  others or the server. `session start` of a profile that lists a declared
+  provider whose last sync failed fails with an error naming it;
+  `session attach` warns and goes ahead.
+- Outcomes are logged (names and credential keys only), published as
+  `openshell.provider` events (created, updated, deleted, and failed when
+  the error changes) and counted in `sundae_openshell_provider_syncs_total`
+  (`provider`, `result`); `sundae_openshell_provider_sync_ok` is 1 while a
+  provider's last sync succeeded.
+
+`ssh <host> openshell providers` (admins only; `--json`) lists the declared
+providers with their state, owner (`sundae`, `adopted`, `other` for a
+conflict), last sync and error, credential key names (never values) and
+the profiles that list them, then the undeclared ones Sundae created, then
+the `manual` ones profiles list without declaring them.
+
+**Rotation.** A new value in the Secret reaches the mounted files (after the
+kubelet's sync delay, typically a minute or two) and the gateway on the
+next sync, as an update of the same provider. What the sandboxes do with it
+is OpenShell's: a running sandbox notices the change within its poll
+interval, and only processes started after that get references to the new
+value. A running session program keeps the placeholders it started with: by
+default they are revision-scoped, so they keep resolving the previous value
+while OpenShell retains that revision and may then fall back to the current
+one; a provider profile credential with `stable_placeholder: true` keeps one
+placeholder across value-only updates, so a running program uses the new
+value once the sandbox has installed it
+([Profiles, Runtime Limitations](https://github.com/NVIDIA/OpenShell/blob/v0.1.8/docs/how-it-works/providers/profiles.mdx)).
+To be sure a session uses a rotated credential, exit its program and attach
+again (or `session end` and start it). Deleting and recreating a provider
+(a type change) gives it new placeholders; Sundae never does that itself.
 
 A placeholder only resolves when the sandbox's network policy lets the
 calling binary reach the endpoint, the endpoint is in the provider's
