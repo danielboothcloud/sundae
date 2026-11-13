@@ -171,6 +171,11 @@ would reject at startup.
 {{- fail "initialAdminKeys must contain public keys only; a private key was found" -}}
 {{- end -}}
 {{- end -}}
+{{- with .Values.initialAdminKeysSecret -}}
+{{- if .name -}}
+{{- $keys = append $keys (printf "%s/%s" (.mountPath | trimSuffix "/") (required "initialAdminKeysSecret.key is required when initialAdminKeysSecret.name is set" .key)) -}}
+{{- end -}}
+{{- end -}}
 {{- $_ := set $cfg "initial_admin_keys" $keys -}}
 
 {{- $os := get $cfg "openshell" | default dict -}}

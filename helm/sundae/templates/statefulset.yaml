@@ -162,6 +162,11 @@ spec:
               mountPath: {{ .Values.snapshots.s3Credentials.mountPath | quote }}
               readOnly: true
             {{- end }}
+            {{- if .Values.initialAdminKeysSecret.name }}
+            - name: admin-keys
+              mountPath: {{ .Values.initialAdminKeysSecret.mountPath | quote }}
+              readOnly: true
+            {{- end }}
             {{- range .Values.secretMounts }}
             - name: {{ printf "secret-%s" .name | quote }}
               mountPath: {{ .mountPath | quote }}
@@ -214,6 +219,17 @@ spec:
             {{- end }}
             # Readable by the pod's fsGroup only.
             defaultMode: 0440
+        {{- end }}
+        {{- with .Values.initialAdminKeysSecret }}
+        {{- if .name }}
+        - name: admin-keys
+          secret:
+            secretName: {{ .name | quote }}
+            items:
+              - key: {{ .key | quote }}
+                path: {{ .key | quote }}
+            defaultMode: 0440
+        {{- end }}
         {{- end }}
         {{- range .Values.secretMounts }}
         - name: {{ printf "secret-%s" .name | quote }}

@@ -29,6 +29,30 @@ fullnameOverride: ""
 initialAdminKeys: []
 #  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... you@example.com"
 
+# Admin public keys from an existing Secret instead (e.g. one synced by
+# External Secrets; create it with extraObjects below). The key holds
+# authorized_keys lines, one per line. The chart mounts it and adds the file
+# to config.initial_admin_keys; both sources are merged. Read at startup.
+initialAdminKeysSecret:
+  name: ""
+  key: keys
+  mountPath: /etc/sundae-admin-keys
+
+# Extra Kubernetes objects rendered with the release, e.g. an ExternalSecret
+# for the Secrets this chart mounts. Each item is a map or a string; both are
+# rendered with `tpl`, so they can use {{ .Release.Namespace }} and friends.
+extraObjects: []
+#  - apiVersion: external-secrets.io/v1
+#    kind: ExternalSecret
+#    metadata:
+#      name: sundae-admin-keys
+#    spec:
+#      secretStoreRef: {kind: ClusterSecretStore, name: my-store}
+#      target: {name: sundae-admin-keys}
+#      data:
+#        - secretKey: keys
+#          remoteRef: {key: sundae, property: admin-keys}
+
 # Where the data volume is mounted and where the read-only config is mounted.
 # The chart sets SUNDAE_DATA_PATH and SUNDAE_CONFIG_LOCATION to match.
 dataPath: /sundae

@@ -64,6 +64,24 @@ func TestValidateInitAdminKeys(t *testing.T) {
 	})
 }
 
+func TestInitAdminKeysFileWithSeveralKeys(t *testing.T) {
+	is := is.New(t)
+	file := filepath.Join(t.TempDir(), "keys")
+	is.NoErr(os.WriteFile(file, []byte(
+		"# admins\n"+
+			"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINMwLvyV3ouVrTysUYGoJdl5Vgn5BACKov+n9PlzfPwH a@b\n"+
+			"\n"+
+			"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFxIobhwtfdwN7m1TFt9wx3PsfvcAkISGPxmbmbauST8 c@d\n",
+	), 0o600))
+	cfg := &Config{DataPath: t.TempDir(), InitialAdminKeys: []string{file}}
+	is.NoErr(cfg.WriteConfig())
+	is.NoErr(cfg.Parse())
+	is.Equal(cfg.InitialAdminKeys, []string{
+		"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINMwLvyV3ouVrTysUYGoJdl5Vgn5BACKov+n9PlzfPwH",
+		"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFxIobhwtfdwN7m1TFt9wx3PsfvcAkISGPxmbmbauST8",
+	})
+}
+
 func TestCustomConfigLocation(t *testing.T) {
 	is := is.New(t)
 	td := t.TempDir()

@@ -865,16 +865,26 @@ func (c *Config) OpenShellCloneURL() string {
 func parseAuthKeys(aks []string) []ssh.PublicKey {
 	exist := make(map[string]struct{}, 0)
 	pks := make([]ssh.PublicKey, 0)
-	for _, key := range aks {
-		if bts, err := os.ReadFile(key); err == nil {
-			// key is a file
-			key = strings.TrimSpace(string(bts))
+	for _, entry := range aks {
+		keys := []string{entry}
+		if bts, err := os.ReadFile(entry); err == nil {
+			// The entry is a file in authorized_keys format: one key per
+			// line, blank lines and # comments ignored.
+			keys = keys[:0]
+			for _, line := range strings.Split(string(bts), "\n") {
+				line = strings.TrimSpace(line)
+				if line != "" && !strings.HasPrefix(line, "#") {
+					keys = append(keys, line)
+				}
+			}
 		}
 
-		if pk, _, err := sshutils.ParseAuthorizedKey(key); err == nil {
-			if _, ok := exist[key]; !ok {
-				pks = append(pks, pk)
-				exist[key] = struct{}{}
+		for _, key := range keys {
+			if pk, _, err := sshutils.ParseAuthorizedKey(key); err == nil {
+				if _, ok := exist[key]; !ok {
+					pks = append(pks, pk)
+					exist[key] = struct{}{}
+				}
 			}
 		}
 	}

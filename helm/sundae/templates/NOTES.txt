@@ -7,7 +7,7 @@ The configuration is the ConfigMap {{ include "sundae.fullname" . }}-config, mou
 {{- if .Values.config.openshell.enabled }}
 OpenShell sessions are enabled against {{ .Values.config.openshell.gateway_address }}.
 {{- end }}
-{{- if not (or .Values.initialAdminKeys .Values.config.initial_admin_keys) }}
+{{- if not (or .Values.initialAdminKeys .Values.config.initial_admin_keys .Values.initialAdminKeysSecret.name) }}
 
 WARNING: no initialAdminKeys are set, so nobody can administer this server over SSH.
 {{- end }}

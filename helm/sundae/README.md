@@ -150,6 +150,8 @@ config:
 | `openshell.clientTLS.secretName` | no | Defaults to `openshell-client-tls`; the TLS paths in `config.openshell` point at it. |
 | `persistence.size`, `persistence.storageClass` | no | Data volume; empty StorageClass uses the cluster default. |
 | `imagePullSecrets` | no | For a private image. |
+| `initialAdminKeysSecret.name`, `.key` | no | Admin keys from an existing Secret (authorized_keys lines); merged with `initialAdminKeys`. |
+| `extraObjects` | no | Extra manifests rendered with the release (maps or strings, through `tpl`), e.g. an `ExternalSecret` for the Secrets the chart mounts. |
 
 Every option is documented in [`values.yaml`](values.yaml). The chart fails
 to render with a message naming the value when a required one is missing or
