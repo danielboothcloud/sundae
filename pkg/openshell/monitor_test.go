@@ -777,9 +777,14 @@ func TestParkable(t *testing.T) {
 		"stopped":                        {idle(func(e *entry) { e.st.Phase = string(types.SandboxStopped) }), 0, false},
 		"unsuspendable":                  {idle(func(e *entry) { e.st.Unsuspendable = "no" }), 0, false},
 	} {
-		if got, why := parkable(tc.e, tc.bridges, now, after); got != tc.want {
+		if got, why := parkable(tc.e, tc.bridges, now, after, false); got != tc.want {
 			t.Errorf("%s: parkable = %v (%s), want %v", name, got, why, tc.want)
 		}
+	}
+	// With the snapshot fallback, a sandbox the gateway cannot suspend is
+	// parked all the same.
+	if got, why := parkable(idle(func(e *entry) { e.st.Unsuspendable = "no" }), 0, now, after, true); !got {
+		t.Errorf("unsuspendable with fallback: parkable = false (%s)", why)
 	}
 }
 

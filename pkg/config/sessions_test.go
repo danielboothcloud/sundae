@@ -175,7 +175,7 @@ func TestSessionsConfigFileRoundTrip(t *testing.T) {
 	is.Equal(got.Sessions.Osewa.Port, 7400)
 	is.Equal(got.Sessions.Osewa.BinaryDir, DefaultOsewaBinaryDir)
 	is.Equal(got.Sessions.Status.PollInterval, 15*time.Second)
-	is.Equal(got.Sessions.Suspend, SessionSuspendConfig{Enabled: false, After: 2 * time.Hour})
+	is.Equal(got.Sessions.Suspend, SessionSuspendConfig{Enabled: false, After: 2 * time.Hour, Fallback: SuspendFallbackNone})
 	is.Equal(got.Sessions.Signals.Keep, 250)
 	is.Equal(got.Sessions.Profiles["claude"], cfg.Sessions.Profiles["claude"])
 	is.Equal(got.Sessions.Repos["infra/*"].Profile, "claude")
@@ -231,7 +231,7 @@ func TestSessionsEnv(t *testing.T) {
 	is.Equal(cfg.Sessions.Osewa.BinaryDir, "/opt/osewa")
 	is.Equal(cfg.Sessions.Osewa.Port, 7401)
 	is.Equal(cfg.Sessions.Status.PollInterval, 20*time.Second)
-	is.Equal(cfg.Sessions.Suspend, SessionSuspendConfig{Enabled: false, After: 45 * time.Minute})
+	is.Equal(cfg.Sessions.Suspend, SessionSuspendConfig{Enabled: false, After: 45 * time.Minute, Fallback: SuspendFallbackNone})
 	is.Equal(cfg.Sessions.Signals.Keep, 500)
 
 	envs := strings.Join(cfg.Environ(), "\n")

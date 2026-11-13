@@ -9,6 +9,7 @@ package sessions
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"image/color"
 	"slices"
@@ -113,6 +114,8 @@ type (
 		repo, name string
 		done       bool
 		err        error
+		// row is the session acted on.
+		row sessionctl.Row
 	}
 )
 
@@ -180,6 +183,8 @@ type Sessions struct {
 	// Overlays.
 	form    *prompt.Form
 	confirm *prompt.Confirm
+	// onYes is what a yes to the confirm does.
+	onYes   func() tea.Cmd
 	target  sessionctl.Row
 	op      *operation
 	opLines []string
@@ -624,7 +629,14 @@ func (m *Sessions) selected() (sessionctl.Row, bool) {
 // message is a session's second line: what the agent last said, else the
 // program's name, else the command it runs.
 func (m *Sessions) message(r sessionctl.Row) string {
-	if msg := signals.RecordMessage(r.Record(), 0); msg != "" {
+	msg := signals.RecordMessage(r.Record(), 0)
+	if note := r.Note(); note != "" {
+		if msg != "" {
+			return note + " · " + msg
+		}
+		return note
+	}
+	if msg != "" {
 		return msg
 	}
 	if m.src == nil {
@@ -642,8 +654,10 @@ func (m *Sessions) onKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		m.confirm = nil
-		if res == prompt.Submitted {
-			return m.endCmd(m.target)
+		yes := m.onYes
+		m.onYes = nil
+		if res == prompt.Submitted && yes != nil {
+			return yes()
 		}
 		return nil
 	case m.form != nil:
@@ -784,14 +798,21 @@ func (m *Sessions) onSessionsKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.attachCmd(r.Info.Repo, r.Info.Name, r.Info.Sandbox, r.Parked())
 	case key.Matches(msg, m.keys.End):
 		m.target = r
-		m.confirm = prompt.NewConfirm(m.common, "End "+label+"?  The sandbox and any unpushed work are deleted.")
+		question := "End " + label + "?  The sandbox and any unpushed work are deleted."
+		switch {
+		case r.ParkedToSnapshot():
+			question = "End " + label + "?  It is parked to an S3 snapshot, which is kept."
+		case m.src.SnapshotsOnEnd():
+			question = "End " + label + "?  /sandbox is saved to S3, then the sandbox is deleted."
+		}
+		m.ask(question, func() tea.Cmd { return m.endCmd(r, false) })
 		return nil
 	case key.Matches(msg, m.keys.Park):
 		if m.busy[r.Info.Sandbox] != "" {
 			return nil
 		}
 		if r.Parked() {
-			return m.resumeCmd(r)
+			return m.resumeCmd(r, openshell.RestoreAuto)
 		}
 		return m.parkCmd(r)
 	case key.Matches(msg, m.keys.Copy):
@@ -901,6 +922,14 @@ func (m *Sessions) onOp(op *operation) tea.Cmd {
 	label := sessionLabel(op.repo, op.name)
 	if err != nil {
 		op.cancel()
+		var conflict *openshell.RestoreConflictError
+		if errors.As(err, &conflict) {
+			// Nothing was started: ask, and start it again with the
+			// answer.
+			m.notice = conflictNotice(label, conflict)
+			m.ask(restoreQuestion(conflict), func() tea.Cmd { return m.rerun(op, openshell.RestoreOver) })
+			return nil
+		}
 		m.notice = notice{text: "✗ " + label + ": " + err.Error(), err: true}
 		return m.listCmd()
 	}
@@ -932,12 +961,41 @@ func (m *Sessions) onAttachDone(msg attachDoneMsg) tea.Cmd {
 	return m.listCmd()
 }
 
-func (m *Sessions) endCmd(r sessionctl.Row) tea.Cmd {
+// ask opens the confirm with question; yes runs onYes.
+func (m *Sessions) ask(question string, onYes func() tea.Cmd) {
+	m.confirm = prompt.NewConfirm(m.common, question)
+	m.onYes = onYes
+}
+
+// restoreQuestion is the one-line question for a restore conflict; the
+// error has the long form.
+func restoreQuestion(e *openshell.RestoreConflictError) string {
+	return fmt.Sprintf("Restore its snapshot (%s) over files already in the new sandbox?", e.Snapshot.Describe())
+}
+
+// conflictNotice says what the new sandbox holds and what no means.
+func conflictNotice(label string, e *openshell.RestoreConflictError) notice {
+	return notice{text: label + ": the new sandbox already holds " + strings.Join(e.Paths, ", ") +
+		". y restores the snapshot over them (files only in the sandbox are kept); n starts nothing (session start --fresh keeps them)."}
+}
+
+// rerun starts op's preparation again, restoring as restore says.
+func (m *Sessions) rerun(op *operation, restore openshell.RestoreMode) tea.Cmd {
+	again, ctx := newOperation(m.ctx, op.title, op.repo, op.name, op.attach)
+	again.key = op.key
+	m.op, m.opLines = again, nil
+	m.notice = notice{}
+	req := op.req
+	req.Restore = restore
+	return again.run(ctx, m.src, req)
+}
+
+func (m *Sessions) endCmd(r sessionctl.Row, force bool) tea.Cmd {
 	m.busy[r.Info.Sandbox] = "ending"
 	ctx, src := m.ctx, m.src
 	return func() tea.Msg {
-		existed, err := src.End(ctx, r.Info.Repo, r.Info.Name)
-		return actionMsg{key: r.Info.Sandbox, verb: "end", repo: r.Info.Repo, name: r.Info.Name, done: existed, err: err}
+		existed, err := src.End(ctx, r.Info.Repo, r.Info.Name, force)
+		return actionMsg{key: r.Info.Sandbox, verb: "end", repo: r.Info.Repo, name: r.Info.Name, done: existed, err: err, row: r}
 	}
 }
 
@@ -950,22 +1008,34 @@ func (m *Sessions) parkCmd(r sessionctl.Row) tea.Cmd {
 	}
 }
 
-func (m *Sessions) resumeCmd(r sessionctl.Row) tea.Cmd {
+func (m *Sessions) resumeCmd(r sessionctl.Row, restore openshell.RestoreMode) tea.Cmd {
 	m.busy[r.Info.Sandbox] = "resuming"
 	ctx, src := m.ctx, m.src
 	return func() tea.Msg {
-		att, err := src.Prepare(ctx, sessionctl.Request{Repo: r.Info.Repo, Name: r.Info.Name})
+		att, err := src.Prepare(ctx, sessionctl.Request{Repo: r.Info.Repo, Name: r.Info.Name, Restore: restore})
 		if att != nil {
 			att.Close()
 		}
-		return actionMsg{key: r.Info.Sandbox, verb: "resume", repo: r.Info.Repo, name: r.Info.Name, done: err == nil, err: err}
+		return actionMsg{key: r.Info.Sandbox, verb: "resume", repo: r.Info.Repo, name: r.Info.Name, done: err == nil, err: err, row: r}
 	}
 }
 
 func (m *Sessions) onAction(msg actionMsg) tea.Cmd {
 	delete(m.busy, msg.key)
 	label := sessionLabel(msg.repo, msg.name)
+	var conflict *openshell.RestoreConflictError
 	switch {
+	case msg.verb == "end" && errors.Is(msg.err, openshell.ErrSnapshotFailed):
+		// Not ended: say why, and offer to end it without a snapshot.
+		m.notice = notice{text: "✗ " + label + ": " + msg.err.Error(), err: true}
+		r := msg.row
+		m.ask("The snapshot failed. End "+label+" without one?  Unpushed work is lost.", func() tea.Cmd { return m.endCmd(r, true) })
+		return m.listCmd()
+	case msg.verb == "resume" && errors.As(msg.err, &conflict):
+		m.notice = conflictNotice(label, conflict)
+		r := msg.row
+		m.ask(restoreQuestion(conflict), func() tea.Cmd { return m.resumeCmd(r, openshell.RestoreOver) })
+		return m.listCmd()
 	case msg.err != nil:
 		m.notice = notice{text: "✗ " + label + ": " + msg.err.Error(), err: true}
 	case msg.verb == "end" && msg.done:

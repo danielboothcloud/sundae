@@ -45,6 +45,11 @@ type fakeSource struct {
 	parked   []string
 	closed   int
 	prepErr  error
+	// prepErrs, when set, are returned by successive Prepares first.
+	prepErrs []error
+	// endErr is returned by End without force.
+	endErr    error
+	snapshots bool
 	// gate, when set, holds Prepare after its progress lines.
 	gate chan struct{}
 }
@@ -88,18 +93,32 @@ func (f *fakeSource) Prepare(_ context.Context, req sessionctl.Request) (Attache
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.prepared = append(f.prepared, req)
+	if len(f.prepErrs) > 0 {
+		err := f.prepErrs[0]
+		f.prepErrs = f.prepErrs[1:]
+		return nil, err
+	}
 	if f.prepErr != nil {
 		return nil, f.prepErr
 	}
 	return &fakeAttacher{src: f, s: &openshell.Session{Repo: req.Repo, Name: req.Name, Sandbox: "sb-" + req.Repo + "-" + req.Name}}, nil
 }
 
-func (f *fakeSource) End(_ context.Context, repo, name string) (bool, error) {
+func (f *fakeSource) End(_ context.Context, repo, name string, force bool) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.ended = append(f.ended, repo+"/"+name)
+	if f.endErr != nil && !force {
+		return false, f.endErr
+	}
+	if force {
+		f.ended = append(f.ended, repo+"/"+name+" (force)")
+	} else {
+		f.ended = append(f.ended, repo+"/"+name)
+	}
 	return true, nil
 }
+
+func (f *fakeSource) SnapshotsOnEnd() bool { return f.snapshots }
 
 func (f *fakeSource) Park(_ context.Context, repo, name string) (bool, error) {
 	f.mu.Lock()

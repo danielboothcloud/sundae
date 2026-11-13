@@ -294,6 +294,16 @@ jobs:
 #    "infra/*":
 #      profile: claude
 
+# Snapshots of a session's /sandbox in S3, off by default. See "S3 snapshots".
+#snapshots:
+#  s3:
+#    enabled: true
+#    endpoint: ""            # empty for AWS; e.g. http://rook-ceph-rgw-store.rook-ceph.svc:80
+#    region: eu-west-2
+#    bucket: agent-snapshots
+#    credentials_file: /etc/soft-serve/secrets/s3-credentials
+#    "on": [end]
+
 # Notifications about agent sessions, through ntfy. See "Notifications".
 #notifications:
 #  "on": [blocked, done, error]
@@ -649,9 +659,10 @@ repository). Parking needs a compute driver with OpenShell's suspend-resume
 capability; the OpenShell 0.1.8 Kubernetes driver has none. When the gateway
 refuses, Soft Serve logs it once, stops trying for that sandbox until it
 restarts, and `session ls --json` shows why under `unsuspendable`. Set
-`sessions.suspend.enabled: false` to not try at all. After a Soft Serve
-restart a session that was parked before shows no status until it is
-resumed: the status is kept in memory only.
+`sessions.suspend.enabled: false` to not try at all, or
+`sessions.suspend.fallback: snapshot` to park such sessions to S3 instead (see
+"S3 snapshots"). After a Soft Serve restart a session that was parked before
+shows no status until it is resumed: the status is kept in memory only.
 
 **Client TLS secret.** In Kubernetes, mount the gateway's client certificate
 secret, typically `openshell-client-tls`, into the Soft Serve pod and point the
@@ -711,12 +722,147 @@ network_policies:
 osewa needs no egress: the bridge reaches its server over loopback, and Soft
 Serve turns its update checks off.
 
+With S3 snapshots on, the sandbox also needs egress to the S3 endpoint
+(`curl` uploads and downloads the snapshot; see "S3 snapshots"):
+
+```yaml
+network_policies:
+  soft_serve_snapshots:
+    name: soft-serve-snapshots
+    endpoints:
+      - host: rook-ceph-rgw-store.rook-ceph.svc.cluster.local   # or s3.<region>.amazonaws.com, <bucket>.s3.<region>.amazonaws.com
+        port: 80
+        protocol: rest
+        access: read-write
+    binaries:
+      - path: /usr/bin/curl
+```
+
 **Idle timeout.** A bridged session is an ordinary SSH session, so
 `ssh.idle_timeout` (default 600 seconds) still applies. Terminal traffic in
 either direction counts as activity. A connection that sits completely quiet
 for longer than the timeout is disconnected; the program keeps running, and
 `session attach` re-attaches. To avoid the disconnects, raise `idle_timeout`
 or set `0`, or set `ServerAliveInterval` in your SSH client.
+
+#### S3 snapshots
+
+Soft Serve can save a session's `/sandbox` (the checkouts and the sandbox
+user's home) to an S3 bucket and restore it, so `session end` loses nothing
+and an idle session can be parked without a sandbox. It is off by default:
+while `snapshots.s3.enabled` is false nothing runs and nothing in the section
+is checked.
+
+```yaml
+snapshots:
+  s3:
+    enabled: true
+    endpoint: ""                 # empty for AWS S3; the base URL of MinIO, Ceph RGW, ...
+    region: eu-west-2            # required for AWS; defaults to us-east-1 with an endpoint
+    bucket: agent-snapshots      # must exist
+    prefix: soft-serve/sessions  # the default
+    credentials_file: /etc/soft-serve/secrets/s3-credentials
+    sse: ""                      # AES256, aws:kms, or "" for the bucket's default
+    path_style: false            # true for most MinIO and RGW setups
+    "on": [end]                  # add park for a backup before every memory-retaining park
+sessions:
+  suspend:
+    fallback: snapshot           # default none; see "Parking to a snapshot" below
+```
+
+**Credentials.** `credentials_file` is an AWS shared-credentials file
+(`[default]` with `aws_access_key_id`, `aws_secret_access_key` and optionally
+`aws_session_token`; `AWS_ACCESS_KEY_ID=...` lines work too), or a directory
+holding the files `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, which is
+what a Kubernetes Secret with those keys mounts as (a Rook
+ObjectBucketClaim's, for example). It is read for every operation, so
+rotated keys need no restart, and `soft config check` reads it. The keys need
+`s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` and `s3:ListBucket` on the
+prefix. They never enter a sandbox: Soft Serve signs a URL for one object
+(AWS Signature V4, valid for an hour) and the sandbox uses that.
+
+**How a snapshot moves.** The archive never passes through Soft Serve. To
+snapshot, Soft Serve runs `tar | gzip` in the sandbox into a file in
+`/tmp/soft-serve` (outside `/sandbox`), presigns a PUT that signs the
+archive's MD5 and the `sse` header, and the sandbox uploads the file with
+`curl`; then the file is deleted. To restore, the sandbox streams `curl |
+gzip -d | tar -x` into `/sandbox`. The sandbox therefore needs `sh`, `tar`
+(GNU tar for anchored exclusions), `gzip`, `md5sum` and `curl`, which the
+sandbox image in `deploy/sandbox` has, egress to the endpoint (see "Sandbox
+egress"), and free space in `/tmp` for the compressed archive. The archive is
+written to a file first, not streamed, because AWS S3 refuses an upload
+without a length, and so a `tar` that fails half-way never uploads a
+truncated archive.
+
+**One object per session.** A session's snapshot is
+`<prefix>/<user-id>/<sandbox>.tar.gz`, replaced by every snapshot. The upload
+goes straight to that key: S3 only replaces an object once the new upload is
+complete and its MD5 checks out, so a failed upload leaves the previous
+snapshot as it was. One upload carries at most 5 GiB (the AWS S3 and Ceph
+RGW limit for a single PUT): a larger compressed archive fails the snapshot
+with that message, before anything is uploaded. Interrupted uploads leave no
+partial objects. Nothing deletes snapshots; use a bucket lifecycle rule if you
+want old ones gone.
+
+**What is left out.** Everything under `/sandbox` is saved except: osewa's
+runtime (`~/.config/osewa`, `~/.local/state/osewa`, the bridge's client key
+and session id under `~/.config/soft-serve`), which would point at a server
+that no longer exists, and is recreated; the osewa build Soft Serve uploads
+(`~/.local/lib/soft-serve`), uploaded and checksummed again; the XDG cache
+(`~/.cache`); and credentials: `~/.ssh`, `~/.gnupg`, `~/.netrc`,
+`~/.git-credentials`, `~/.aws`, `~/.kube`, `~/.docker/config.json`, and the
+logins of `gh`, `glab`, Claude Code (`~/.claude/.credentials.json`) and Codex
+(`~/.codex/auth.json`). Paths are relative to `/sandbox` only: a checkout's
+own `.cache` or `.ssh` is kept. Soft Serve's git token is never under
+`/sandbox`. Anything else secret you keep in `/sandbox` (an `.env` file in a
+checkout) is in the snapshot: protect the bucket accordingly.
+
+**`session end`.** With `end` in `on`, `/sandbox` is saved before the sandbox
+is deleted (a parked sandbox is resumed for that). If the snapshot fails, the
+session is not ended and the error says why; `session end --force` ends it
+anyway, without a snapshot. In the TUI, ending asks again: `The snapshot
+failed. End … without one?`.
+
+**`session start`.** When a start creates the sandbox and the session has a
+snapshot, `/sandbox` is restored before the clone check, so the restored
+checkout is used rather than cloned again: `Restoring /sandbox from the
+snapshot of 2026-11-12 10:41 UTC, 312 MiB...`. A sandbox that already exists
+is never restored into. `--fresh` starts from a fresh clone instead (the
+snapshot stays until the next one replaces it). If the restore fails, the new
+sandbox is deleted again and the start fails, so the next start tries again
+from scratch; no half-restored session is left. The snapshot wins over what
+the image put in the new `/sandbox` (shell start-up files) without asking. If
+the new sandbox already holds work, Soft Serve's own state or the checkout,
+which a new sandbox only does when a volume outlived its sandbox, the start
+asks first: `Restore the snapshot over them? [y/N]` (files the snapshot has
+replace those in the sandbox; files only in the sandbox are kept). Without a
+terminal it fails and says to run `session start --restore` (yes) or
+`--fresh` (keep them); the TUI asks the same in its confirm line.
+
+**Parking to a snapshot.** With `sessions.suspend.fallback: snapshot`, a
+session the gateway cannot suspend (the OpenShell 0.1.8 Kubernetes driver
+cannot) is parked by saving `/sandbox` and deleting the sandbox, automatically
+when idle or with `session park`. Its program is stopped: whatever it held
+in memory is lost. `session ls` shows it as `parked (snapshot)` (phase
+`Snapshot`, `"park": "snapshot"` in `--json`) with `program stopped by the
+snapshot park; attach restarts it`, distinct from a memory-retaining
+`parked`. The session's record while it has no sandbox is a small object next
+to its snapshot, `<prefix>/<user-id>/<sandbox>.parked.json` (repository,
+session, profile, image and its last status): Soft Serve keeps no session
+state of its own, and the sandbox that would carry it is gone. `session
+start`, `attach` and `resume` create the sandbox again from the same image,
+restore `/sandbox`, delete that object and start the program, with the usual
+notice: `Started claude again: it was not running when the session resumed
+(the session was parked to a snapshot of /sandbox, which keeps files but not
+running programs)`. `session end` of such a session deletes the object and
+keeps the snapshot. If the snapshot fails, the sandbox is left running and
+the park is not tried again for another `sessions.suspend.after`.
+
+**Events.** Snapshots and restores are lifecycle events in `session signals`,
+the TUI's Signals pane and notifications: `snapshotted` (`op` `end` or
+`park`, with the size), `restored`, `parked` with `snapshot: true`, and
+`failed` with `op` `snapshot` or `restore`, which the `session_failed`
+notification trigger covers.
 
 #### Notifications
 

@@ -175,6 +175,11 @@ config:
       # none, and Soft Serve then leaves sandboxes running (logged once).
       enabled: true
       after: 30m
+      # Where the gateway cannot suspend (the 0.1.8 Kubernetes driver):
+      # "none" leaves the sandbox running; "snapshot" saves /sandbox to S3
+      # (config.snapshots.s3 must be enabled) and deletes the sandbox, which
+      # stops the session's program until the next start or attach.
+      fallback: none
     signals:
       # How many signals (session status changes and lifecycle events) to
       # keep for `session signals` and the TUI, across all users. In memory
@@ -235,6 +240,33 @@ config:
       # placeholders {repo}, {session}, {sandbox} and {user}.
       click_url: ""
 
+  # Snapshots of a session's /sandbox in an S3 bucket (AWS S3, or MinIO,
+  # Ceph RGW and other S3-compatible stores). Off by default; while
+  # s3.enabled is false nothing here is checked. Semantics in the top-level
+  # README, "S3 snapshots". The sandboxes upload and download the snapshot
+  # themselves through presigned URLs: the sandbox network policy must allow
+  # the endpoint, and Soft Serve needs egress to it too.
+  snapshots:
+    s3:
+      enabled: false
+      # Empty for AWS S3; e.g. http://rook-ceph-rgw-store.rook-ceph.svc:80
+      # for Ceph RGW.
+      endpoint: ""
+      # Required for AWS; defaults to us-east-1 with an endpoint.
+      region: ""
+      bucket: ""
+      prefix: "soft-serve/sessions"
+      # Leave empty to have the chart point it at the mounted
+      # snapshots.s3Credentials secret. Never put keys here.
+      credentials_file: ""
+      # "AES256", "aws:kms" or "" (the bucket's default encryption).
+      sse: ""
+      # Most MinIO and Ceph RGW deployments need path-style addressing.
+      path_style: false
+      # Keep the key quoted (see notifications). "end", and "park" for a
+      # backup before every memory-retaining park.
+      "on": ["end"]
+
   # Leave empty; use the top-level initialAdminKeys instead.
   initial_admin_keys: []
 
@@ -275,6 +307,25 @@ notifications:
     secretName: ""
     key: token
     mountPath: /etc/soft-serve-ntfy
+
+# Chart-side wiring for config.snapshots. Only used when
+# config.snapshots.s3.enabled is true.
+snapshots:
+  # The S3 access key, from an existing Secret in this namespace. When
+  # secretName is set the Secret is mounted read-only at mountPath and
+  # config.snapshots.s3.credentials_file points at it:
+  #   - with `key` set, at <mountPath>/<key>, a file in the AWS
+  #     shared-credentials format ([default] aws_access_key_id = ...,
+  #     aws_secret_access_key = ...);
+  #   - with `key` empty, at the directory itself, which must hold the keys
+  #     AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY: the Secret a Rook
+  #     ObjectBucketClaim creates can be used as it is.
+  # The directory is mounted rather than a subPath, so a rotated Secret
+  # reaches the pod; Soft Serve reads the keys again for every operation.
+  s3Credentials:
+    secretName: ""
+    key: credentials
+    mountPath: /etc/soft-serve-s3
 
 # Extra existing Secrets mounted read-only as files, for anything the config
 # refers to by path (http.tls_key_path, ssh.key_path, ...).

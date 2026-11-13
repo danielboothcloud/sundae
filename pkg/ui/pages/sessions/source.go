@@ -52,8 +52,12 @@ type Source interface {
 	// on the session until it is closed.
 	Prepare(ctx context.Context, req sessionctl.Request) (Attacher, error)
 	// End ends a session, deleting its sandbox. It reports whether there
-	// was one.
-	End(ctx context.Context, repo, name string) (bool, error)
+	// was one. When the session's S3 snapshot fails it is not ended
+	// (openshell.ErrSnapshotFailed), unless force is set.
+	End(ctx context.Context, repo, name string, force bool) (bool, error)
+	// SnapshotsOnEnd reports whether ending a session saves /sandbox to
+	// S3 first.
+	SnapshotsOnEnd() bool
 	// Park parks a running session. It reports whether it parked it.
 	Park(ctx context.Context, repo, name string) (bool, error)
 	// AttachCommand is the command that attaches to the session from a
@@ -219,13 +223,16 @@ func (s *source) Prepare(ctx context.Context, req sessionctl.Request) (Attacher,
 	return &attacher{Prepared: p, client: client}, nil
 }
 
-func (s *source) End(ctx context.Context, repo, name string) (existed bool, err error) {
+func (s *source) End(ctx context.Context, repo, name string, force bool) (existed bool, err error) {
 	err = s.withClient(func(mgr *openshell.Manager) error {
-		existed, err = mgr.End(ctx, s.user, repo, name)
+		res, err := mgr.EndSession(ctx, s.user, repo, name, openshell.EndOptions{Force: force})
+		existed = res.Existed
 		return err //nolint:wrapcheck
 	})
 	return existed, err
 }
+
+func (s *source) SnapshotsOnEnd() bool { return s.cfg.Snapshots.S3.Snapshots(config.SnapshotOnEnd) }
 
 func (s *source) Park(ctx context.Context, repo, name string) (parked bool, err error) {
 	err = s.withClient(func(mgr *openshell.Manager) error {

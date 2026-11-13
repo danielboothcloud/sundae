@@ -64,3 +64,22 @@ func TestRowWords(t *testing.T) {
 		t.Errorf("Label() = %q", got)
 	}
 }
+
+func TestRowParkedToSnapshot(t *testing.T) {
+	memory := Row{Info: openshell.Info{Phase: "Suspended"}}
+	if !memory.Parked() || memory.ParkedToSnapshot() || memory.Note() != "" || memory.Words() != "none · parked" {
+		t.Fatalf("memory park: %v %v %q %q", memory.Parked(), memory.ParkedToSnapshot(), memory.Note(), memory.Words())
+	}
+	snap := Row{
+		Info:   openshell.Info{Phase: openshell.PhaseSnapshot, Snapshot: &openshell.ParkedSnapshot{}},
+		Status: &openshell.SessionStatus{Record: events.Record{State: events.StateIdle}},
+	}
+	if !snap.Parked() || !snap.ParkedToSnapshot() || snap.Words() != "idle · parked (snapshot)" ||
+		snap.Note() != "program stopped by the snapshot park; attach restarts it" || snap.Label() != "○ idle · parked (snapshot)" {
+		t.Fatalf("snapshot park: %v %v %q %q", snap.Parked(), snap.ParkedToSnapshot(), snap.Note(), snap.Words())
+	}
+	running := Row{Info: openshell.Info{Phase: "Ready"}}
+	if running.Parked() || running.Note() != "" {
+		t.Fatal("running row parked")
+	}
+}

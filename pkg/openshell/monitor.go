@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"strconv"
 	"strings"
@@ -131,6 +132,11 @@ type Monitor struct {
 	timeout     time.Duration
 	concurrency int
 	suspend     config.SessionSuspendConfig
+	// snaps is the S3 snapshot store; nil when snapshots are off.
+	snaps *snapshotStore
+	// fallback parks sessions the gateway cannot suspend to their S3
+	// snapshot (sessions.suspend.fallback: snapshot).
+	fallback bool
 
 	mu      sync.Mutex
 	entries map[string]*entry
@@ -177,6 +183,8 @@ func NewMonitor(newClient func() (Client, error), cfg *config.Config, opts ...Mo
 		timeout:       DefaultPollTimeout,
 		concurrency:   DefaultPollConcurrency,
 		suspend:       cfg.Sessions.Suspend,
+		snaps:         newSnapshotStore(cfg),
+		fallback:      cfg.SnapshotFallback(),
 		entries:       map[string]*entry{},
 		bridges:       map[string]int{},
 		parking:       map[string]chan struct{}{},
@@ -295,19 +303,35 @@ func isParkedPhase(p v1.SandboxPhase) bool {
 const (
 	WordParked   = "parked"
 	WordStarting = "starting"
+	// WordParkedSnapshot is a session parked to its S3 snapshot: it has no
+	// sandbox, and its program was stopped.
+	WordParkedSnapshot = "parked (snapshot)"
 )
+
+// PhaseSnapshot is the phase Soft Serve shows for a session parked to its
+// S3 snapshot. It is not a sandbox phase: the session has no sandbox.
+const PhaseSnapshot = "Snapshot"
 
 // PhaseWord returns the lifecycle word shown after a session's state for a
 // sandbox phase: WordParked for a suspended (or suspending) sandbox,
-// WordStarting for one being provisioned or started, else "".
+// WordParkedSnapshot for PhaseSnapshot, WordStarting for one being
+// provisioned or started, else "".
 func PhaseWord(phase string) string {
 	switch v1.SandboxPhase(phase) {
 	case v1.SandboxSuspended, v1.SandboxSuspending:
 		return WordParked
 	case v1.SandboxProvisioning, v1.SandboxStarting:
 		return WordStarting
+	case PhaseSnapshot:
+		return WordParkedSnapshot
 	}
 	return ""
+}
+
+// IsParkedWord reports whether a lifecycle word is a park: WordParked or
+// WordParkedSnapshot.
+func IsParkedWord(word string) bool {
+	return word == WordParked || word == WordParkedSnapshot
 }
 
 // reconcile brings the entries in line with a listing and returns the
@@ -546,12 +570,12 @@ func (m *Monitor) observe(sandbox, id string, ls osewaList, pollErr error) {
 // shell running a long build is not frozen mid-build. A program that has
 // exited, or whose osewa session is gone, runs nothing: it is parked like an
 // idle one, and the next start or attach starts it again either way.
-func parkable(e *entry, bridges int, now time.Time, after time.Duration) (bool, string) {
+func parkable(e *entry, bridges int, now time.Time, after time.Duration, fallback bool) (bool, string) {
 	st := e.st
 	switch {
 	case st.Phase != string(v1.SandboxReady):
 		return false, "the sandbox is " + st.Phase
-	case st.Unsuspendable != "":
+	case st.Unsuspendable != "" && !fallback:
 		return false, "the gateway cannot suspend it"
 	case bridges > 0:
 		return false, "a bridge is open"
@@ -578,10 +602,10 @@ func (m *Monitor) parkIdle(ctx context.Context) {
 		if _, busy := m.parking[name]; busy {
 			continue
 		}
-		if _, no := m.unsuspendable[name]; no {
+		if _, no := m.unsuspendable[name]; no && !m.fallback {
 			continue
 		}
-		if ok, _ := parkable(e, m.bridges[name], now, m.suspend.After); ok {
+		if ok, _ := parkable(e, m.bridges[name], now, m.suspend.After, m.fallback); ok {
 			due = append(due, name)
 		}
 	}
@@ -614,7 +638,7 @@ func (m *Monitor) autoPark(ctx context.Context, sandbox string) {
 
 	ctx, cancel := context.WithTimeout(ctx, parkTimeout)
 	defer cancel()
-	err = m.park(ctx, client, sandbox, true)
+	snapshot, err := m.park(ctx, client, sandbox, true)
 	switch {
 	case err == nil:
 		m.mu.Lock()
@@ -628,16 +652,28 @@ func (m *Monitor) autoPark(ctx context.Context, sandbox string) {
 		m.mu.Unlock()
 		if userID != 0 {
 			m.bus.Publish(events.SessionLifecycleEvent(userID, events.SessionLifecycle{
-				Session: sess,
-				Step:    events.LifecycleParked,
-				Op:      ParkAuto,
+				Session:  sess,
+				Step:     events.LifecycleParked,
+				Op:       ParkAuto,
+				Snapshot: snapshot,
 			}))
 		}
-		m.logger.Info("parked idle session", "sandbox", sandbox, "after", m.suspend.After)
+		if snapshot {
+			m.logger.Info("parked idle session to an S3 snapshot and deleted its sandbox", "sandbox", sandbox, "after", m.suspend.After)
+		} else {
+			m.logger.Info("parked idle session", "sandbox", sandbox, "after", m.suspend.After)
+		}
 	case errors.Is(err, errNotDue), errors.Is(err, ErrBridgeOpen), errors.Is(err, ErrParkInProgress):
 	case IsSuspendUnsupported(err):
 		// Logged by park.
 	default:
+		if m.fallback {
+			// Not again until the session has been idle for another
+			// `after`.
+			m.mu.Lock()
+			m.touch(sandbox)
+			m.mu.Unlock()
+		}
 		m.logger.Warn("cannot park session", "sandbox", sandbox, "err", err)
 	}
 }
@@ -645,33 +681,47 @@ func (m *Monitor) autoPark(ctx context.Context, sandbox string) {
 // errNotDue is returned by park when an automatic park is no longer due.
 var errNotDue = errors.New("not due")
 
-// park suspends the sandbox unless a bridge is open on it, it is being
-// parked already, or the gateway has refused to suspend it before. auto
-// parks re-check that the session is still due. Commands that open a bridge
-// meanwhile wait for the park to finish (see OpenBridge), then resume it.
-func (m *Monitor) park(ctx context.Context, client Client, sandbox string, auto bool) error {
+// park parks the sandbox unless a bridge is open on it, it is being parked
+// already, or the gateway has refused to suspend it before (and there is
+// no snapshot fallback). auto parks re-check that the session is still
+// due. Commands that open a bridge meanwhile wait for the park to finish
+// (see OpenBridge), then resume it.
+//
+// It suspends the sandbox, after a backup snapshot when snapshots.s3.on
+// includes park. Where the gateway cannot suspend and
+// sessions.suspend.fallback is snapshot, it parks the session to its S3
+// snapshot instead (see parkToSnapshot), and reports snapshot.
+func (m *Monitor) park(ctx context.Context, client Client, sandbox string, auto bool) (snapshot bool, err error) {
 	m.mu.Lock()
 	if m.bridges[sandbox] > 0 {
 		m.mu.Unlock()
-		return ErrBridgeOpen
+		return false, ErrBridgeOpen
 	}
 	if _, busy := m.parking[sandbox]; busy {
 		m.mu.Unlock()
-		return ErrParkInProgress
+		return false, ErrParkInProgress
 	}
-	if reason, no := m.unsuspendable[sandbox]; no {
+	reason, unsupported := m.unsuspendable[sandbox]
+	if unsupported && !m.fallback {
 		m.mu.Unlock()
-		return fmt.Errorf("%w: %s", ErrSuspendUnsupported, reason)
+		return false, fmt.Errorf("%w: %s", ErrSuspendUnsupported, reason)
+	}
+	// The gateway has one compute driver: once it refused one sandbox,
+	// the fallback does not ask again for the next.
+	unsupported = unsupported || (m.fallback && m.warnedUnsupported)
+	var rec events.Record
+	if e := m.entries[sandbox]; e != nil {
+		rec = e.st.Record
 	}
 	if auto {
 		e := m.entries[sandbox]
 		if e == nil {
 			m.mu.Unlock()
-			return errNotDue
+			return false, errNotDue
 		}
-		if ok, _ := parkable(e, 0, m.now(), m.suspend.After); !ok {
+		if ok, _ := parkable(e, 0, m.now(), m.suspend.After, m.fallback); !ok {
 			m.mu.Unlock()
-			return errNotDue
+			return false, errNotDue
 		}
 	}
 	done := make(chan struct{})
@@ -684,21 +734,146 @@ func (m *Monitor) park(ctx context.Context, client Client, sandbox string, auto 
 		close(done)
 	}()
 
-	sb, err := client.SuspendSandbox(ctx, sandbox)
+	if m.snaps != nil {
+		unlock, err := sandboxLocks.Lock(ctx, sandbox)
+		if err != nil {
+			return false, err
+		}
+		defer unlock()
+	}
+
+	op := ParkManual
+	if auto {
+		op = ParkAuto
+	}
+	if !unsupported {
+		var backup *SnapshotInfo
+		if m.snaps.onPark() {
+			backup = m.backup(ctx, client, sandbox)
+		}
+		sb, err := client.SuspendSandbox(ctx, sandbox)
+		switch {
+		case err == nil:
+			m.mu.Lock()
+			if e := m.entries[sandbox]; e != nil {
+				e.st.Phase = string(v1.SandboxSuspended)
+				if sb != nil && sb.Status.Phase != "" {
+					e.st.Phase = string(sb.Status.Phase)
+				}
+				e.st.Parked = true
+			}
+			m.mu.Unlock()
+			return false, nil
+		case !IsSuspendUnsupported(err):
+			return false, err
+		}
+		m.markUnsuspendable(sandbox, err)
+		if !m.fallback {
+			return false, err
+		}
+		if err := m.parkToSnapshot(ctx, client, sandbox, op, rec, backup); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	if err := m.parkToSnapshot(ctx, client, sandbox, op, rec, nil); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// backup takes the snapshot snapshots.s3.on: [park] asks for before a
+// memory-retaining park. A failure is published and logged; the park goes
+// on.
+func (m *Monitor) backup(ctx context.Context, client Client, sandbox string) *SnapshotInfo {
+	sb, err := client.GetSandbox(ctx, sandbox)
 	if err != nil {
-		if IsSuspendUnsupported(err) {
-			m.markUnsuspendable(sandbox, err)
+		m.logger.Warn("cannot snapshot session before parking it", "sandbox", sandbox, "err", err)
+		return nil
+	}
+	userID, ok := managedSandbox(sb)
+	if !ok {
+		return nil
+	}
+	sess := sessionOf(sb)
+	info, err := m.snaps.take(ctx, client, userID, sess, io.Discard)
+	if err != nil {
+		m.logger.Warn("cannot snapshot session before parking it", "sandbox", sandbox, "err", err)
+		m.bus.Publish(events.SessionLifecycleEvent(userID, events.SessionLifecycle{
+			Session: sess, Step: events.LifecycleFailed, Op: "snapshot", Reason: err.Error(),
+		}))
+		return nil
+	}
+	m.bus.Publish(events.SessionLifecycleEvent(userID, events.SessionLifecycle{
+		Session: sess, Step: events.LifecycleSnapshotted, Op: "park", Bytes: info.Size,
+	}))
+	return info
+}
+
+// parkToSnapshot parks a session the gateway cannot suspend: it snapshots
+// /sandbox (unless taken is a snapshot taken a moment ago), records the
+// session as parked next to the snapshot (ParkedSnapshot), and deletes the
+// sandbox. The session's program is stopped; start and attach recreate the
+// sandbox, restore /sandbox and start the program again. The marker is the
+// session's only record while it has no sandbox, which is why it is written
+// before the sandbox is deleted, and removed again if the delete fails.
+func (m *Monitor) parkToSnapshot(ctx context.Context, client Client, sandbox, op string, rec events.Record, taken *SnapshotInfo) error {
+	sb, err := client.GetSandbox(ctx, sandbox)
+	if err != nil {
+		return fmt.Errorf("openshell: get sandbox %q: %w", sandbox, err)
+	}
+	userID, ok := managedSandbox(sb)
+	if !ok {
+		return fmt.Errorf("openshell: sandbox %q was not created by Soft Serve; not parking it", sandbox)
+	}
+	if sb.Status.Phase != v1.SandboxReady {
+		return fmt.Errorf("openshell: sandbox %q is %s; only a running session can be parked", sandbox, sb.Status.Phase)
+	}
+	sess := sessionOf(sb)
+	info := taken
+	if info == nil {
+		info, err = m.snaps.take(ctx, client, userID, sess, io.Discard)
+		if err != nil {
+			m.bus.Publish(events.SessionLifecycleEvent(userID, events.SessionLifecycle{
+				Session: sess, Step: events.LifecycleFailed, Op: "snapshot", Reason: err.Error(),
+			}))
+			return fmt.Errorf("openshell: park session to a snapshot: %w", err)
+		}
+		m.bus.Publish(events.SessionLifecycleEvent(userID, events.SessionLifecycle{
+			Session: sess, Step: events.LifecycleSnapshotted, Op: "park", Bytes: info.Size,
+		}))
+	}
+
+	marker := ParkedSnapshot{
+		UserID:  userID,
+		User:    sess.User,
+		Repo:    sess.Repo,
+		Session: sess.Name,
+		Sandbox: sandbox,
+		Profile: sb.Annotations[AnnotationProfile],
+		Parked:  m.now().UTC(),
+		Op:      op,
+		Record:  rec,
+		Size:    info.Size,
+	}
+	if sb.Spec.Template != nil {
+		marker.Image = sb.Spec.Template.Image
+	}
+	if err := m.snaps.writeMarker(ctx, marker); err != nil {
+		return fmt.Errorf("openshell: record the session as parked: %w", err)
+	}
+	if err := client.DeleteSandbox(ctx, sandbox); err != nil {
+		if derr := m.snaps.deleteMarker(context.WithoutCancel(ctx), userID, sandbox); derr != nil {
+			m.logger.Warn("cannot clear a parked marker", "sandbox", sandbox, "err", derr)
 		}
 		return err
 	}
 
 	m.mu.Lock()
 	if e := m.entries[sandbox]; e != nil {
-		e.st.Phase = string(v1.SandboxSuspended)
-		if sb != nil && sb.Status.Phase != "" {
-			e.st.Phase = string(sb.Status.Phase)
-		}
+		e.st.Phase = PhaseSnapshot
 		e.st.Parked = true
+		e.st.Running = false
 	}
 	m.mu.Unlock()
 	return nil
@@ -723,9 +898,17 @@ func (m *Monitor) markUnsuspendable(sandbox string, err error) {
 // Park parks a session for the user's `session park`: see park. It is the
 // caller's job to check ownership and publish.
 func (m *Monitor) Park(ctx context.Context, client Client, sandbox string) error {
+	_, err := m.ParkSession(ctx, client, sandbox)
+	return err
+}
+
+// ParkSession is Park, reporting whether the session was parked to its S3
+// snapshot (its sandbox deleted, its program stopped) rather than
+// suspended. A nil Monitor only suspends.
+func (m *Monitor) ParkSession(ctx context.Context, client Client, sandbox string) (snapshot bool, err error) {
 	if m == nil {
 		_, err := client.SuspendSandbox(ctx, sandbox)
-		return err //nolint:wrapcheck
+		return false, err //nolint:wrapcheck
 	}
 	return m.park(ctx, client, sandbox, false)
 }

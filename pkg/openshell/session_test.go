@@ -163,6 +163,8 @@ type fakeExec struct {
 	arch string
 	// probeExit makes the probe fail.
 	probeExit int
+	// snap configures the snapshot scripts (see snapshot_test.go).
+	snap fakeSnapshotKnobs
 }
 
 func newFakeExec() *fakeExec {
@@ -355,6 +357,8 @@ func (f *fakeExec) Run(_ context.Context, _, sandbox string, command []string, o
 		if !found {
 			b.includes = append(b.includes, a[1])
 		}
+	case snapshotPackName, snapshotUploadName, snapshotRestoreName, snapshotProbeName:
+		return f.snapshotScript(b, call)
 	default:
 		return nil, fmt.Errorf("fakeExec: unexpected script %q", call.script())
 	}

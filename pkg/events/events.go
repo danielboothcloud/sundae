@@ -18,7 +18,8 @@ const (
 	// is set.
 	KindSessionStatus Kind = "session.status"
 	// KindSessionLifecycle is a session lifecycle step: created, ready,
-	// resumed, parked, exited, ended or failed. Lifecycle is set.
+	// resumed, parked, exited, ended, failed, snapshotted or restored.
+	// Lifecycle is set.
 	KindSessionLifecycle Kind = "session.lifecycle"
 	// KindForge is the outcome of a forge operation. Forge is set.
 	KindForge Kind = "forge"
@@ -214,15 +215,32 @@ const (
 	// LifecycleFailed: starting or ending the session failed. Reason says
 	// why.
 	LifecycleFailed Lifecycle = "failed"
+	// LifecycleSnapshotted: /sandbox was saved to the S3 snapshot store.
+	// Op says why: "end" (before session end deleted the sandbox) or
+	// "park" (before a park). Bytes is the snapshot's size.
+	LifecycleSnapshotted Lifecycle = "snapshotted"
+	// LifecycleRestored: /sandbox of a newly created sandbox was restored
+	// from the session's S3 snapshot. Op is the command ("start",
+	// "attach"). Bytes is the snapshot's size.
+	LifecycleRestored Lifecycle = "restored"
 )
 
 // SessionLifecycle is a lifecycle step of a session.
 type SessionLifecycle struct {
 	Session Session   `json:"session"`
 	Step    Lifecycle `json:"step"`
-	// Op is the operation that failed ("start", "end"); set for
-	// LifecycleFailed. For LifecycleParked it says who parked the session.
+	// Op is the operation that failed ("start", "end", "snapshot",
+	// "restore"); set for LifecycleFailed. For LifecycleParked it says who
+	// parked the session; for LifecycleSnapshotted and LifecycleRestored,
+	// why the snapshot was taken or restored.
 	Op string `json:"op,omitempty"`
+	// Snapshot is set for LifecycleParked when the session was parked by
+	// snapshotting /sandbox to S3 and deleting its sandbox: its program
+	// was stopped, and the next start or attach starts it again.
+	Snapshot bool `json:"snapshot,omitempty"`
+	// Bytes is the size of the snapshot; set for LifecycleSnapshotted and
+	// LifecycleRestored.
+	Bytes int64 `json:"bytes,omitempty"`
 	// Reason says why a step failed. It may quote command output.
 	Reason string `json:"reason,omitempty"`
 	// ExitCode is the program's exit status; set for LifecycleExited.

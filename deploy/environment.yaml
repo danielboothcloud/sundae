@@ -138,4 +138,28 @@ softServe:
   #         suspend:
   #           enabled: true
   #           after: 30m
+  #
+  # S3 snapshots of each session's /sandbox, off by default (top-level README,
+  # "S3 snapshots"). The access key comes from a Secret in `namespace`; with
+  # `key: ""` the Secret is mounted as a directory holding AWS_ACCESS_KEY_ID
+  # and AWS_SECRET_ACCESS_KEY, which is what a Rook ObjectBucketClaim creates.
+  # The sandbox network policy must let curl reach the endpoint. With
+  # fallback: snapshot, idle sessions the gateway cannot suspend are parked
+  # to S3 (their sandbox deleted, their program stopped):
+  #   chartValues:
+  #     snapshots:
+  #       s3Credentials:
+  #         secretName: soft-serve-snapshots   # the ObjectBucketClaim's name
+  #         key: ""
+  #     config:
+  #       snapshots:
+  #         s3:
+  #           enabled: true
+  #           endpoint: http://rook-ceph-rgw-store.rook-ceph.svc:80
+  #           bucket: soft-serve-snapshots-<generated>   # the OBC's BUCKET_NAME
+  #           path_style: true
+  #           "on": [end]
+  #       sessions:
+  #         suspend:
+  #           fallback: snapshot
   chartValues: {}

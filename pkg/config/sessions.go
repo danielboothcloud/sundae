@@ -107,6 +107,28 @@ type SessionSuspendConfig struct {
 	// After is how long a session must have had nobody attached and no
 	// working status before it is parked. 0 means DefaultSuspendAfter.
 	After time.Duration `env:"AFTER" yaml:"after"`
+
+	// Fallback is what parking does where the gateway cannot suspend:
+	// SuspendFallbackNone leaves the sandbox running;
+	// SuspendFallbackSnapshot snapshots /sandbox to S3 (snapshots.s3 must
+	// be enabled) and deletes the sandbox, which stops the session's
+	// program; start and attach then recreate the sandbox and restore it.
+	Fallback string `env:"FALLBACK" yaml:"fallback"`
+}
+
+// Values of sessions.suspend.fallback.
+const (
+	// SuspendFallbackNone leaves a sandbox the gateway cannot suspend
+	// running. The default.
+	SuspendFallbackNone = "none"
+	// SuspendFallbackSnapshot parks a sandbox the gateway cannot suspend
+	// by snapshotting /sandbox to S3 and deleting the sandbox.
+	SuspendFallbackSnapshot = "snapshot"
+)
+
+// SnapshotFallback reports whether parking falls back to an S3 snapshot.
+func (c *Config) SnapshotFallback() bool {
+	return c.Sessions.Suspend.Fallback == SuspendFallbackSnapshot && c.Snapshots.S3.Enabled
 }
 
 // SessionSignalsConfig configures the signals feed.
@@ -210,6 +232,19 @@ func (c *Config) validateSessions() error {
 		fail("suspend.after %s must not be shorter than status.poll_interval %s", sc.Suspend.After, sc.Status.PollInterval)
 	}
 
+	sc.Suspend.Fallback = strings.ToLower(strings.TrimSpace(sc.Suspend.Fallback))
+	switch sc.Suspend.Fallback {
+	case "":
+		sc.Suspend.Fallback = SuspendFallbackNone
+	case SuspendFallbackNone:
+	case SuspendFallbackSnapshot:
+		if !c.Snapshots.S3.Enabled {
+			fail("suspend.fallback %q needs snapshots.s3.enabled: true", SuspendFallbackSnapshot)
+		}
+	default:
+		fail("suspend.fallback %q must be %s or %s", sc.Suspend.Fallback, SuspendFallbackNone, SuspendFallbackSnapshot)
+	}
+
 	switch {
 	case sc.Signals.Keep == 0:
 		sc.Signals.Keep = DefaultSignalsKeep
@@ -275,6 +310,7 @@ func (c *Config) sessionsEnviron() []string {
 		"SOFT_SERVE_SESSIONS_STATUS_POLL_INTERVAL=" + c.Sessions.Status.PollInterval.String(),
 		fmt.Sprintf("SOFT_SERVE_SESSIONS_SUSPEND_ENABLED=%t", c.Sessions.Suspend.Enabled),
 		"SOFT_SERVE_SESSIONS_SUSPEND_AFTER=" + c.Sessions.Suspend.After.String(),
+		"SOFT_SERVE_SESSIONS_SUSPEND_FALLBACK=" + c.Sessions.Suspend.Fallback,
 		fmt.Sprintf("SOFT_SERVE_SESSIONS_SIGNALS_KEEP=%d", c.Sessions.Signals.Keep),
 	}
 }

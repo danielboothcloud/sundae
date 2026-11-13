@@ -120,6 +120,32 @@ The path of the mounted ntfy token file.
 {{- end }}
 
 {{/*
+Whether the S3 snapshot credentials secret is mounted.
+*/}}
+{{- define "soft-serve.s3CredentialsMounted" -}}
+{{- $snap := .Values.config.snapshots | default dict -}}
+{{- $s3 := get $snap "s3" | default dict -}}
+{{- $creds := (.Values.snapshots | default dict).s3Credentials | default dict -}}
+{{- if and (get $s3 "enabled") $creds.secretName -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
+The path config.snapshots.s3.credentials_file points at: the key's file, or
+the mount directory when no key is set.
+*/}}
+{{- define "soft-serve.s3CredentialsPath" -}}
+{{- $creds := .Values.snapshots.s3Credentials -}}
+{{- $dir := $creds.mountPath | trimSuffix "/" -}}
+{{- if $creds.key -}}
+{{- printf "%s/%s" $dir $creds.key -}}
+{{- else -}}
+{{- $dir -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 The Soft Serve config file: .Values.config, plus
   - initial_admin_keys merged with .Values.initialAdminKeys;
   - when OpenShell is enabled and the client TLS secret is mounted, any empty
@@ -127,7 +153,9 @@ The Soft Serve config file: .Values.config, plus
   - when OpenShell is enabled and the gateway token secret is mounted, an
     empty openshell.token_file pointed at the mounted key;
   - when ntfy notifications are enabled and the ntfy token secret is mounted,
-    an empty notifications.ntfy.token_file pointed at the mounted key.
+    an empty notifications.ntfy.token_file pointed at the mounted key;
+  - when S3 snapshots are enabled and their credentials secret is mounted,
+    an empty snapshots.s3.credentials_file pointed at it.
 Refuses to render secret material or an OpenShell section Soft Serve itself
 would reject at startup.
 */}}
@@ -190,6 +218,30 @@ would reject at startup.
 {{- end -}}
 {{- $_ := set $notif "ntfy" $ntfy -}}
 {{- $_ := set $cfg "notifications" $notif -}}
+{{- end -}}
+
+{{- $snap := get $cfg "snapshots" | default dict -}}
+{{- $s3 := get $snap "s3" | default dict -}}
+{{- if hasKey $s3 "true" -}}
+{{- fail "config.snapshots.s3 has a key `true`: Helm reads a bare `on:` as true. Quote the key: \"on\": [end]" -}}
+{{- end -}}
+{{- range $k := list "access_key_id" "secret_access_key" "aws_access_key_id" "aws_secret_access_key" -}}
+{{- if hasKey $s3 $k -}}
+{{- fail (printf "config.snapshots.s3.%s must not be set: the config is rendered into a ConfigMap. Put the keys in a Secret and set snapshots.s3Credentials.secretName; the chart mounts it and sets config.snapshots.s3.credentials_file." $k) -}}
+{{- end -}}
+{{- end -}}
+{{- if get $s3 "enabled" -}}
+{{- if not (get $s3 "bucket") -}}
+{{- fail "config.snapshots.s3.bucket is required when config.snapshots.s3.enabled is true" -}}
+{{- end -}}
+{{- if and (include "soft-serve.s3CredentialsMounted" .) (not (get $s3 "credentials_file")) -}}
+{{- $_ := set $s3 "credentials_file" (include "soft-serve.s3CredentialsPath" .) -}}
+{{- end -}}
+{{- if not (get $s3 "credentials_file") -}}
+{{- fail "config.snapshots.s3.credentials_file is required when config.snapshots.s3.enabled is true: set snapshots.s3Credentials.secretName to mount the keys from a Secret" -}}
+{{- end -}}
+{{- $_ := set $snap "s3" $s3 -}}
+{{- $_ := set $cfg "snapshots" $snap -}}
 {{- end -}}
 
 {{- toYaml $cfg -}}

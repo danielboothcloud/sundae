@@ -7,6 +7,7 @@ import (
 	"unicode"
 
 	"github.com/charmbracelet/soft-serve/pkg/events"
+	"github.com/dustin/go-humanize"
 )
 
 // The status vocabulary shared by `session ls`, `session signals` and the
@@ -146,7 +147,11 @@ func (s Signal) Label() string {
 			}
 			return label
 		}
-		return s.Last.Glyph() + " " + s.Last.Word() + " · " + Sanitize(string(l.Step), 16)
+		step := Sanitize(string(l.Step), 16)
+		if l.Step == events.LifecycleParked && l.Snapshot {
+			step += " (snapshot)"
+		}
+		return s.Last.Glyph() + " " + s.Last.Word() + " · " + step
 	}
 	return events.StateNone.Glyph() + " " + events.StateNone.Word()
 }
@@ -209,13 +214,37 @@ func lifecycleMessage(l events.SessionLifecycle) string {
 		return "ready to attach"
 	case events.LifecycleParked:
 		// openshell.ParkAuto and openshell.ParkManual.
+		var m string
 		switch l.Op {
 		case "auto":
-			return "parked while idle"
+			m = "parked while idle"
 		case "park":
-			return "parked by session park"
+			m = "parked by session park"
+		default:
+			m = "parked"
 		}
-		return "parked"
+		if l.Snapshot {
+			m += " to an S3 snapshot: the sandbox was deleted and the program stopped; attach restarts it"
+		}
+		return m
+	case events.LifecycleSnapshotted:
+		m := "/sandbox saved to S3"
+		switch l.Op {
+		case "end":
+			m += " before the session ended"
+		case "park":
+			m += " before the session was parked"
+		}
+		if l.Bytes > 0 {
+			m += " (" + humanize.IBytes(uint64(l.Bytes)) + ")"
+		}
+		return m
+	case events.LifecycleRestored:
+		m := "/sandbox restored from its S3 snapshot"
+		if l.Bytes > 0 {
+			m += " (" + humanize.IBytes(uint64(l.Bytes)) + ")"
+		}
+		return m
 	case events.LifecycleExited:
 		if l.ExitCode != nil {
 			return "program exited with status " + strconv.Itoa(*l.ExitCode)

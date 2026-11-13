@@ -204,6 +204,12 @@ sessions:
     # "session start" and "session attach" resume a parked session.
     enabled: {{ .Sessions.Suspend.Enabled }}
     after: "{{ .Sessions.Suspend.After }}"
+    # What parking does where the gateway cannot suspend (the OpenShell 0.1.8
+    # Kubernetes driver): "none" leaves the sandbox running; "snapshot"
+    # saves /sandbox to S3 (snapshots.s3 must be enabled) and deletes the
+    # sandbox. That stops the session's program; start and attach recreate
+    # the sandbox, restore /sandbox and start the program again.
+    fallback: {{ printf "%q" .Sessions.Suspend.Fallback }}
   signals:
     # How many signals (every session status change and lifecycle event,
     # shown by "session signals" and the TUI) to keep, across all users.
@@ -321,6 +327,44 @@ notifications:
     # replaced by URL-escaped values: {repo}, {session}, {sandbox}, {user}.
     # Left off a notification that has no value for a placeholder it uses.
     click_url: {{ printf "%q" .Notifications.Ntfy.ClickURL }}
+
+# Snapshots of a session's /sandbox (checkouts and the sandbox user's home) in
+# an S3 bucket: AWS S3 or an S3-compatible store (MinIO, Ceph RGW). Off by
+# default: while s3.enabled is false nothing in this section is checked.
+# Each session has one object, <prefix>/<user-id>/<sandbox>.tar.gz, replaced
+# by every snapshot. The sandbox uploads and downloads it itself through
+# presigned URLs Soft Serve signs, so the S3 keys never enter a sandbox, but
+# the sandbox network policy must allow the endpoint. Changes take effect on
+# restart.
+snapshots:
+  s3:
+    enabled: {{ .Snapshots.S3.Enabled }}
+    # Base URL of an S3-compatible store; empty for AWS S3.
+    endpoint: {{ printf "%q" .Snapshots.S3.Endpoint }}
+    # The region requests are signed for. Required for AWS; defaults to
+    # us-east-1 with an endpoint.
+    region: {{ printf "%q" .Snapshots.S3.Region }}
+    # The bucket, which must exist.
+    bucket: {{ printf "%q" .Snapshots.S3.Bucket }}
+    prefix: {{ printf "%q" .Snapshots.S3.Prefix }}
+    # File holding the access key, AWS shared-credentials format:
+    #   [default]
+    #   aws_access_key_id = ...
+    #   aws_secret_access_key = ...
+    # Read again for every operation. Never put the keys in this file.
+    credentials_file: {{ printf "%q" .Snapshots.S3.CredentialsFile }}
+    # Server-side encryption: "AES256", "aws:kms" (the bucket's default KMS
+    # key) or "" (none requested; the bucket's default applies).
+    sse: {{ printf "%q" .Snapshots.S3.SSE }}
+    # Address the bucket as <endpoint>/<bucket>; most MinIO and RGW setups
+    # need this.
+    path_style: {{ .Snapshots.S3.PathStyle }}
+    # When to snapshot: "end" (before "session end" deletes the sandbox; a
+    # failed snapshot stops the end unless --force) and "park" (before each
+    # memory-retaining park, as a backup). "session start" restores the
+    # snapshot into a newly created sandbox either way.
+    # Quote the key: YAML 1.1 tools such as Helm read a bare on: as true.
+    "on": [{{ range $i, $t := .Snapshots.S3.On }}{{ if $i }}, {{ end }}{{ printf "%q" $t }}{{ end }}]
 
 # Additional admin keys.
 #initial_admin_keys:

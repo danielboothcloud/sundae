@@ -45,6 +45,11 @@
 #   and ~/.gitconfig includes that file; the token never lands in /sandbox.
 #   The bootstrap uses sh, git, grep, gzip, sha256sum and base64, and flock
 #   when present; all are in this image.
+# - With S3 snapshots on (snapshots.s3), Soft Serve archives /sandbox with GNU
+#   tar and gzip into /tmp/soft-serve, checks it with md5sum and uploads it
+#   with curl to a presigned URL; a restore streams curl | gzip -d | tar -x.
+#   All are in this image; the sandbox network policy must allow curl to
+#   reach the S3 endpoint.
 # - The default filesystem policy grants read-only access to /usr, /bin, /lib
 #   and /etc but not /opt, so every tool is installed under /usr; /sandbox and
 #   /tmp are writable.

@@ -51,6 +51,8 @@ type fakeOpenShell struct {
 	interactiveErr error
 	// ensureErr makes EnsureSandbox fail.
 	ensureErr error
+	// scripts, when set, answers the scripts it knows first.
+	scripts func(sandbox string, command []string) (*openshell.ExecResult, bool)
 }
 
 var _ openshell.Client = (*fakeOpenShell)(nil)
@@ -186,6 +188,11 @@ func (f *fakeOpenShell) Upload(context.Context, string, string, string) error {
 func (f *fakeOpenShell) Run(_ context.Context, name string, command []string, _ openshell.ExecOptions) (*openshell.ExecResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.scripts != nil {
+		if res, ok := f.scripts(name, command); ok {
+			return res, nil
+		}
+	}
 	out := ""
 	switch command[0] {
 	case "test":

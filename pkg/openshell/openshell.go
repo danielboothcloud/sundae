@@ -8,7 +8,9 @@
 // Inside the sandbox, an osewa session holds the session's program, so it
 // outlives the SSH connection that started it. The server's Monitor keeps
 // what it reads of each session's status, and the open bridges, in memory
-// only.
+// only. With S3 snapshots on (snapshots.s3), a session parked to its
+// snapshot has no sandbox; a small marker object next to the snapshot is
+// then its only record (see ParkedSnapshot).
 package openshell
 
 import (

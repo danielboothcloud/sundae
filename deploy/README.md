@@ -181,7 +181,11 @@ softServe.chartValues.config.openshell.token_file=/tmp/token`. The same goes
 for every `config.forges[].token_file`: the check reads each one. And for
 `config.notifications.ntfy.token_file` when ntfy is enabled (set to
 `/etc/soft-serve-ntfy/token` when
-`softServe.chartValues.notifications.ntfyToken.secretName` is set).
+`softServe.chartValues.notifications.ntfyToken.secretName` is set), and for
+`config.snapshots.s3.credentials_file` when S3 snapshots are enabled (set to
+`/etc/soft-serve-s3/<key>`, or the directory `/etc/soft-serve-s3` with an
+empty key, when `softServe.chartValues.snapshots.s3Credentials.secretName`
+is set).
 
 ## Things to know
 
@@ -231,6 +235,23 @@ for every `config.forges[].token_file`: the check reads each one. And for
   `suspend_sandbox`), so with this deployment the gateway refuses, Soft Serve
   logs that once and leaves the sandboxes running. Set
   `config.sessions.suspend.enabled: false` to skip the attempt.
+- **S3 snapshots.** Off by default. Turn them on under
+  `softServe.chartValues.config.snapshots.s3` (example in `environment.yaml`;
+  semantics in the top-level README, "S3 snapshots"). The access key is a
+  Secret in the namespace named by
+  `softServe.chartValues.snapshots.s3Credentials.secretName`: with `key` set
+  (default `credentials`) that key is an AWS shared-credentials file mounted
+  at `/etc/soft-serve-s3/<key>`; with `key: ""` the whole Secret is mounted
+  at `/etc/soft-serve-s3` and must hold `AWS_ACCESS_KEY_ID` and
+  `AWS_SECRET_ACCESS_KEY`, as the Secret of a Rook ObjectBucketClaim does.
+  The chart points `snapshots.s3.credentials_file` at it, refuses inline keys
+  and a bare `on:` key, and requires a bucket. Soft Serve needs egress to the
+  endpoint (HEAD, small GET and PUT, LIST, DELETE), and so do the sandboxes:
+  they upload and download the archives themselves with `curl`, so add the
+  endpoint to the sandbox network policy (example in the top-level README,
+  "Sandbox egress"). With `config.sessions.suspend.fallback: snapshot`, idle
+  sessions are parked to S3 instead of left running, since this deployment's
+  driver cannot suspend.
 - **The data volume outlives the release.** `hf destroy` keeps the
   `data-soft-serve-0` claim and the Agent Sandbox CRDs. Its size cannot be
   changed through helmfile after the first install.
@@ -278,6 +299,14 @@ Not checked, because it needs an image build or a live cluster:
   not support sandbox suspend", from the 0.1.8 source), and, with a driver
   that can suspend, a resume that keeps the osewa session or a clean restart
   that loses it. The poll was run against a native osewa 0.1.4 build.
+- S3 snapshots against the cluster's Ceph RGW or AWS: the sandbox's egress
+  to the endpoint, RGW's handling of the presigned PUT with `Content-MD5` and
+  of `sse` (RGW refuses SSE headers without a configured KMS, hence the
+  default `sse: ""`), and how long large archives take. The pipeline ran
+  against a local MinIO (with SSE-S3) and a signature-checking fake; whether
+  OpenShell's Kubernetes driver keeps a sandbox's `/sandbox` volume after the
+  sandbox is deleted (which is when a restore asks before replacing files)
+  is not known.
 - Notifications against a real ntfy server from the cluster (egress, and an
   access-controlled topic with a token). The publish format was checked
   against an `httptest` server.

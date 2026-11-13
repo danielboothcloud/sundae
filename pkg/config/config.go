@@ -244,6 +244,10 @@ type Config struct {
 	// events. Off unless notifications.ntfy.enabled is true.
 	Notifications NotificationsConfig `envPrefix:"NOTIFICATIONS_" yaml:"notifications"`
 
+	// Snapshots configures snapshots of a session's /sandbox to S3. Off
+	// unless snapshots.s3.enabled is true.
+	Snapshots SnapshotsConfig `envPrefix:"SNAPSHOTS_" yaml:"snapshots"`
+
 	// InitialAdminKeys is a list of public keys that will be added to the list of admins.
 	InitialAdminKeys []string `env:"INITIAL_ADMIN_KEYS" envSeparator:"\n" yaml:"initial_admin_keys"`
 
@@ -346,6 +350,9 @@ func (c *Config) Environ() []string {
 	// The ntfy token only ever lives in its token_file.
 	envs = append(envs, c.notificationsEnviron()...)
 
+	// The S3 keys only ever live in their credentials_file.
+	envs = append(envs, c.snapshotsEnviron()...)
+
 	// AnonAccess and AllowKeyless are tri-state overrides: only emit them
 	// when explicitly set, so a subprocess parsing these envs sees the same
 	// "unset" state (rather than an empty string coercing to a zero value).
@@ -446,7 +453,7 @@ func describeKeyError(msg string) string {
 	if section != "" {
 		key = section + "." + key
 	}
-	if key == "notifications.true" {
+	if key == "notifications.true" || key == "snapshots.s3.true" {
 		// YAML 1.1 tools, Helm among them, read an unquoted `on:` key as
 		// the boolean true.
 		return fmt.Sprintf("line %s: unknown key %s (an unquoted `on:` key was read as true by a YAML 1.1 tool; quote it: \"on\":)", m[1], key)
@@ -686,8 +693,9 @@ func DefaultConfig() *Config {
 				PollInterval: DefaultStatusPollInterval,
 			},
 			Suspend: SessionSuspendConfig{
-				Enabled: true,
-				After:   DefaultSuspendAfter,
+				Enabled:  true,
+				After:    DefaultSuspendAfter,
+				Fallback: SuspendFallbackNone,
 			},
 			Signals: SessionSignalsConfig{
 				Keep: DefaultSignalsKeep,
@@ -696,6 +704,12 @@ func DefaultConfig() *Config {
 		Notifications: NotificationsConfig{
 			On:       append([]string(nil), DefaultTriggers...),
 			Debounce: DefaultNotificationDebounce,
+		},
+		Snapshots: SnapshotsConfig{
+			S3: S3SnapshotConfig{
+				Prefix: DefaultSnapshotPrefix,
+				On:     append([]string(nil), DefaultSnapshotOn...),
+			},
 		},
 	}
 }
@@ -746,7 +760,7 @@ func (c *Config) Validate() error {
 
 	c.HTTP.CORS.AllowedOrigins = append([]string{c.HTTP.PublicURL}, c.HTTP.CORS.AllowedOrigins...)
 
-	return errors.Join(c.validateOpenShell(), c.validateSessions(), c.validateForges(), c.validateNotifications())
+	return errors.Join(c.validateOpenShell(), c.validateSessions(), c.validateForges(), c.validateNotifications(), c.validateSnapshots())
 }
 
 // validateOpenShell validates the OpenShell configuration and resolves its

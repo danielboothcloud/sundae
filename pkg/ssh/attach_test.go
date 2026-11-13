@@ -143,8 +143,9 @@ func (f *fakeSource) Command(string) string                   { return "bash" }
 func (f *fakeSource) AttachCommand(repo, name string) string {
 	return "ssh -t host session attach " + repo + " -n " + name
 }
-func (f *fakeSource) End(context.Context, string, string) (bool, error)  { return true, nil }
-func (f *fakeSource) Park(context.Context, string, string) (bool, error) { return true, nil }
+func (f *fakeSource) End(context.Context, string, string, bool) (bool, error) { return true, nil }
+func (f *fakeSource) SnapshotsOnEnd() bool                                    { return false }
+func (f *fakeSource) Park(context.Context, string, string) (bool, error)      { return true, nil }
 func (f *fakeSource) Prepare(_ context.Context, req sessionctl.Request) (sessions.Attacher, error) {
 	if req.Repo != "r" || req.Name != "main" || req.Create {
 		return nil, fmt.Errorf("unexpected request %+v", req)
