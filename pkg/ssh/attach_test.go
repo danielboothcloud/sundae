@@ -306,13 +306,16 @@ func TestTUIAttachRoundTrip(t *testing.T) {
 	}
 
 	// The TUI reads the keyboard again, at the size the window has now:
-	// the end confirm fills the 100-column line (96 inside the margins).
+	// the end confirm fills the 100-column line (94 inside the margins and
+	// the footer's padding), its answers at the right end.
 	mark = out.len()
 	send("x")
 	out.waitFor(t, mark, "End r / main?")
-	out.waitFor(t, mark, "y / N")
-	if col := answerColumn(out.raw(mark)); col < 90 {
-		t.Errorf("the confirm's y / N is at column %d, want near the end of the 100-column window", col)
+	out.waitFor(t, mark, "y yes • N no")
+	// 100 - 2 (margin) - 1 (padding) - 12 ("y yes • N no") + 1 = 86; an
+	// 80-column render puts it at 66.
+	if col := answerColumn(out.raw(mark)); col != 86 {
+		t.Errorf("the confirm's y yes • N no is at column %d, want 86, at the end of the 100-column window", col)
 	}
 	send("n")
 	if in, _ := att.shell.seen(); in != "qx-hello\r~." {
@@ -344,11 +347,11 @@ func waitUntil(t *testing.T, cond func() bool, msg string) {
 	t.Fatal(msg)
 }
 
-// answerColumn returns the column the renderer moved to (CHA) to draw the
-// confirm's "y / N": it skips blanks with cursor moves, so the column is
-// where the line's right end is.
+// answerColumn returns the column the renderer moved to (CHA or CUP) to draw the
+// confirm's "y yes • N no": it skips blanks with cursor moves, so the
+// column is where the answers start, at the line's right end.
 func answerColumn(raw string) int {
-	m := regexp.MustCompile(`\x1b\[(\d+)G(?:\x1b\[[0-9;]*m)*y(?:\x1b\[[0-9;]*m)* / `).FindStringSubmatch(raw)
+	m := regexp.MustCompile(`\x1b\[(?:\d+;)?(\d+)[GH](?:\x1b\[[0-9;]*m)*y(?:\x1b\[[0-9;]*m)* (?:\x1b\[[0-9;]*m)*yes`).FindStringSubmatch(raw)
 	if m == nil {
 		return 0
 	}

@@ -1380,7 +1380,7 @@ func (m *Sessions) summary(narrow bool, bg color.Color) string {
 		parts = append(parts, style.Render(text))
 	}
 	if bg != nil {
-		return strings.Join(parts, lipgloss.NewStyle().Background(bg).Render(sep))
+		return strings.Join(parts, st.StatusBarSummary.UnsetPadding().Render(sep))
 	}
 	return strings.Join(parts, sep)
 }

@@ -19,16 +19,22 @@ type Footer struct {
 	keymap help.KeyMap
 }
 
-// New creates a new Footer.
-func New(c common.Common, keymap help.KeyMap) *Footer {
+// NewHelp returns the help the footer renders keys with. Other lines that
+// show keys (a confirm's answers) use it to look the same.
+func NewHelp(c common.Common) help.Model {
 	h := help.New()
 	h.Styles.ShortKey = c.Styles.HelpKey
 	h.Styles.ShortDesc = c.Styles.HelpValue
 	h.Styles.FullKey = c.Styles.HelpKey
 	h.Styles.FullDesc = c.Styles.HelpValue
+	return h
+}
+
+// New creates a new Footer.
+func New(c common.Common, keymap help.KeyMap) *Footer {
 	f := &Footer{
 		common: c,
-		help:   h,
+		help:   NewHelp(c),
 		keymap: keymap,
 	}
 	f.SetSize(c.Width, c.Height)

@@ -166,9 +166,25 @@ type Styles struct {
 		LineBar   lipgloss.Style
 	}
 
+	// Prompt styles the forms, confirms, one-line notices and errors the
+	// tabs show, from the colours above: a form reads like the repository
+	// list, a confirm or notice like the help, an error in the error
+	// title's colour.
+	Prompt struct {
+		Title       lipgloss.Style
+		Label       lipgloss.Style
+		ActiveLabel lipgloss.Style
+		Value       lipgloss.Style
+		ActiveValue lipgloss.Style
+		Detail      lipgloss.Style
+		Question    lipgloss.Style
+		Notice      lipgloss.Style
+		Error       lipgloss.Style
+	}
+
 	// State colours the session status vocabulary: blocked amber, error
 	// red, done green, working teal (the active tab's colour), idle and
-	// none grey.
+	// none grey. Only agent states use them.
 	State struct {
 		Blocked lipgloss.Style
 		Error   lipgloss.Style
@@ -539,6 +555,17 @@ func DefaultStyles() *Styles {
 	s.Stash.Selector = lipgloss.NewStyle().
 		Width(1).
 		Foreground(selectorColor)
+
+	s.Prompt.Title = s.RepoSelector.Normal.Title
+	s.Prompt.Label = s.RepoSelector.Normal.Desc
+	s.Prompt.ActiveLabel = s.RepoSelector.Active.Title
+	s.Prompt.Value = lipgloss.NewStyle()
+	s.Prompt.ActiveValue = s.RepoSelector.Active.Title
+	s.Prompt.Detail = s.RepoSelector.Normal.Desc
+	s.Prompt.Question = s.HelpKey
+	s.Prompt.Notice = s.HelpKey
+	s.Prompt.Error = lipgloss.NewStyle().
+		Foreground(s.ErrorTitle.GetBackground())
 
 	s.State.Blocked = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
 	s.State.Error = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))

@@ -93,11 +93,14 @@ func (ui *UI) selection() *selection.Selection {
 }
 
 // footerView renders the footer: the help, or a line the home page puts in
-// its place (the end-session confirm).
+// its place (the end-session confirm), laid out as the footer lays out the
+// help.
 func (ui *UI) footerView() string {
 	if s := ui.selection(); s != nil && ui.activePage == selectionPage && ui.state == readyState {
-		if line := s.FooterLine(ui.common.Width - ui.common.Styles.App.GetHorizontalFrameSize()); line != "" {
-			return ui.common.Styles.Footer.Render(line)
+		st := ui.common.Styles
+		w := ui.common.Width - st.App.GetHorizontalFrameSize()
+		if line := s.FooterLine(w - st.Footer.GetHorizontalFrameSize()); line != "" {
+			return st.Footer.Width(w).Render(line)
 		}
 	}
 	return ui.footer.View()

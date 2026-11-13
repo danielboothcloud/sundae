@@ -415,6 +415,10 @@ func TestStatesGolden(t *testing.T) {
 	}
 	m.Update(listMsg{err: errors.New("dial tcp 127.0.0.1:1: connect: connection refused")})
 	golden(t, "gateway-down-80", view(m))
+	// The gateway being down is an error, not an agent state.
+	if want := m.common.Styles.Prompt.Error.Render("✗ " + gatewayDown); !strings.Contains(m.View(), want) {
+		t.Fatalf("the gateway-down line is not in the prompt's error style:\n%q", m.View())
+	}
 	if m.Summary(false) != "" {
 		t.Fatal("summary shown while the gateway is down")
 	}
@@ -651,7 +655,7 @@ func TestEndConfirm(t *testing.T) {
 		t.Fatal("the confirm does not capture keys")
 	}
 	line := ansi.Strip(m.FooterLine(76))
-	if !strings.HasPrefix(line, "End infra / claude-1?  The sandbox and any unpushed work are") || !strings.HasSuffix(line, "y / N") {
+	if !strings.HasPrefix(line, "End infra / claude-1?  The sandbox and any unpushed work are") || !strings.HasSuffix(line, "y yes • N no") {
 		t.Fatalf("confirm line %q", line)
 	}
 	keys(m, "n")
@@ -668,6 +672,9 @@ func TestEndConfirm(t *testing.T) {
 	}
 	if !strings.Contains(view(m), "Ended infra / claude-1.") {
 		t.Fatalf("notice:\n%s", view(m))
+	}
+	if want := m.common.Styles.Prompt.Notice.Render("Ended infra / claude-1."); !strings.Contains(m.View(), want) {
+		t.Fatalf("the notice is not in the prompt's notice style:\n%q", m.View())
 	}
 }
 
@@ -1036,7 +1043,7 @@ func TestScopeKeys(t *testing.T) {
 	keys(m, "esc")
 	// x asks in the tab: the repository page's footer is the help.
 	keys(m, "j", "x")
-	if m.FooterLine(80) != "" || !strings.Contains(view(m), "End sundae / tui?") || !strings.Contains(view(m), "y / N") {
+	if m.FooterLine(80) != "" || !strings.Contains(view(m), "End sundae / tui?") || !strings.Contains(view(m), "y yes • N no") {
 		t.Fatalf("confirm:\n%s", view(m))
 	}
 	run(m, keys(m, "y"), 2)

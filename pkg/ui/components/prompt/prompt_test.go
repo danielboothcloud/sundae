@@ -6,9 +6,11 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/danielboothcloud/sundae/pkg/ui/common"
+	"github.com/danielboothcloud/sundae/pkg/ui/components/footer"
 )
 
 // press returns the key press for a key name ("enter", "left") or text.
@@ -203,14 +205,69 @@ func TestConfirm(t *testing.T) {
 		t.Fatal("a non-key message closed the confirm")
 	}
 	v := ansi.Strip(c.View(80))
-	if !strings.HasSuffix(v, "y / N") || ansi.StringWidth(v) != 80 {
+	if !strings.HasSuffix(v, "y yes • N no") || ansi.StringWidth(v) != 80 {
 		t.Fatalf("view %q (%d)", v, ansi.StringWidth(v))
 	}
 	v = ansi.Strip(c.View(40))
-	if ansi.StringWidth(v) > 40 || !strings.HasSuffix(v, "y / N") || !strings.Contains(v, "…") {
+	if ansi.StringWidth(v) > 40 || !strings.HasSuffix(v, "y yes • N no") || !strings.Contains(v, "…") {
 		t.Fatalf("narrow view %q", v)
 	}
 }
+
+// TestConfirmLooksLikeTheHelp checks the confirm's colours: the question
+// in the help's key colour and the answers exactly as the help footer
+// renders the confirm's keys.
+func TestConfirmLooksLikeTheHelp(t *testing.T) {
+	c := NewConfirm(newCommon(), "Delete mine?")
+	st := c.common.Styles
+	sep := footer.NewHelp(c.common).Styles.ShortSeparator.Render(" • ")
+	answer := st.HelpKey.Render("y") + " " + st.HelpValue.Render("yes") + sep +
+		st.HelpKey.Render("N") + " " + st.HelpValue.Render("no")
+	want := st.HelpKey.Render("Delete mine?") + strings.Repeat(" ", 40-12-12) + answer
+	if got := c.View(40); got != want {
+		t.Fatalf("view\n%q\nwant\n%q", got, want)
+	}
+	// The footer, showing the same keys as its help, renders them alike.
+	f := footer.New(c.common, keys{c.Yes, c.No})
+	if !strings.Contains(f.View(), answer) {
+		t.Fatalf("the help footer renders the keys as %q, the confirm as %q", f.View(), answer)
+	}
+}
+
+// TestFormStyles checks the form's colours come from the style sheet:
+// labels and details as the repository list's descriptions, the focused
+// field as its selected title, an error in the prompt's error colour.
+func TestFormStyles(t *testing.T) {
+	f := newTestForm()
+	ps := f.common.Styles.Prompt
+	v := f.View(80)
+	for _, want := range []string{
+		ps.Title.Render("New session"),
+		ps.Label.Width(13).Render("Repository"),
+		ps.ActiveLabel.Width(13).Render("Name"),
+		ps.ActiveValue.Render("claude-1"),
+		ps.Value.Render("sundae"),
+		ps.Value.Render("‹ codex ›"),
+		ps.Detail.Render("img-codex · codex"),
+	} {
+		if !strings.Contains(v, want) {
+			t.Fatalf("view lacks %q:\n%q", want, v)
+		}
+	}
+	for range len("claude-1") {
+		f.Update(press("backspace"))
+	}
+	f.Update(press("enter"))
+	if want := ps.Error.Render("✗ name is required"); !strings.Contains(f.View(80), want) {
+		t.Fatalf("view lacks %q:\n%q", want, f.View(80))
+	}
+}
+
+// keys is a help.KeyMap of bindings.
+type keys []key.Binding
+
+func (k keys) ShortHelp() []key.Binding  { return k }
+func (k keys) FullHelp() [][]key.Binding { return [][]key.Binding{k} }
 
 func TestTextFieldCharLimit(t *testing.T) {
 	long := strings.Repeat("x", 100)

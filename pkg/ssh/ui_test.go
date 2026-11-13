@@ -252,7 +252,7 @@ func TestHomeSessionsKeys(t *testing.T) {
 	uiKey(ui, "x")
 	s := screenText(ui)
 	last := s[strings.LastIndex(s, "\n")+1:]
-	if !strings.Contains(last, "End infra / claude-1?") || !strings.HasSuffix(last, "y / N") {
+	if !strings.Contains(last, "End infra / claude-1?") || !strings.HasSuffix(last, "y yes • N no") {
 		t.Fatalf("confirm line %q:\n%s", last, s)
 	}
 	uiKey(ui, "esc")

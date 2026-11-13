@@ -13,6 +13,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/danielboothcloud/sundae/pkg/events"
 	"github.com/danielboothcloud/sundae/pkg/forge"
@@ -454,6 +455,10 @@ func TestForgesPushConfirmAndRefusal(t *testing.T) {
 	if !strings.Contains(view(m), "Pushed main of github/danielboothcloud/sundae to github: 1111111..2222222.") {
 		t.Fatalf("view:\n%s", view(m))
 	}
+	st := m.common.Styles
+	if want := st.Prompt.Notice.Render("Pushed main of github/danielboothcloud/sundae to github: 1111111..2222222."); !strings.Contains(m.View(), want) {
+		t.Fatalf("the notice is not in the prompt's notice style:\n%q", m.View())
+	}
 
 	// A refused push says why, in the tab.
 	src.pushErr = &forge.UpstreamAheadError{Branch: "main", Missing: 2}
@@ -463,6 +468,21 @@ func TestForgesPushConfirmAndRefusal(t *testing.T) {
 	got := view(m)
 	if !strings.Contains(got, "✗ push refused") || !strings.Contains(got, "✗ Push refused: forge branch main has 2 commit(s) that main lacks") {
 		t.Fatalf("view:\n%s", got)
+	}
+	raw := m.View()
+	for _, want := range []string{
+		st.Prompt.Error.Render("✗ push refused"),
+		strings.TrimSuffix(st.Prompt.Error.Render("✗ Push refused: forge branch main has 2 commit(s) that main lacks"), "\x1b[m"),
+	} {
+		if !strings.Contains(raw, want) {
+			t.Fatalf("view lacks %q in the prompt's error style:\n%q", want, raw)
+		}
+	}
+	// The session state colours are for agent states only.
+	for _, ss := range []lipgloss.Style{st.State.Blocked, st.State.Error, st.State.Done, st.State.Working} {
+		if open := strings.TrimSuffix(ss.Render("x"), "x\x1b[m"); strings.Contains(raw, open) {
+			t.Fatalf("view uses a state colour %q:\n%q", open, raw)
+		}
 	}
 
 	// Pushing a repository that is not imported, or from a header, is

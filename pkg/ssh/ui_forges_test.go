@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/danielboothcloud/sundae/pkg/backend"
 	"github.com/danielboothcloud/sundae/pkg/events"
 	"github.com/danielboothcloud/sundae/pkg/forge"
@@ -246,11 +247,15 @@ func TestHomeForgesTab(t *testing.T) {
 			ui, _, ff := richHomeUI(t, w, 20)
 			uiKey(ui, "3")
 			goldenFile(t, fmt.Sprintf("home-forges-%d", w), screenText(ui))
-			// p pushes, after a confirm naming the branch, in the footer.
+			// p pushes, after a confirm naming the branch, in the footer;
+			// the question is cut to leave room for the answers.
 			uiKey(ui, "j", "j", "p")
 			s := screenText(ui)
 			last := s[strings.LastIndex(s, "\n")+1:]
-			if !strings.Contains(last, "Push main of sundae to github?") || !strings.HasSuffix(last, "y / N") {
+			if !strings.HasPrefix(last, "   Push main of sundae to github") || !strings.HasSuffix(last, "y yes • N no") ||
+				ansi.StringWidth(last) != w-3 {
+				// The line ends inside the right margin (2) and the
+				// footer's padding (1).
 				t.Fatalf("confirm %q", last)
 			}
 			// q is an answer, not quit.

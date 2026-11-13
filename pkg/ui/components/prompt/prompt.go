@@ -14,6 +14,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/danielboothcloud/sundae/pkg/ui/common"
+	"github.com/danielboothcloud/sundae/pkg/ui/components/footer"
 )
 
 // Result is what a message did to a prompt.
@@ -336,6 +337,15 @@ type Form struct {
 // focus. submit names what enter does in the help ("create").
 func NewForm(c common.Common, title, submit string, fields ...*Field) *Form {
 	f := &Form{common: c, Title: title, fields: fields, focus: -1}
+	for _, fd := range fields {
+		if fd.kind == Text {
+			// Typed text reads as the other fields' values do.
+			st := fd.input.Styles()
+			st.Focused.Text = c.Styles.Prompt.ActiveValue
+			st.Blurred.Text = c.Styles.Prompt.Value
+			fd.input.SetStyles(st)
+		}
+	}
 	f.KeyMap = KeyMap{
 		Field:  key.NewBinding(key.WithKeys("up", "down", "tab", "shift+tab"), key.WithHelp("↑↓", "field")),
 		Change: key.NewBinding(key.WithKeys("left", "right"), key.WithHelp("←→", "change")),
@@ -546,27 +556,26 @@ func (e *multiError) Error() string {
 	return "pick at least one of " + strings.ToLower(e.label) + " (space toggles)"
 }
 
-// View renders the form in width columns.
+// View renders the form in width columns, with the shared prompt styles.
 func (f *Form) View(width int) string {
-	st := f.common.Styles
+	ps := f.common.Styles.Prompt
 	labelW := 0
 	for _, fd := range f.fields {
 		labelW = max(labelW, lipgloss.Width(fd.Label))
 	}
 	labelW += 3
-	title := st.RepoSelector.Normal.Title.Render(f.Title)
-	lines := []string{title, ""}
-	dim := st.RepoSelector.Normal.Desc
+	lines := []string{ps.Title.Render(f.Title), ""}
 	for i, fd := range f.fields {
 		focused := i == f.focus
-		label := lipgloss.NewStyle().Width(labelW).Render(fd.Label)
+		labelStyle, valueStyle := ps.Label, ps.Value
 		if focused {
-			label = st.RepoSelector.Active.Title.Width(labelW).Render(fd.Label)
+			labelStyle, valueStyle = ps.ActiveLabel, ps.ActiveValue
 		}
+		label := labelStyle.Width(labelW).Render(fd.Label)
 		var value string
 		switch fd.kind {
 		case Fixed:
-			value = fd.fixed
+			value = ps.Value.Render(fd.fixed)
 		case Text:
 			value = fd.input.View()
 		case Choice:
@@ -575,10 +584,7 @@ func (f *Form) View(width int) string {
 			if ok {
 				name = o.label()
 			}
-			value = "‹ " + name + " ›"
-			if focused {
-				value = st.RepoSelector.Active.Title.Render(value)
-			}
+			value = valueStyle.Render("‹ " + name + " ›")
 			var extra []string
 			if fd.filter != "" {
 				extra = append(extra, "/"+fd.filter)
@@ -587,7 +593,7 @@ func (f *Form) View(width int) string {
 				extra = append(extra, o.Detail)
 			}
 			if len(extra) > 0 {
-				value += "   " + dim.Render(strings.Join(extra, "  "))
+				value += "   " + ps.Detail.Render(strings.Join(extra, "  "))
 			}
 		case Multi:
 			o, ok := fd.Selected()
@@ -599,10 +605,7 @@ func (f *Form) View(width int) string {
 				}
 				name = mark + o.label()
 			}
-			value = "‹ " + name + " ›"
-			if focused {
-				value = st.RepoSelector.Active.Title.Render(value)
-			}
+			value = valueStyle.Render("‹ " + name + " ›")
 			var extra []string
 			if fd.filter != "" {
 				extra = append(extra, "/"+fd.filter)
@@ -615,21 +618,18 @@ func (f *Form) View(width int) string {
 			default:
 				extra = append(extra, fd.picked[0]+", "+fd.picked[1]+", +"+itoa(n-2))
 			}
-			value += "   " + dim.Render(strings.Join(extra, "  "))
+			value += "   " + ps.Detail.Render(strings.Join(extra, "  "))
 		case Toggle:
-			value = "no"
+			v := "no"
 			if fd.on {
-				value = "yes"
+				v = "yes"
 			}
-			if focused {
-				value = st.RepoSelector.Active.Title.Render(value)
-			}
+			value = valueStyle.Render(v)
 		}
-		line := "  " + label + value
-		lines = append(lines, common.TruncateString(line, max(width, 1)))
+		lines = append(lines, common.TruncateString("  "+label+value, max(width, 1)))
 	}
 	if f.err != nil {
-		lines = append(lines, "", st.State.Error.Render(common.TruncateString("✗ "+f.err.Error(), max(width, 1))))
+		lines = append(lines, "", ps.Error.Render(common.TruncateString("✗ "+f.err.Error(), max(width, 1))))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -666,13 +666,13 @@ func (c *Confirm) Update(msg tea.Msg) Result {
 	return Cancelled
 }
 
-// View renders the question with "y / N" at the right end of width
-// columns, cutting the question to fit.
+// View renders the question, in the prompt's question style, with the
+// answers at the right end of width columns as the help footer renders
+// keys ("y yes • N no"), cutting the question to fit.
 func (c *Confirm) View(width int) string {
-	st := c.common.Styles
-	answer := st.HelpKey.Render("y") + st.HelpValue.Render(" / ") + st.HelpKey.Render("N")
+	answer := footer.NewHelp(c.common).ShortHelpView([]key.Binding{c.Yes, c.No})
 	aw := lipgloss.Width(answer)
 	q := common.TruncateString(c.Question, max(width-aw-2, 1))
 	gap := max(width-lipgloss.Width(q)-aw, 2)
-	return q + strings.Repeat(" ", gap) + answer
+	return c.common.Styles.Prompt.Question.Render(q) + strings.Repeat(" ", gap) + answer
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/danielboothcloud/sundae/pkg/sessionctl"
 	"github.com/danielboothcloud/sundae/pkg/signals"
 	"github.com/danielboothcloud/sundae/pkg/ui/common"
+	"github.com/danielboothcloud/sundae/pkg/ui/components/footer"
 	"github.com/danielboothcloud/sundae/pkg/ui/styles"
 )
 
@@ -101,9 +102,9 @@ func (m *Sessions) View() string {
 		}
 		lines = append(lines, "", " "+m.confirm.View(w-2))
 	} else if m.notice.text != "" {
-		style := m.common.Styles.RepoSelector.Normal.Desc
+		style := m.common.Styles.Prompt.Notice
 		if m.notice.err {
-			style = m.common.Styles.State.Error
+			style = m.common.Styles.Prompt.Error
 		}
 		for len(lines) < h-2 {
 			lines = append(lines, "")
@@ -140,7 +141,7 @@ func (m *Sessions) opView(w int) []string {
 	if len(m.opLines) == 0 {
 		lines = append(lines, "   "+st.RepoSelector.Normal.Desc.Render("…"))
 	}
-	lines = append(lines, "", " "+st.HelpValue.Render("esc cancel"))
+	lines = append(lines, "", " "+footer.NewHelp(m.common).ShortHelpView([]key.Binding{m.keys.Cancel}))
 	return lines
 }
 
@@ -245,7 +246,7 @@ func (m *Sessions) sessionsView(w, h int) []string {
 	case m.listErr != nil:
 		line := gatewayDown
 		cause := signals.Sanitize(m.listErr.Error(), 0)
-		out := " " + st.State.Error.Render(events.StateError.Glyph()+" "+common.TruncateString(line, w-3))
+		out := " " + st.Prompt.Error.Render("✗ "+common.TruncateString(line, w-3))
 		if room := w - 3 - lipgloss.Width(line) - 4; room > 8 {
 			out += st.RepoSelector.Normal.Desc.Render("  · " + common.TruncateString(cause, room))
 		}
@@ -372,7 +373,8 @@ func (m *Sessions) signalRow(s signals.Signal, selected bool, w, whereW, wordsW 
 	cw := max(w-base.GetHorizontalFrameSize(), 10)
 	ss := stateStyle(st, s.State())
 	if s.IsGap() {
-		ss = st.State.Blocked
+		// Missed signals are not an agent state.
+		ss = sel.Desc
 	}
 	glyph, words, _ := strings.Cut(s.Label(), " ")
 	when := signals.FormatTime(s.Time, m.now())

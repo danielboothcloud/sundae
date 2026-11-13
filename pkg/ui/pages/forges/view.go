@@ -74,9 +74,9 @@ func (m *Forges) View() string {
 func (m *Forges) bottomLine(w int) string {
 	st := m.common.Styles
 	if m.notice.text != "" {
-		style := st.RepoSelector.Normal.Desc
+		style := st.Prompt.Notice
 		if m.notice.err {
-			style = st.State.Error
+			style = st.Prompt.Error
 		}
 		return " " + style.Render(common.TruncateString(m.notice.text, w-1))
 	}
@@ -88,7 +88,7 @@ func (m *Forges) bottomLine(w int) string {
 	if it.kind == headerRow {
 		// The whole of what went wrong with the forge.
 		if text, ok := m.forgeError(g.status); ok {
-			return " " + st.State.Error.Render(common.TruncateString("✗ "+g.status.Name+": "+text, w-1))
+			return " " + st.Prompt.Error.Render(common.TruncateString("✗ "+g.status.Name+": "+text, w-1))
 		}
 		return ""
 	}
@@ -102,7 +102,7 @@ func (m *Forges) bottomLine(w int) string {
 	if text == "" {
 		return ""
 	}
-	return " " + st.State.Error.Render(common.TruncateString(oneLine(text), w-1))
+	return " " + st.Prompt.Error.Render(common.TruncateString(oneLine(text), w-1))
 }
 
 func (m *Forges) listView(w, h int) []string {
@@ -110,7 +110,7 @@ func (m *Forges) listView(w, h int) []string {
 	desc := st.RepoSelector.Normal.Desc
 	switch {
 	case m.statusErr != nil:
-		return []string{" " + st.State.Error.Render(common.TruncateString("✗ Cannot read the forges (r to retry): "+oneLine(m.statusErr.Error()), w-1))}
+		return []string{" " + st.Prompt.Error.Render(common.TruncateString("✗ Cannot read the forges (r to retry): "+oneLine(m.statusErr.Error()), w-1))}
 	case !m.loaded:
 		return []string{" " + desc.Render("Loading forges…")}
 	case len(m.groups) == 0:
@@ -175,18 +175,18 @@ func (m *Forges) headerRow(g group, selected bool, w int) []string {
 		if p := m.progress[s.Name]; p != nil && p.total > 0 {
 			doing += fmt.Sprintf(" %d of %d", min(p.done, p.total), p.total)
 		}
-		doing = st.State.Working.Render(doing)
+		doing = sel.Updated.Render(doing)
 	case s.Syncing:
-		doing = st.State.Working.Render("syncing…")
+		doing = sel.Updated.Render("syncing…")
 	case m.listing[s.Name]:
-		doing = st.State.Working.Render("listing…")
+		doing = sel.Updated.Render("listing…")
 	}
 	if s.Matching != nil {
 		counts = sel.Desc.Render(plural(*s.Matching, "repo", "repos") + " · ")
 	}
 	counts += sel.Desc.Render(fmt.Sprintf("%d imported", s.Imported))
 	if text, ok := m.forgeError(s); ok {
-		last = st.State.Error.Render("✗ " + text)
+		last = st.Prompt.Error.Render("✗ " + text)
 	} else if s.LastSync != nil {
 		last = sel.Desc.Render("synced " + ago(*s.LastSync, m.now()))
 	} else {
@@ -234,7 +234,7 @@ func (m *Forges) groupNote(g group, cw int) []string {
 	style := st.RepoSelector.Normal.Desc
 	switch {
 	case g.err != nil:
-		text, style = "✗ Cannot read its repositories: "+oneLine(g.err.Error()), st.State.Error
+		text, style = "✗ Cannot read its repositories: "+oneLine(g.err.Error()), st.Prompt.Error
 	case !g.loaded:
 		text = "Loading…"
 	case len(g.repos) > 0:
@@ -266,7 +266,7 @@ func (m *Forges) repoRow(g group, r forge.RepoStatus, selected bool, w int) []st
 
 	mark := " "
 	if r.Imported {
-		mark = st.State.Done.Render("✓")
+		mark = sel.Updated.Render("✓")
 	}
 	path := r.Path
 	if r.Imported && !r.Listed && g.status.Listed != nil {
@@ -284,13 +284,13 @@ func (m *Forges) repoRow(g group, r forge.RepoStatus, selected bool, w int) []st
 	var last string
 	switch res, ok := m.results[rk]; {
 	case m.busy[rk] != "":
-		last = st.State.Working.Render(m.busy[rk])
+		last = sel.Updated.Render(m.busy[rk])
 	case ok && res.err:
-		last = st.State.Error.Render(res.short)
+		last = st.Prompt.Error.Render(res.short)
 	case ok:
-		last = st.State.Done.Render(res.short)
+		last = sel.Updated.Render(res.short)
 	case r.LastError != "":
-		last = st.State.Error.Render("✗ sync failed")
+		last = st.Prompt.Error.Render("✗ sync failed")
 	case r.Imported && r.LastSync != nil:
 		last = sel.Updated.Render("synced " + strings.TrimSuffix(ago(*r.LastSync, m.now()), " ago"))
 	case r.Imported:
