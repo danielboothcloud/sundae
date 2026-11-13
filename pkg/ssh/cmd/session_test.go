@@ -346,7 +346,8 @@ func TestSessionStartPropagatesExitCode(t *testing.T) {
 
 	_, stderr, err := runSessionCmd(t, ctx, "start", "r")
 	is.NoErr(err)
-	is.True(strings.Contains(stderr, "Starting sandbox sundae-alice-r"))
+	// Named after the repository.
+	is.True(strings.Contains(stderr, "Starting sandbox "+openshell.SessionSandboxName("alice", "r")))
 	is.True(strings.Contains(sess.out.String(), "hello from the sandbox"))
 	is.True(sess.exited)
 	is.Equal(sess.exitCode, 3)
@@ -377,35 +378,80 @@ func TestSessionStartDetachAndAttach(t *testing.T) {
 
 	_, stderr, err := runSessionCmd(t, noPty, "start", "r", "--name", "review", "--profile", "claude", "--detach")
 	is.NoErr(err)
-	is.True(strings.Contains(stderr, "Session review of r is running"))
-	is.True(strings.Contains(stderr, "Attach with: session attach r --name review"))
+	is.True(strings.Contains(stderr, "Session review (r) is running"))
+	is.True(strings.Contains(stderr, "Attach with: session attach review"))
 	is.Equal(len(fc.interactive), 0) // not attached
-	sb := fc.sandboxes[openshell.SessionSandboxName("alice", "r", "review")]
+	sb := fc.sandboxes[openshell.SessionSandboxName("alice", "review")]
 	is.True(sb != nil)
 	is.Equal(sb.Annotations[openshell.AnnotationProfile], "claude")
 	is.Equal(sb.Annotations[openshell.AnnotationSession], "review")
 
 	// attach needs a terminal, and an existing session.
-	_, _, err = runSessionCmd(t, noPty, "attach", "r", "--name", "review")
+	_, _, err = runSessionCmd(t, noPty, "attach", "review")
 	is.True(err != nil && strings.Contains(err.Error(), "session attach requires a terminal (ssh -t)"))
 	withPty := context.WithValue(ctx, sshutils.ContextKeySession, &fakeSSHSession{})
-	_, _, err = runSessionCmd(t, withPty, "attach", "r")
+	_, _, err = runSessionCmd(t, withPty, "attach", "nope")
 	is.True(err != nil && strings.Contains(err.Error(), "no such session"))
-	is.True(strings.Contains(err.Error(), `"session start r"`))
-	_, ok := fc.sandboxes["sundae-alice-r"]
-	is.True(!ok) // attach never creates
 
 	fc.exitCode = 5
 	sess := &fakeSSHSession{}
-	_, _, err = runSessionCmd(t, context.WithValue(ctx, sshutils.ContextKeySession, sess), "attach", "r", "-n", "review")
+	// The only session holding r is found by the repository too.
+	_, _, err = runSessionCmd(t, context.WithValue(ctx, sshutils.ContextKeySession, sess), "attach", "r")
 	is.NoErr(err)
 	is.Equal(len(fc.interactive), 1)
 	is.True(sess.exited)
 	is.Equal(sess.exitCode, 5)
 
-	// Bad names are refused before the gateway is contacted.
-	_, _, err = runSessionCmd(t, withPty, "attach", "r", "--name", "Bad")
+	// The old -n form still names the session.
+	_, _, err = runSessionCmd(t, withPty, "attach", "r", "-n", "Bad")
 	is.True(err != nil && strings.Contains(err.Error(), "invalid session name"))
+}
+
+func TestSessionNewWithSeveralRepos(t *testing.T) {
+	is := is.New(t)
+	ctx, be, user, fc := newSessionTestContext(t)
+	for _, r := range []string{"app", "lib"} {
+		_, err := be.CreateRepository(ctx, r, user, proto.RepositoryOptions{})
+		is.NoErr(err)
+	}
+	// The server's Monitor remembers each session's current list.
+	ctx, _ = withMonitor(ctx, fc)
+	noPty := context.WithValue(ctx, sshutils.ContextKeySession, &fakeSSHSession{noPty: true})
+
+	_, _, err := runSessionCmd(t, noPty, "new", "bundle", "-d")
+	is.True(err != nil && strings.Contains(err.Error(), "--repo"))
+	_, _, err = runSessionCmd(t, noPty, "new", "bundle", "-d", "--repo", "app", "--repo", "missing")
+	is.True(err != nil && strings.Contains(err.Error(), "missing"))
+
+	_, stderr, err := runSessionCmd(t, noPty, "new", "bundle", "-d", "--repo", "app", "--repo", "lib")
+	is.NoErr(err)
+	is.True(strings.Contains(stderr, "Session bundle (app, lib) is running"))
+	sb := fc.sandboxes[openshell.SessionSandboxName("alice", "bundle")]
+	is.True(sb != nil)
+	is.Equal(sb.Annotations[openshell.AnnotationRepos], "app,lib")
+
+	stdout, _, err := runSessionCmd(t, ctx, "repos", "bundle")
+	is.NoErr(err)
+	is.Equal(stdout, "app\nlib\n")
+
+	// "lib" is held by one session only, so it names it.
+	_, _, err = runSessionCmd(t, noPty, "repos", "lib", "remove", "app")
+	is.NoErr(err)
+	stdout, _, err = runSessionCmd(t, ctx, "ls", "--json")
+	is.NoErr(err)
+	var listed []sessionJSON
+	is.NoErr(json.Unmarshal([]byte(stdout), &listed))
+	is.Equal(len(listed), 1)
+	is.Equal(listed[0].Repos, []string{"lib"})
+
+	_, _, err = runSessionCmd(t, noPty, "repos", "bundle", "add", "app")
+	is.NoErr(err)
+	stdout, _, err = runSessionCmd(t, ctx, "repos", "bundle")
+	is.NoErr(err)
+	is.Equal(stdout, "lib\napp\n")
+
+	_, _, err = runSessionCmd(t, noPty, "repos", "bundle", "frobnicate", "app")
+	is.True(err != nil && strings.Contains(err.Error(), "unknown action"))
 }
 
 func TestSessionListAndEnd(t *testing.T) {
@@ -418,13 +464,14 @@ func TestSessionListAndEnd(t *testing.T) {
 	is.NoErr(err)
 	is.True(strings.Contains(stdout, "No sessions found"))
 
-	// A session whose repository has since been deleted, from before
-	// named sessions.
-	name := openshell.SandboxName(user.Username(), "gone")
+	// A session whose repository has since been deleted.
+	name := openshell.SessionSandboxName(user.Username(), "gone")
 	sb := &openshell.Sandbox{
-		Name:        name,
-		Labels:      map[string]string{openshell.LabelUserID: strconv.FormatInt(user.ID(), 10), openshell.LabelManaged: "true"},
-		Annotations: map[string]string{openshell.AnnotationRepo: "gone"},
+		Name:   name,
+		Labels: map[string]string{openshell.LabelUserID: strconv.FormatInt(user.ID(), 10), openshell.LabelManaged: "true"},
+		Annotations: map[string]string{
+			openshell.AnnotationRepo: "gone", openshell.AnnotationSession: "gone",
+		},
 	}
 	sb.Status.Phase = types.SandboxReady
 	fc.sandboxes[name] = sb
@@ -438,33 +485,32 @@ func TestSessionListAndEnd(t *testing.T) {
 
 	stdout, _, err = runSessionCmd(t, ctx, "ls")
 	is.NoErr(err)
-	for _, want := range []string{"Repository", "Name", "Profile", "Sandbox", "Phase", "gone", name, "Ready", "sundae-alice-r", "review", "claude"} {
+	for _, want := range []string{"Name", "Repositories", "Profile", "Sandbox", "Phase", "gone", name, "Ready", openshell.SessionSandboxName("alice", "r"), "review", "claude"} {
 		is.True(strings.Contains(stdout, want)) // missing: want
 	}
 	lines := strings.Split(stdout, "\n")
 	var rows []string
 	for _, l := range lines {
-		if strings.Contains(l, "sundae-alice") {
+		if strings.Contains(l, "sd-") {
 			rows = append(rows, strings.Join(strings.Fields(strings.NewReplacer("│", " ", "|", " ").Replace(l)), " "))
 		}
 	}
 	is.Equal(len(rows), 3)
-	is.True(strings.HasPrefix(rows[0], "gone main - "+name))
-	is.True(strings.HasPrefix(rows[1], "r main - sundae-alice-r Ready"))
-	is.True(strings.HasPrefix(rows[2], "r review claude "+openshell.SessionSandboxName("alice", "r", "review")))
+	is.True(strings.HasPrefix(rows[0], "gone gone - "+name))
+	is.True(strings.HasPrefix(rows[1], "r r - "+openshell.SessionSandboxName("alice", "r")+" Ready"))
+	is.True(strings.HasPrefix(rows[2], "review r claude "+openshell.SessionSandboxName("alice", "review")))
 
-	// Ending the named session leaves main.
-	_, stderr, err := runSessionCmd(t, ctx, "end", "r", "--name", "review")
-	is.NoErr(err)
-	is.True(strings.Contains(stderr, "Session ended"))
-	_, ok := fc.sandboxes[openshell.SessionSandboxName("alice", "r", "review")]
+	// r is held by two sessions now: naming it is ambiguous.
+	_, _, err = runSessionCmd(t, ctx, "end", "r", "-n", "")
+	is.NoErr(err) // "r" is also a session name
+	_, ok := fc.sandboxes[openshell.SessionSandboxName("alice", "r")]
 	is.True(!ok)
-	_, ok = fc.sandboxes["sundae-alice-r"]
+	_, ok = fc.sandboxes[openshell.SessionSandboxName("alice", "review")]
 	is.True(ok)
 
 	// The deleted repository's session can still be ended, and ending
 	// again is a no-op.
-	_, stderr, err = runSessionCmd(t, ctx, "end", "gone")
+	_, stderr, err := runSessionCmd(t, ctx, "end", "gone")
 	is.NoErr(err)
 	is.True(strings.Contains(stderr, "Session ended"))
 	_, ok = fc.sandboxes[name]
@@ -490,11 +536,11 @@ func TestSessionCommandsPublishLifecycle(t *testing.T) {
 
 	_, _, err = runSessionCmd(t, ctx, "start", "r", "--name", "two")
 	is.NoErr(err)
-	_, _, err = runSessionCmd(t, ctx, "attach", "r", "--name", "two")
+	_, _, err = runSessionCmd(t, ctx, "attach", "two")
 	is.NoErr(err)
-	_, _, err = runSessionCmd(t, ctx, "end", "r", "--name", "two")
+	_, _, err = runSessionCmd(t, ctx, "end", "two")
 	is.NoErr(err)
-	sandbox := openshell.SessionSandboxName("alice", "r", "two")
+	sandbox := openshell.SessionSandboxName("alice", "two")
 	_, ok := fc.sandboxes[sandbox]
 	is.True(!ok)
 

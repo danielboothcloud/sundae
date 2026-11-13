@@ -163,7 +163,7 @@ func TestOsewaLive(t *testing.T) {
 	port := l.Addr().(*net.TCPAddr).Port
 	_ = l.Close()
 
-	lc := &localClient{home: home, bin: binDir, sandbox: "sundae-alice-r"}
+	lc := &localClient{home: home, bin: binDir, sandbox: SessionSandboxName("alice", "main")}
 	m := &Manager{client: lc, osewaPort: port}
 	t.Cleanup(func() {
 		_ = exec.CommandContext(context.Background(), "pkill", "-f", "--", "--listen 127.0.0.1:"+strconv.Itoa(port)).Run()

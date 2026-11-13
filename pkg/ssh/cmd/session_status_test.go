@@ -31,7 +31,7 @@ func withMonitor(ctx context.Context, fc *fakeOpenShell) (context.Context, *open
 func tableRows(out string) []string {
 	var rows []string
 	for _, l := range strings.Split(out, "\n") {
-		if !strings.Contains(l, "sundae-alice") {
+		if !strings.Contains(l, "sd-") {
 			continue
 		}
 		cells := strings.FieldsFunc(l, func(r rune) bool { return r == '│' || r == '|' })
@@ -62,21 +62,21 @@ func TestSessionListStatus(t *testing.T) {
 		_, _, err := runSessionCmd(t, noPty, args...)
 		is.NoErr(err)
 	}
-	sb := func(repo, name string) string { return openshell.SessionSandboxName("alice", repo, name) }
-	fc.setStatus(sb("infra", "main"), 1, map[string]any{"state": "working", "app": "claude-code", "msg": "Running go test ./pkg/ui/...", "progress": 40})
+	sb := func(repo, name string) string { return openshell.SessionSandboxName("alice", name) }
+	fc.setStatus(sb("infra", "infra"), 1, map[string]any{"state": "working", "app": "claude-code", "msg": "Running go test ./pkg/ui/...", "progress": 40})
 	fc.setStatus(sb("infra", "review"), 0, map[string]any{
 		"state": "blocked", "kind": "permission", "app": "claude-code",
 		"msg": "Apply \x1b[31m3 to add,\u202e 1 to change?\n" + strings.Repeat("x", 100),
 	})
-	fc.setStatus(sb("docs", "main"), 0, map[string]any{"state": "done", "app": "claude-code", "title": "Implemented GitHub discovery"})
-	fc.setStatus(sb("web", "main"), 0, map[string]any{"state": "error", "msg": "build failed"})
+	fc.setStatus(sb("docs", "docs"), 0, map[string]any{"state": "done", "app": "claude-code", "title": "Implemented GitHub discovery"})
+	fc.setStatus(sb("web", "web"), 0, map[string]any{"state": "error", "msg": "build failed"})
 	fc.setStatus(sb("web", "quiet"), 0, nil)
 	mon.Poll(ctx)
 
 	// A parked blocked session still reads blocked.
-	_, stderr, err := runSessionCmd(t, ctx, "park", "infra", "-n", "review")
+	_, stderr, err := runSessionCmd(t, ctx, "park", "review")
 	is.NoErr(err)
-	is.True(strings.Contains(stderr, "Session review of infra parked. Resume it with: session resume infra --name review"))
+	is.True(strings.Contains(stderr, "Session review parked. Resume it with: session resume review"))
 	mon.Poll(ctx)
 
 	stdout, _, err := runSessionCmd(t, ctx, "ls")
@@ -87,11 +87,11 @@ func TestSessionListStatus(t *testing.T) {
 	rows := tableRows(stdout)
 	is.Equal(len(rows), 5)
 	want := []string{
-		"infra | review | - | " + sb("infra", "review") + " | Suspended | ▲ blocked · permission · parked | Apply [31m3 to add, 1 to change? x",
-		"web | main | - | " + sb("web", "main") + " | Ready | ✗ error | build failed | 0 | now",
-		"docs | main | - | " + sb("docs", "main") + " | Ready | ✓ done | Implemented GitHub discovery | 0 | now",
-		"infra | main | - | " + sb("infra", "main") + " | Ready | ● working 40% | Running go test ./pkg/ui/... | 1 | now",
-		"web | quiet | - | " + sb("web", "quiet") + " | Ready | · none | - | 0 | now",
+		"review | infra | - | " + sb("infra", "review") + " | Suspended | ▲ blocked · permission · parked | Apply [31m3 to add, 1 to change? x",
+		"web | web | - | " + sb("web", "web") + " | Ready | ✗ error | build failed | 0 | now",
+		"docs | docs | - | " + sb("docs", "docs") + " | Ready | ✓ done | Implemented GitHub discovery | 0 | now",
+		"infra | infra | - | " + sb("infra", "infra") + " | Ready | ● working 40% | Running go test ./pkg/ui/... | 1 | now",
+		"quiet | web | - | " + sb("web", "quiet") + " | Ready | · none | - | 0 | now",
 	}
 	for i, w := range want {
 		if !strings.HasPrefix(rows[i], w) {
@@ -116,7 +116,7 @@ func TestSessionListStatus(t *testing.T) {
 	for _, s := range got {
 		order = append(order, s["repo"].(string)+"/"+s["name"].(string))
 	}
-	is.Equal(strings.Join(order, ","), "infra/review,web/main,docs/main,infra/main,web/quiet")
+	is.Equal(strings.Join(order, ","), "infra/review,web/web,docs/docs,infra/infra,web/quiet")
 	review := got[0]
 	is.Equal(review["state"], "blocked")
 	is.Equal(review["kind"], "permission")
@@ -136,7 +136,7 @@ func TestSessionListStatus(t *testing.T) {
 	stdout, _, err = runSessionCmd(t, plain, "ls")
 	is.NoErr(err)
 	rows = tableRows(stdout)
-	is.True(strings.HasPrefix(rows[0], "docs | main | - | "+sb("docs", "main")+" | Ready | · none | - | - | -"))
+	is.True(strings.HasPrefix(rows[0], "docs | docs | - | "+sb("docs", "docs")+" | Ready | · none | - | - | -"))
 	is.True(strings.Contains(stdout, "· none · parked"))
 }
 
@@ -154,39 +154,39 @@ func TestSessionParkAndResumeCommands(t *testing.T) {
 
 	_, _, err = runSessionCmd(t, noPty, "start", "r", "-d", "-n", "two")
 	is.NoErr(err)
-	sandbox := openshell.SessionSandboxName("alice", "r", "two")
+	sandbox := openshell.SessionSandboxName("alice", "two")
 
-	_, stderr, err := runSessionCmd(t, ctx, "park", "r", "-n", "two")
+	_, stderr, err := runSessionCmd(t, ctx, "park", "two")
 	is.NoErr(err)
-	is.True(strings.Contains(stderr, "Session two of r parked"))
+	is.True(strings.Contains(stderr, "Session two parked"))
 	is.Equal(fc.phase(sandbox), types.SandboxSuspended)
-	_, stderr, err = runSessionCmd(t, ctx, "park", "r", "-n", "two")
+	_, stderr, err = runSessionCmd(t, ctx, "park", "two")
 	is.NoErr(err)
-	is.True(strings.Contains(stderr, "Session two of r is already parked"))
+	is.True(strings.Contains(stderr, "Session two is already parked"))
 
-	_, stderr, err = runSessionCmd(t, noPty, "resume", "r", "-n", "two")
+	_, stderr, err = runSessionCmd(t, noPty, "resume", "two")
 	is.NoErr(err)
 	is.True(strings.Contains(stderr, "Session two was parked; resuming it"))
-	is.True(strings.Contains(stderr, "Session two of r is running in sandbox "+sandbox))
+	is.True(strings.Contains(stderr, "Session two (r) is running in sandbox "+sandbox))
 	is.Equal(fc.phase(sandbox), types.SandboxReady)
 	is.Equal(fc.resumes, 1)
 	is.Equal(len(fc.interactive), 0) // resume never attaches
 
 	// resume never creates; park needs a session.
-	_, _, err = runSessionCmd(t, noPty, "resume", "r", "-n", "nope")
+	_, _, err = runSessionCmd(t, noPty, "resume", "nope")
 	is.True(err != nil && strings.Contains(err.Error(), "no such session"))
-	_, _, err = runSessionCmd(t, ctx, "park", "r", "-n", "nope")
+	_, _, err = runSessionCmd(t, ctx, "park", "nope")
 	is.True(err != nil && strings.Contains(err.Error(), "no such session"))
-	_, ok := fc.sandboxes[openshell.SessionSandboxName("alice", "r", "nope")]
+	_, ok := fc.sandboxes[openshell.SessionSandboxName("alice", "nope")]
 	is.True(!ok)
 
 	// A gateway that cannot suspend says so.
 	fc.suspendErr = &types.StatusError{Code: types.ErrorConflict, GRPCCode: 9, Message: "compute driver does not support sandbox suspend"}
-	_, _, err = runSessionCmd(t, ctx, "park", "r", "-n", "two")
+	_, _, err = runSessionCmd(t, ctx, "park", "two")
 	is.True(err != nil && strings.Contains(err.Error(), "cannot suspend"))
 	fc.suspendErr = nil
 	// ...and the Monitor remembers: it is not asked again.
-	_, _, err = runSessionCmd(t, ctx, "park", "r", "-n", "two")
+	_, _, err = runSessionCmd(t, ctx, "park", "two")
 	is.True(err != nil && strings.Contains(err.Error(), "cannot suspend"))
 	is.Equal(fc.suspends, 1)
 
@@ -216,7 +216,7 @@ func TestSessionAttachParkedCleanRestart(t *testing.T) {
 	sess := &fakeSSHSession{}
 	_, stderr, err := runSessionCmd(t, context.WithValue(ctx, sshutils.ContextKeySession, sess), "attach", "r")
 	is.NoErr(err)
-	is.True(strings.Contains(stderr, "Session main was parked; resuming it"))
+	is.True(strings.Contains(stderr, "Session r was parked; resuming it"))
 	is.True(strings.Contains(stderr, "Started bash -l again: it was not running when the session resumed"))
 	is.Equal(fc.resumes, 1)
 	is.Equal(strings.Join(fc.interactive[0], " "), "/usr/local/bin/osewa attach --take --predict never sandbox id2")
@@ -229,7 +229,7 @@ func TestSessionBridgeCounting(t *testing.T) {
 	_, err := be.CreateRepository(ctx, "r", user, proto.RepositoryOptions{})
 	is.NoErr(err)
 	ctx, mon := withMonitor(ctx, fc)
-	sandbox := openshell.SessionSandboxName("alice", "r", "main")
+	sandbox := openshell.SessionSandboxName("alice", "r")
 	withSess := func() context.Context { return context.WithValue(ctx, sshutils.ContextKeySession, &fakeSSHSession{}) }
 
 	var during []int
@@ -271,16 +271,16 @@ func TestSessionBridgeCounting(t *testing.T) {
 	fc.ensureErr = errors.New("quota exceeded")
 	_, _, err = runSessionCmd(t, withSess(), "start", "r", "-n", "other")
 	is.True(err != nil)
-	is.Equal(mon.Bridges(openshell.SessionSandboxName("alice", "r", "other")), 0)
+	is.Equal(mon.Bridges(openshell.SessionSandboxName("alice", "other")), 0)
 	fc.ensureErr = nil
 
 	// No such session, and a bad name.
 	_, _, err = runSessionCmd(t, withSess(), "attach", "r", "-n", "nope")
 	is.True(err != nil)
-	is.Equal(mon.Bridges(openshell.SessionSandboxName("alice", "r", "nope")), 0)
+	is.Equal(mon.Bridges(openshell.SessionSandboxName("alice", "nope")), 0)
 	_, _, err = runSessionCmd(t, withSess(), "attach", "r", "-n", "Bad")
 	is.True(err != nil)
-	is.Equal(mon.Bridges(openshell.SessionSandboxName("alice", "r", "Bad")), 0)
+	is.Equal(mon.Bridges(openshell.SessionSandboxName("alice", "Bad")), 0)
 
 	// The SSH client goes away mid-bridge.
 	cctx, cancel := context.WithCancel(withSess())
@@ -312,7 +312,7 @@ func TestSessionListProviders(t *testing.T) {
 	for _, s := range got {
 		providers[s.Name] = s.Providers
 	}
-	is.Equal(providers["main"], []string{"my-claude", "my-github"})
+	is.Equal(providers["r"], []string{"my-claude", "my-github"})
 	is.Equal(providers["plain"], nil)
 	is.True(!strings.Contains(stdout, `"providers":null`))
 }

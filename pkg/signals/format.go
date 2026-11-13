@@ -164,7 +164,7 @@ func (s Signal) Where() string {
 	if !ok {
 		return ""
 	}
-	w := Sanitize(sess.Repo, 0) + " / " + Sanitize(sess.DisplayName(), 0)
+	w := SessionLabel(sess.DisplayName(), sess.AllRepos())
 	if s.Status != nil && s.Status.Record.ID != "" {
 		w += "/" + Sanitize(s.Status.Record.ID, 0)
 	}
@@ -280,4 +280,27 @@ func FormatTime(t, now time.Time) string {
 		return t.Format("15:04:05")
 	}
 	return t.Format("Jan 02")
+}
+
+// SessionLabel names a session for display, sanitised: "repo / name" for
+// a session of one repository, else "name (repo1, repo2, +N)".
+func SessionLabel(name string, repos []string) string {
+	if name == "" {
+		name = "main"
+	}
+	switch len(repos) {
+	case 0:
+		return Sanitize(name, 0)
+	case 1:
+		return Sanitize(repos[0], 0) + " / " + Sanitize(name, 0)
+	}
+	shown := repos[:min(len(repos), 2)]
+	parts := make([]string, 0, 3)
+	for _, r := range shown {
+		parts = append(parts, Sanitize(r, 0))
+	}
+	if more := len(repos) - len(shown); more > 0 {
+		parts = append(parts, "+"+strconv.Itoa(more))
+	}
+	return Sanitize(name, 0) + " (" + strings.Join(parts, ", ") + ")"
 }

@@ -185,7 +185,7 @@ func testOsewaSessionEnv(t *testing.T, shell string) {
 	if err := os.WriteFile(bin, []byte(fakeOsewaNew), 0o700); err != nil { //nolint:gosec
 		t.Fatal(err)
 	}
-	lc := &localClient{home: home, bin: binDir, sandbox: "sundae-alice-r", supervisorEnv: supervisorEnv()}
+	lc := &localClient{home: home, bin: binDir, sandbox: SessionSandboxName("alice", "main"), supervisorEnv: supervisorEnv()}
 	m := &Manager{client: lc}
 	command := []string{"/bin/sh", "-c", envProgram}
 
@@ -244,7 +244,7 @@ func TestOsewaLiveSessionEnv(t *testing.T) {
 	}
 	port := l.Addr().(*net.TCPAddr).Port
 	_ = l.Close()
-	lc := &localClient{home: home, bin: binDir, sandbox: "sundae-alice-r", supervisorEnv: supervisorEnv()}
+	lc := &localClient{home: home, bin: binDir, sandbox: SessionSandboxName("alice", "main"), supervisorEnv: supervisorEnv()}
 	m := &Manager{client: lc, osewaPort: port}
 	t.Cleanup(func() {
 		_ = exec.CommandContext(context.Background(), "pkill", "-f", "--", "--listen 127.0.0.1:"+strconv.Itoa(port)).Run()

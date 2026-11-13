@@ -55,15 +55,15 @@ type Source interface {
 	// End ends a session, deleting its sandbox. It reports whether there
 	// was one. When the session's S3 snapshot fails it is not ended
 	// (openshell.ErrSnapshotFailed), unless force is set.
-	End(ctx context.Context, repo, name string, force bool) (bool, error)
+	End(ctx context.Context, name string, force bool) (bool, error)
 	// SnapshotsOnEnd reports whether ending a session saves /sandbox to
 	// S3 first.
 	SnapshotsOnEnd() bool
 	// Park parks a running session. It reports whether it parked it.
-	Park(ctx context.Context, repo, name string) (bool, error)
+	Park(ctx context.Context, name string) (bool, error)
 	// AttachCommand is the command that attaches to the session from a
 	// terminal.
-	AttachCommand(repo, name string) string
+	AttachCommand(name string) string
 }
 
 // Feed delivers signals as they are recorded; *signals.Feed satisfies it.
@@ -230,9 +230,9 @@ func (s *source) Prepare(ctx context.Context, req sessionctl.Request) (Attacher,
 	return &attacher{Prepared: p, client: client}, nil
 }
 
-func (s *source) End(ctx context.Context, repo, name string, force bool) (existed bool, err error) {
+func (s *source) End(ctx context.Context, name string, force bool) (existed bool, err error) {
 	err = s.withClient(func(mgr *openshell.Manager) error {
-		res, err := mgr.EndSession(ctx, s.user, repo, name, openshell.EndOptions{Force: force})
+		res, err := mgr.EndSession(ctx, s.user, name, openshell.EndOptions{Force: force})
 		existed = res.Existed
 		return err //nolint:wrapcheck
 	})
@@ -241,16 +241,16 @@ func (s *source) End(ctx context.Context, repo, name string, force bool) (existe
 
 func (s *source) SnapshotsOnEnd() bool { return s.cfg.Snapshots.S3.Snapshots(config.SnapshotOnEnd) }
 
-func (s *source) Park(ctx context.Context, repo, name string) (parked bool, err error) {
+func (s *source) Park(ctx context.Context, name string) (parked bool, err error) {
 	err = s.withClient(func(mgr *openshell.Manager) error {
-		parked, err = mgr.Park(ctx, s.user, repo, name)
+		parked, err = mgr.Park(ctx, s.user, name)
 		return err //nolint:wrapcheck
 	})
 	return parked, err
 }
 
-func (s *source) AttachCommand(repo, name string) string {
-	return sessionctl.AttachCommand(s.cfg.SSH.PublicURL, repo, name)
+func (s *source) AttachCommand(name string) string {
+	return sessionctl.AttachCommand(s.cfg.SSH.PublicURL, name)
 }
 
 // attacher is a sessionctl.Prepared with the client it was prepared with.

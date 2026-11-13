@@ -233,3 +233,69 @@ func TestTextFieldCharLimit(t *testing.T) {
 	// Other kinds ignore it.
 	ToggleField("t", "T", false).SetCharLimit(1)
 }
+
+func TestMultiField(t *testing.T) {
+	opts := []Option{{Value: "app"}, {Value: "infra"}, {Value: "lib"}, {Value: "gone"}}
+	// Values not among the options are dropped.
+	m := MultiField("repos", "Repositories", opts, []string{"lib", "nope"})
+	f := NewForm(newCommon(), "Pick", "go", m)
+	var changes int
+	f.OnChange = func(*Form, string) { changes++ }
+	if m.Kind() != Multi || strings.Join(m.Values(), ",") != "lib" || m.Value() != "lib" {
+		t.Fatalf("initial %v", m.Values())
+	}
+	// The shown option starts on the first picked one.
+	if o, _ := m.Selected(); o.Value != "lib" {
+		t.Fatalf("shown %s", o.Value)
+	}
+	// ←→ move, space toggles, in the order picked.
+	f.Update(press("left"))
+	f.Update(press(" "))
+	f.Update(press("right"))
+	f.Update(press("right"))
+	f.Update(press(" "))
+	if strings.Join(m.Values(), ",") != "lib,infra,gone" || changes != 2 {
+		t.Fatalf("values %v changes %d", m.Values(), changes)
+	}
+	// Space again unpicks.
+	f.Update(press(" "))
+	if strings.Join(m.Values(), ",") != "lib,infra" {
+		t.Fatalf("values %v", m.Values())
+	}
+	// Typing filters; backspace and esc clear the filter, not the form.
+	for _, k := range []string{"a", "p"} {
+		f.Update(press(k))
+	}
+	if o, ok := m.Selected(); !ok || o.Value != "app" {
+		t.Fatalf("filtered %v %v", o, ok)
+	}
+	view := ansi.Strip(f.View(80))
+	if !strings.Contains(view, "‹ [ ] app ›") || !strings.Contains(view, "/ap") || !strings.Contains(view, "lib, infra") {
+		t.Fatalf("view:\n%s", view)
+	}
+	if res, _ := f.Update(press("esc")); res != Pending {
+		t.Fatal("esc with a filter cancelled the form")
+	}
+	// Three or more picked: two shown and a count.
+	f.Update(press(" ")) // app (the filter is gone; the shown option stays)
+	f.Update(press("left"))
+	f.Update(press(" ")) // gone, before app when wrapping left
+	if strings.Join(m.Values(), ",") != "lib,infra,app,gone" || !strings.Contains(ansi.Strip(f.View(80)), "lib, infra, +2") {
+		t.Fatalf("values %v view:\n%s", m.Values(), ansi.Strip(f.View(80)))
+	}
+	// Nothing picked is refused at submit.
+	for _, v := range m.Values() {
+		m.toggle(v, false)
+	}
+	if res, _ := f.Update(press("enter")); res != Pending || f.Err() == nil || !strings.Contains(f.Err().Error(), "pick at least one") {
+		t.Fatalf("empty submit: %v", f.Err())
+	}
+	// The help names space.
+	found := false
+	for _, b := range f.ShortHelp() {
+		found = found || b.Help().Key == "space"
+	}
+	if !found {
+		t.Fatal("no space in the help")
+	}
+}

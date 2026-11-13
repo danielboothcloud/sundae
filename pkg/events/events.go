@@ -72,14 +72,49 @@ func (e Event) payloadKind() Kind {
 type Session struct {
 	// User is the owner's username.
 	User string `json:"user"`
-	// Repo is the repository the session works on.
+	// Repo is the session's first repository.
 	Repo string `json:"repo"`
-	// Name is the session's name within the repository ("main" unless the
-	// user named it). Empty only from publishers that predate named
-	// sessions.
+	// Repos are all the session's repositories, in order, when it has
+	// more than one; nil for a one-repository session.
+	Repos []string `json:"repos,omitempty"`
+	// Name is the session's name, unique per user. Empty only from
+	// publishers that predate named sessions.
 	Name string `json:"name,omitempty"`
 	// Sandbox is the OpenShell sandbox name.
 	Sandbox string `json:"sandbox"`
+}
+
+// NewSession returns the Session of a session holding repos.
+func NewSession(user, name, sandbox string, repos []string) Session {
+	s := Session{User: user, Name: name, Sandbox: sandbox}
+	if len(repos) > 0 {
+		s.Repo = repos[0]
+	}
+	if len(repos) > 1 {
+		s.Repos = append([]string(nil), repos...)
+	}
+	return s
+}
+
+// AllRepos returns the session's repositories, in order.
+func (s Session) AllRepos() []string {
+	if len(s.Repos) > 0 {
+		return s.Repos
+	}
+	if s.Repo != "" {
+		return []string{s.Repo}
+	}
+	return nil
+}
+
+// HasRepo reports whether repo is one of the session's repositories.
+func (s Session) HasRepo(repo string) bool {
+	for _, r := range s.AllRepos() {
+		if r == repo {
+			return true
+		}
+	}
+	return false
 }
 
 // DisplayName is the name to show for the session: Name, or the sandbox

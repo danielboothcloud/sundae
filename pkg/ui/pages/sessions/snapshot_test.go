@@ -35,7 +35,7 @@ func TestEndWithSnapshot(t *testing.T) {
 		t.Fatalf("notice:\n%s", view(m))
 	}
 	run(m, keys(m, "y"), 2)
-	if fmt.Sprint(src.ended) != "[infra/claude-1 (force)]" {
+	if fmt.Sprint(src.ended) != "[claude-1 (force)]" {
 		t.Fatalf("ended %v", src.ended)
 	}
 
@@ -121,7 +121,7 @@ func TestRestoreConflictConfirm(t *testing.T) {
 	if len(src.prepared) != 3 || src.prepared[2].Restore != openshell.RestoreOver || !src.prepared[2].Create {
 		t.Fatalf("prepared %+v", src.prepared)
 	}
-	if !strings.Contains(view(m), "Started infra / claude-2.") {
+	if !strings.Contains(view(m), "Started infra / infra.") {
 		t.Fatalf("notice:\n%s", view(m))
 	}
 }

@@ -1,10 +1,12 @@
 // Package prompt holds the TUI's small input components: a Form of labelled
-// fields (fixed text, free text, a choice among options, a yes/no toggle),
+// fields (fixed text, free text, a choice among options, a multi-select,
+// a yes/no toggle),
 // and a one-line yes/no Confirm. They are embedded by pages, which forward
 // messages to them and act on the Result.
 package prompt
 
 import (
+	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -40,6 +42,10 @@ const (
 	Choice
 	// Toggle is yes or no.
 	Toggle
+	// Multi picks any number of a list of options: ←→ move among them,
+	// space toggles the one shown, and typing narrows them to those
+	// containing what was typed. Values are in the order they were picked.
+	Multi
 )
 
 // Option is one choice of a Choice field.
@@ -78,6 +84,9 @@ type Field struct {
 	filterable bool
 	filter     string
 
+	// picked are a Multi field's selected Values, in the order picked.
+	picked []string
+
 	on bool
 }
 
@@ -108,6 +117,53 @@ func ChoiceField(key, label string, opts []Option, selected string, filterable b
 	return f
 }
 
+// MultiField returns a field picking any number of opts, with the Values in
+// picked selected, in that order. Typing filters the options.
+func MultiField(key, label string, opts []Option, picked []string) *Field {
+	f := &Field{Key: key, Label: label, kind: Multi, filterable: true}
+	f.SetOptions(opts, "")
+	for _, v := range picked {
+		f.toggle(v, true)
+	}
+	if len(f.picked) > 0 {
+		f.SetValue(f.picked[0])
+	}
+	return f
+}
+
+// Values returns a Multi field's selected Values, in the order picked.
+func (f *Field) Values() []string { return append([]string(nil), f.picked...) }
+
+// toggle selects (on) or deselects the option with Value v.
+func (f *Field) toggle(v string, on bool) {
+	i := -1
+	for j, p := range f.picked {
+		if p == v {
+			i = j
+		}
+	}
+	switch {
+	case on && i < 0:
+		for _, o := range f.options {
+			if o.Value == v {
+				f.picked = append(f.picked, v)
+			}
+		}
+	case !on && i >= 0:
+		f.picked = append(f.picked[:i], f.picked[i+1:]...)
+	}
+}
+
+// isPicked reports whether a Multi field has v selected.
+func (f *Field) isPicked(v string) bool {
+	for _, p := range f.picked {
+		if p == v {
+			return true
+		}
+	}
+	return false
+}
+
 // ToggleField returns a yes/no field.
 func ToggleField(key, label string, on bool) *Field {
 	return &Field{Key: key, Label: label, kind: Toggle, on: on}
@@ -136,6 +192,8 @@ func (f *Field) Value() string {
 			return o.Value
 		}
 		return ""
+	case Multi:
+		return strings.Join(f.picked, ",")
 	case Toggle:
 		if f.on {
 			return "yes"
@@ -161,7 +219,7 @@ func (f *Field) SetValue(v string) {
 	case Text:
 		f.input.SetValue(v)
 		f.input.CursorEnd()
-	case Choice:
+	case Choice, Multi:
 		for i, o := range f.options {
 			if o.Value == v {
 				f.choice = i
@@ -188,7 +246,7 @@ func (f *Field) SetOptions(opts []Option, selected string) {
 // Selected returns a Choice field's chosen option; false when there is
 // none, or none matches the filter.
 func (f *Field) Selected() (Option, bool) {
-	if f.kind != Choice || len(f.options) == 0 || !f.matches(f.options[f.choice]) {
+	if (f.kind != Choice && f.kind != Multi) || len(f.options) == 0 || !f.matches(f.options[f.choice]) {
 		return Option{}, false
 	}
 	return f.options[f.choice], true
@@ -337,8 +395,14 @@ func (f *Form) move(d int) {
 
 // ShortHelp returns the form's keys for the help line.
 func (f *Form) ShortHelp() []key.Binding {
+	if cur := f.Focused(); cur != nil && cur.kind == Multi {
+		toggle := key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "pick"))
+		return []key.Binding{f.KeyMap.Field, f.KeyMap.Change, toggle, f.KeyMap.Submit, f.KeyMap.Cancel}
+	}
 	return []key.Binding{f.KeyMap.Field, f.KeyMap.Change, f.KeyMap.Submit, f.KeyMap.Cancel}
 }
+
+func itoa(n int) string { return strconv.Itoa(n) }
 
 // Update handles a message and reports whether the form was submitted or
 // cancelled. A submitted form's values are valid.
@@ -355,7 +419,7 @@ func (f *Form) Update(msg tea.Msg) (Result, tea.Cmd) {
 	cur := f.Focused()
 	switch km.String() {
 	case "esc":
-		if cur != nil && cur.kind == Choice && cur.filter != "" {
+		if cur != nil && (cur.kind == Choice || cur.kind == Multi) && cur.filter != "" {
 			cur.setFilter("")
 			return Pending, nil
 		}
@@ -396,6 +460,27 @@ func (f *Form) Update(msg tea.Msg) (Result, tea.Cmd) {
 			if cur.filterable && km.Text != "" {
 				cur.setFilter(cur.filter + km.Text)
 				changed = true
+			}
+		}
+	case Multi:
+		switch km.String() {
+		case "left":
+			cur.step(-1)
+		case "right":
+			cur.step(1)
+		case "space", " ":
+			if o, ok := cur.Selected(); ok {
+				cur.toggle(o.Value, !cur.isPicked(o.Value))
+				changed = true
+			}
+		case "backspace":
+			if cur.filter != "" {
+				r := []rune(cur.filter)
+				cur.setFilter(string(r[:len(r)-1]))
+			}
+		default:
+			if km.Text != "" && km.Text != " " {
+				cur.setFilter(cur.filter + km.Text)
 			}
 		}
 	case Toggle:
@@ -439,6 +524,10 @@ func (f *Form) check() error {
 			if _, ok := fd.Selected(); !ok {
 				return &choiceError{label: fd.Label}
 			}
+		case Multi:
+			if len(fd.picked) == 0 {
+				return &multiError{label: fd.Label}
+			}
 		}
 	}
 	if f.Validate != nil {
@@ -450,6 +539,12 @@ func (f *Form) check() error {
 type choiceError struct{ label string }
 
 func (e *choiceError) Error() string { return "choose a " + strings.ToLower(e.label) }
+
+type multiError struct{ label string }
+
+func (e *multiError) Error() string {
+	return "pick at least one of " + strings.ToLower(e.label) + " (space toggles)"
+}
 
 // View renders the form in width columns.
 func (f *Form) View(width int) string {
@@ -494,6 +589,33 @@ func (f *Form) View(width int) string {
 			if len(extra) > 0 {
 				value += "   " + dim.Render(strings.Join(extra, "  "))
 			}
+		case Multi:
+			o, ok := fd.Selected()
+			name := "(no match)"
+			if ok {
+				mark := "[ ] "
+				if fd.isPicked(o.Value) {
+					mark = "[x] "
+				}
+				name = mark + o.label()
+			}
+			value = "‹ " + name + " ›"
+			if focused {
+				value = st.RepoSelector.Active.Title.Render(value)
+			}
+			var extra []string
+			if fd.filter != "" {
+				extra = append(extra, "/"+fd.filter)
+			}
+			switch n := len(fd.picked); {
+			case n == 0:
+				extra = append(extra, "none picked")
+			case n <= 2:
+				extra = append(extra, strings.Join(fd.picked, ", "))
+			default:
+				extra = append(extra, fd.picked[0]+", "+fd.picked[1]+", +"+itoa(n-2))
+			}
+			value += "   " + dim.Render(strings.Join(extra, "  "))
 		case Toggle:
 			value = "no"
 			if fd.on {

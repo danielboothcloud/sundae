@@ -226,9 +226,9 @@ func TestRepositoriesNewSessionKey(t *testing.T) {
 	if !strings.Contains(s, "New session") || !strings.Contains(s, "• Sessions") {
 		t.Fatalf("s did not open the form:\n%s", s)
 	}
-	// The repository is the selected one, fixed.
-	if !strings.Contains(s, "Repository   sundae") || strings.Contains(s, "‹ sundae ›") {
-		t.Fatalf("repository not fixed:\n%s", s)
+	// The repository is the selected one, picked; others can be added.
+	if !strings.Contains(s, "‹ [x] sundae ›") {
+		t.Fatalf("repository not picked:\n%s", s)
 	}
 	uiKey(ui, "esc", "1")
 	found := false

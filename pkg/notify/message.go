@@ -10,6 +10,7 @@ import (
 
 	"github.com/danielboothcloud/sundae/pkg/config"
 	"github.com/danielboothcloud/sundae/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/signals"
 )
 
 // Length caps, in bytes. ntfy limits titles to 1 KB, all tags to 512 bytes
@@ -102,7 +103,10 @@ func tags(candidates ...string) []string {
 // sessionLabel is "repo / session" as shown in titles, with a child record's
 // id after the session name.
 func sessionLabel(s events.Session, recordID string) string {
-	label := sanitize(s.Repo, maxLine) + " / " + sanitize(s.DisplayName(), maxLine)
+	label := signals.SessionLabel(s.DisplayName(), s.AllRepos())
+	if len([]rune(label)) > maxLine {
+		label = string([]rune(label)[:maxLine-1]) + "…"
+	}
 	if recordID != "" {
 		label += "/" + sanitize(recordID, maxLine)
 	}

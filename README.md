@@ -369,36 +369,55 @@ Use the `lfs` config section to customize your Git LFS server.
 
 Sundae can start and resume agent sessions in
 [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) sandboxes. Each
-session has its own sandbox, with the repository cloned into
-`/sandbox/<repo>`. The session's program (a shell by default, or an agent)
-runs there inside an [osewa](https://github.com/rjyo/osewa) session, so it
-keeps running after your SSH connection closes. Your SSH terminal is bridged
-to it:
+session has its own sandbox holding one or more repositories, each cloned
+into `/sandbox/<repo>`. The session's program (a shell by default, or an
+agent) runs inside an [osewa](https://github.com/rjyo/osewa) session, in the
+checkout of its only repository, else in `/sandbox`, so it keeps running
+after your SSH connection closes. Your SSH terminal is bridged to it:
 
 ```sh
-ssh -t -p 23231 localhost session start icecream                  # create or resume the "main" session, then attach
-ssh -t -p 23231 localhost session start icecream --name review    # a second session of the same repository
-ssh -t -p 23231 localhost session start icecream --profile claude # create from a profile (see below)
-ssh -t -p 23231 localhost session start icecream --image my/img   # image used only when the sandbox is first created
-ssh    -p 23231 localhost session start icecream -n bg --detach   # create or resume without attaching (no -t needed)
-ssh -t -p 23231 localhost session attach icecream --name review   # attach to an existing session (resuming it if parked)
-ssh    -p 23231 localhost session ls                              # your sessions, with what each agent is doing
-ssh    -p 23231 localhost session ls --json                       # the same as JSON
-ssh    -p 23231 localhost session signals                         # what your sessions reported, newest first
-ssh    -p 23231 localhost session signals --attention --follow    # keep printing what needs you (Ctrl-C to stop)
-ssh    -p 23231 localhost session park icecream --name review     # suspend that session's sandbox now
-ssh    -p 23231 localhost session resume icecream --name review   # resume it without attaching
-ssh    -p 23231 localhost session end icecream --name review      # delete that session's sandbox and revoke its token
+ssh -t -p 23231 localhost session start icecream                    # create or resume the session "icecream" holding the repository, then attach
+ssh -t -p 23231 localhost session new bundle --repo app --repo lib  # a session holding several repositories
+ssh -t -p 23231 localhost session start icecream --name review      # a second session of the same repository
+ssh -t -p 23231 localhost session start icecream --profile claude   # create from a profile (see below)
+ssh -t -p 23231 localhost session start icecream --image my/img     # image used only when the sandbox is first created
+ssh    -p 23231 localhost session start icecream -n bg --detach     # create or resume without attaching (no -t needed)
+ssh -t -p 23231 localhost session attach review                     # attach to an existing session (resuming it if parked)
+ssh    -p 23231 localhost session repos bundle                      # the session's repositories
+ssh    -p 23231 localhost session repos bundle add docs             # clone another repository into it
+ssh    -p 23231 localhost session repos bundle remove lib           # take one out (its checkout stays)
+ssh    -p 23231 localhost session ls                                # your sessions, with what each agent is doing
+ssh    -p 23231 localhost session ls --json                         # the same as JSON
+ssh    -p 23231 localhost session signals                           # what your sessions reported, newest first
+ssh    -p 23231 localhost session signals --attention --follow      # keep printing what needs you (Ctrl-C to stop)
+ssh    -p 23231 localhost session park review                       # suspend that session's sandbox now
+ssh    -p 23231 localhost session resume review                     # resume it without attaching
+ssh    -p 23231 localhost session end review                        # delete that session's sandbox and revoke its token
 ```
 
-**Named sessions.** A user can have several sessions per repository, told
-apart by `--name` (1 to 32 lowercase letters, digits and hyphens; `main` when
-omitted). Each is its own sandbox: `main` keeps the name `sundae-<user>-<repo>`
-sessions had before names existed, so existing sandboxes are its `main`
-session, and other names get `sundae-<user>-<repo>-<name>--<hash>` (cut to 63
-characters). The sandbox records the user, repository, session name and
-profile as annotations; Sundae stores no session state of its own.
-`session end` deletes one session and leaves the others.
+**Sessions and repositories.** A session is named (1 to 32 lowercase
+letters, digits and hyphens) and its name is unique per user. `session new
+NAME --repo R...` creates one holding the repositories given, in order;
+`session start REPO` is the one-repository shorthand, naming the session
+after the repository's last path segment (or a numbered name such as `tool-2`
+when a session of that name holds other repositories), or `--name`. Starting
+an existing session resumes it and adds any repository it lacks. Commands
+that take `SESSION` (attach, park, resume, end, repos) accept the session's
+name, or a repository held by exactly one of your sessions.
+
+Each session is its own sandbox, named `sd-` and 16 hex digits of a hash of
+the user and session name: OpenShell 0.1.8 refuses sandbox names over 19
+characters. The sandbox records the user, session name, profile and the
+repositories it was created with as annotations; OpenShell cannot change
+annotations, so after `session repos add|remove` the current list is kept in
+the sandbox (`~/.config/sundae/repos`, which snapshots keep too) and the
+server remembers it. After a server restart a session shows the list it was
+created with until it is next started or attached. Removing a repository
+leaves its checkout in `/sandbox`. A new session's profile is `--profile`,
+else the first repository's own profile (`repo profile`), else the first
+`sessions.repos` match among its repositories, in order. Each repository
+gets the git identity of the forge it was imported from (see "Git
+identity"). `session end` deletes one session and leaves the others.
 
 **Detach and re-attach.** `session start` and `session attach` need a
 terminal, so pass `-t`. Detach with `~.` after a newline (osewa's escape), or
@@ -407,9 +426,9 @@ running. `session start` or `session attach` re-attaches to the same program,
 starting it again only if it has exited or the sandbox was restarted. The
 attach exits with the program's exit status when the program ends. A new
 attach takes over from an earlier one, which stays connected as a read-only
-viewer (`Ctrl-T` takes control back). You need read access to the repository,
-and anonymous users can't use sessions. `session attach` never creates a
-sandbox.
+viewer (`Ctrl-T` takes control back). You need read access to every
+repository a session holds, and anonymous users can't use sessions. `session
+attach` never creates a sandbox.
 
 The feature is off by default. When it is disabled, `session` is an unknown
 command. To enable it:
@@ -1863,7 +1882,9 @@ cycles. When OpenShell is enabled and you are signed in with a key, a
 **Sessions** tab lists your agent sessions, what needs you first, and the
 header counts the ones blocked, errored, done and working. In it:
 <kbd>enter</kbd> attaches (detach with <kbd>~.</kbd> to come back to the same
-row), <kbd>n</kbd> starts a session from a profile, <kbd>x</kbd> ends one,
+row), <kbd>n</kbd> starts a session (pick any number of repositories with
+<kbd>space</kbd>, a name and a profile), <kbd>a</kbd> and <kbd>R</kbd> add
+repositories to the highlighted session or remove some, <kbd>x</kbd> ends it,
 <kbd>z</kbd> parks or resumes it, <kbd>c</kbd> copies its `session attach`
 command, <kbd>/</kbd> filters, and <kbd>e</kbd> switches to the **Signals**
 pane: the `session signals` feed, live, newest first (<kbd>a</kbd> shows only
@@ -1876,7 +1897,9 @@ repository (the most urgent state and how many), and, when forges are
 configured, where it comes from (`local`, or the forge with `↑n ↓n` commits
 ahead and behind its default branch as of the last sync). They follow status
 changes and forge syncs live and drop off on narrow terminals. <kbd>s</kbd>
-starts a session for the highlighted repository, and <kbd>n</kbd> opens the
+opens the new-session form with the highlighted repository picked,
+<kbd>D</kbd> deletes it after a confirm (with write access, as `repo
+delete`), and <kbd>n</kbd> opens the
 new-repository form (for whoever may run `repo create`): name, description,
 VCS, template (those you can read), session profile, private, and whether to
 start a session. On success the new repository is selected; with "Start
@@ -1889,7 +1912,8 @@ When forges are configured, server admins (the same people who may run
 `forge import` and `forge sync`) get a **Forges** tab: every forge with its
 repositories, imported (`✓`, with ahead/behind and last sync) or not.
 <kbd>i</kbd> imports the highlighted repository, <kbd>I</kbd> imports all
-shown (the <kbd>/</kbd> filter narrows them; you confirm the count),
+shown (the <kbd>/</kbd> filter narrows them); both ask whether to import
+them as jj or git repositories,
 <kbd>r</kbd> syncs the forge on its header or the repository on its row,
 <kbd>p</kbd> pushes the repository's branch to the forge after a confirm
 naming it (fast-forward only; a refusal says why), and <kbd>enter</kbd> opens

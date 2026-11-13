@@ -20,7 +20,6 @@ import (
 	"github.com/danielboothcloud/sundae/pkg/sessionctl"
 	"github.com/danielboothcloud/sundae/pkg/signals"
 	"github.com/danielboothcloud/sundae/pkg/ui/common"
-	"github.com/danielboothcloud/sundae/pkg/ui/components/prompt"
 )
 
 var update = flag.Bool("update", false, "update golden files")
@@ -85,7 +84,7 @@ func (f *fakeSource) Command(profile string) string {
 
 func (f *fakeSource) Prepare(_ context.Context, req sessionctl.Request) (Attacher, error) {
 	if req.Progress != nil {
-		fmt.Fprintf(req.Progress, "Starting sandbox for %s...\nCloning %s...\n", req.Name, req.Repo) //nolint:errcheck
+		fmt.Fprintf(req.Progress, "Starting sandbox for %s...\nCloning %s...\n", req.Name, strings.Join(req.Repos, ", ")) //nolint:errcheck
 	}
 	if f.gate != nil {
 		<-f.gate
@@ -101,34 +100,43 @@ func (f *fakeSource) Prepare(_ context.Context, req sessionctl.Request) (Attache
 	if f.prepErr != nil {
 		return nil, f.prepErr
 	}
-	return &fakeAttacher{src: f, s: &openshell.Session{Repo: req.Repo, Name: req.Name, Sandbox: "sb-" + req.Repo + "-" + req.Name}}, nil
+	repos := req.Repos
+	if len(repos) == 0 && req.Repo != "" {
+		repos = []string{req.Repo}
+	}
+	s := &openshell.Session{Name: req.Name, Repos: repos}
+	if len(repos) > 0 {
+		s.Repo = repos[0]
+	}
+	s.Sandbox = "sb-" + s.Repo + "-" + req.Name
+	return &fakeAttacher{src: f, s: s}, nil
 }
 
-func (f *fakeSource) End(_ context.Context, repo, name string, force bool) (bool, error) {
+func (f *fakeSource) End(_ context.Context, name string, force bool) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.endErr != nil && !force {
 		return false, f.endErr
 	}
 	if force {
-		f.ended = append(f.ended, repo+"/"+name+" (force)")
+		f.ended = append(f.ended, name+" (force)")
 	} else {
-		f.ended = append(f.ended, repo+"/"+name)
+		f.ended = append(f.ended, name)
 	}
 	return true, nil
 }
 
 func (f *fakeSource) SnapshotsOnEnd() bool { return f.snapshots }
 
-func (f *fakeSource) Park(_ context.Context, repo, name string) (bool, error) {
+func (f *fakeSource) Park(_ context.Context, name string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.parked = append(f.parked, repo+"/"+name)
+	f.parked = append(f.parked, name)
 	return true, nil
 }
 
-func (f *fakeSource) AttachCommand(repo, name string) string {
-	return sessionctl.AttachCommand("ssh://git.example.com", repo, name)
+func (f *fakeSource) AttachCommand(name string) string {
+	return sessionctl.AttachCommand("ssh://git.example.com", name)
 }
 
 type fakeAttacher struct {
@@ -655,7 +663,7 @@ func TestEndConfirm(t *testing.T) {
 		t.Fatalf("busy words %q", m.words(m.rows[0]))
 	}
 	run(m, cmd, 2)
-	if fmt.Sprint(src.ended) != "[infra/claude-1]" {
+	if fmt.Sprint(src.ended) != "[claude-1]" {
 		t.Fatalf("ended %v", src.ended)
 	}
 	if !strings.Contains(view(m), "Ended infra / claude-1.") {
@@ -667,7 +675,7 @@ func TestParkAndResume(t *testing.T) {
 	src := newFakeSource()
 	m := loaded(t, 76, 30, src)
 	run(m, keys(m, "z"), 1) // infra / claude-1 is running: park it
-	if fmt.Sprint(src.parked) != "[infra/claude-1]" {
+	if fmt.Sprint(src.parked) != "[claude-1]" {
 		t.Fatalf("parked %v", src.parked)
 	}
 	keys(m, "G") // dotfiles / main is parked: resume it, without attaching
@@ -676,7 +684,7 @@ func TestParkAndResume(t *testing.T) {
 		t.Fatalf("selected %s", r.Info.Repo)
 	}
 	run(m, keys(m, "z"), 1)
-	if len(src.prepared) != 1 || src.prepared[0].Create || src.prepared[0].Repo != "dotfiles" || src.closed != 1 {
+	if len(src.prepared) != 1 || src.prepared[0].Create || src.prepared[0].Name != "main" || src.closed != 1 {
 		t.Fatalf("prepared %+v, closed %d", src.prepared, src.closed)
 	}
 	if !strings.Contains(view(m), "Resumed dotfiles / main.") {
@@ -690,7 +698,7 @@ func TestCopyAttachCommand(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("no clipboard command")
 	}
-	if got := fmt.Sprint(cmd()); !strings.Contains(got, "ssh -t git.example.com session attach infra -n claude-1") {
+	if got := fmt.Sprint(cmd()); !strings.Contains(got, "ssh -t git.example.com session attach claude-1") {
 		t.Fatalf("clipboard %q", got)
 	}
 	if !strings.Contains(view(m), "(copied to clipboard)") {
@@ -740,19 +748,27 @@ func TestNewSessionForm(t *testing.T) {
 		t.Fatal("n did not open the form")
 	}
 	f := m.form
-	if f.Field("repo").Value() != "sundae" || f.Field("profile").Value() != "claude" || f.Field("name").Value() != "claude-1" {
-		t.Fatalf("defaults: %s %s %s", f.Field("repo").Value(), f.Field("profile").Value(), f.Field("name").Value())
+	repos := f.Field("repos")
+	// The selected session's repository is picked; the session is named
+	// after it, from its profile.
+	if strings.Join(repos.Values(), ",") != "sundae" || f.Field("profile").Value() != "claude" || f.Field("name").Value() != "sundae" {
+		t.Fatalf("defaults: %v %s %s", repos.Values(), f.Field("profile").Value(), f.Field("name").Value())
 	}
 	golden(t, "new-session-80", view(m))
 
-	// Changing the profile renames an untouched name.
+	// Pick a second repository: ← to infra, space.
+	keys(m, "left", " ")
+	if strings.Join(repos.Values(), ",") != "sundae,infra" || !strings.Contains(view(m), "sundae, infra") {
+		t.Fatalf("picked %v:\n%s", repos.Values(), view(m))
+	}
+	// Changing the profile does not rename.
 	keys(m, "down", "down", "right")
-	if f.Field("profile").Value() != "shell" || f.Field("name").Value() != "shell-1" {
+	if f.Field("profile").Value() != "shell" || f.Field("name").Value() != "sundae" {
 		t.Fatalf("after profile change: %s %s", f.Field("profile").Value(), f.Field("name").Value())
 	}
 	// An invalid name is refused.
 	keys(m, "up")
-	for range len("shell-1") {
+	for range len("sundae") {
 		keys(m, "backspace")
 	}
 	typeText(m, "Bad")
@@ -766,7 +782,7 @@ func TestNewSessionForm(t *testing.T) {
 	}
 	typeText(m, "tui")
 	keys(m, "enter")
-	if m.form == nil || !strings.Contains(view(m), "sundae / tui already exists") {
+	if m.form == nil || !strings.Contains(view(m), "session tui already exists") {
 		t.Fatalf("existing name accepted:\n%s", view(m))
 	}
 	keys(m, "backspace")
@@ -782,15 +798,20 @@ func TestNewSessionForm(t *testing.T) {
 		t.Fatalf("prepared %+v", src.prepared)
 	}
 	req := src.prepared[0]
-	if !req.Create || req.Repo != "sundae" || req.Name != "tu2" || req.Profile != "shell" {
+	if !req.Create || strings.Join(req.Repos, ",") != "sundae,infra" || req.Name != "tu2" || req.Profile != "shell" {
 		t.Fatalf("request %+v", req)
 	}
-	if m.op != nil || src.closed != 1 || !strings.Contains(view(m), "Started sundae / tu2.") {
+	if m.op != nil || src.closed != 1 || !strings.Contains(view(m), "Started tu2 (sundae, infra).") {
 		t.Fatalf("op %v closed %d:\n%s", m.op, src.closed, view(m))
 	}
 
-	// esc cancels the form.
+	// Nothing picked is refused; esc cancels the form.
 	run(m, keys(m, "n"), 1)
+	keys(m, " ") // unpick the preselected one
+	keys(m, "enter")
+	if m.form == nil || !strings.Contains(view(m), "pick at least one") {
+		t.Fatalf("empty pick accepted:\n%s", view(m))
+	}
 	keys(m, "esc")
 	if m.form != nil {
 		t.Fatal("esc did not cancel")
@@ -802,12 +823,44 @@ func TestNewSessionFormRepoPicker(t *testing.T) {
 	m := loaded(t, 76, 30, src)
 	run(m, keys(m, "n"), 1)
 	f := m.form
-	if f.Focused().Key != "repo" {
+	if f.Focused().Key != "repos" {
 		t.Fatalf("focused %s", f.Focused().Key)
 	}
+	// Typing filters; space picks what is shown.
+	keys(m, " ") // unpick the default
 	typeText(m, "sundae")
-	if f.Field("repo").Value() != "sundae" || f.Field("profile").Value() != "claude" || f.Field("name").Value() != "claude-1" {
-		t.Fatalf("picked %s %s %s", f.Field("repo").Value(), f.Field("profile").Value(), f.Field("name").Value())
+	keys(m, " ")
+	if strings.Join(f.Field("repos").Values(), ",") != "sundae" || f.Field("profile").Value() != "claude" || f.Field("name").Value() != "sundae" {
+		t.Fatalf("picked %v %s %s", f.Field("repos").Values(), f.Field("profile").Value(), f.Field("name").Value())
+	}
+}
+
+func TestEditSessionRepos(t *testing.T) {
+	src := newFakeSource()
+	m := loaded(t, 76, 30, src)
+	// infra / claude-1 is selected: add sundae to it.
+	run(m, keys(m, "a"), 1)
+	if m.form == nil || !strings.Contains(view(m), "Add repositories to infra / claude-1") {
+		t.Fatalf("view:\n%s", view(m))
+	}
+	// Only repositories it lacks are offered.
+	if strings.Contains(m.form.View(76), "‹ [ ] infra ›") {
+		t.Fatal("infra offered again")
+	}
+	typeText(m, "sund")
+	keys(m, " ")
+	run(m, keys(m, "enter"), 2)
+	if len(src.prepared) != 1 || src.prepared[0].Create || src.prepared[0].Name != "claude-1" || strings.Join(src.prepared[0].Repos, ",") != "sundae" {
+		t.Fatalf("prepared %+v", src.prepared)
+	}
+	if !strings.Contains(view(m), "Added sundae to") {
+		t.Fatalf("notice:\n%s", view(m))
+	}
+
+	// One repository: R refuses to remove it.
+	keys(m, "R")
+	if m.form != nil || !strings.Contains(view(m), "a session keeps at least one") {
+		t.Fatalf("view:\n%s", view(m))
 	}
 }
 
@@ -819,7 +872,7 @@ func TestStartAndAttach(t *testing.T) {
 	src.gate = make(chan struct{})
 	run(m, keys(m, "n"), 1)
 	cmd := keys(m, "enter")
-	if !strings.Contains(view(m), "Starting infra / claude-2 …") {
+	if !strings.Contains(view(m), "Starting infra / infra …") {
 		t.Fatalf("progress:\n%s", view(m))
 	}
 	// The progress lines show in place.
@@ -839,7 +892,7 @@ func TestStartAndAttach(t *testing.T) {
 	for m.op != nil {
 		_, cmd = m.Update(cmd())
 	}
-	if h.taken != 1 || cmd == nil || src.prepared[0].Name != "claude-2" {
+	if h.taken != 1 || cmd == nil || src.prepared[0].Name != "infra" {
 		t.Fatalf("taken %d, prepared %+v", h.taken, src.prepared)
 	}
 }
@@ -855,7 +908,7 @@ func TestEnterAttachesFromBothPanes(t *testing.T) {
 		t.Fatalf("attach of a parked session:\n%s", view(m))
 	}
 	run(m, cmd, 1)
-	if len(src.prepared) != 1 || src.prepared[0].Create || src.prepared[0].Repo != "dotfiles" {
+	if len(src.prepared) != 1 || src.prepared[0].Create || src.prepared[0].Name != "main" {
 		t.Fatalf("prepared %+v", src.prepared)
 	}
 	if m.op != nil || m.handoff.(*fakeHandoff).taken != 1 {
@@ -866,7 +919,7 @@ func TestEnterAttachesFromBothPanes(t *testing.T) {
 	m.Update(followMsg{snap: src.snap, feed: &fakeFeed{ch: make(chan []signals.Signal)}})
 	keys(m, "e", "g")
 	keys(m, "enter")
-	if m.op == nil || m.op.repo != "infra" || m.op.name != "claude-1" {
+	if m.op == nil || strings.Join(m.op.repos, ",") != "infra" || m.op.name != "claude-1" {
 		t.Fatalf("op %+v", m.op)
 	}
 	m.op.abandon()
@@ -899,11 +952,11 @@ func TestAttachExec(t *testing.T) {
 		t.Fatalf("code %d released %d closed %d", ex.code, released, src.closed)
 	}
 	m := loaded(t, 76, 30, src)
-	m.Update(attachDoneMsg{repo: "infra", name: "claude-1", code: 3})
+	m.Update(attachDoneMsg{repos: []string{"infra"}, name: "claude-1", code: 3})
 	if !strings.Contains(view(m), "infra / claude-1: the program exited with status 3.") {
 		t.Fatalf("view:\n%s", view(m))
 	}
-	m.Update(attachDoneMsg{repo: "infra", name: "claude-1"})
+	m.Update(attachDoneMsg{repos: []string{"infra"}, name: "claude-1"})
 	if !strings.Contains(view(m), "Detached from infra / claude-1.") {
 		t.Fatalf("view:\n%s", view(m))
 	}
@@ -912,7 +965,7 @@ func TestAttachExec(t *testing.T) {
 func TestOperationAbandonClosesAttacher(t *testing.T) {
 	src := newFakeSource()
 	ctx, cancel := context.WithCancel(context.Background())
-	op, opCtx := newOperation(ctx, "t", "r", "n", true)
+	op, opCtx := newOperation(ctx, "t", []string{"r"}, "n", true)
 	cmd := op.run(opCtx, src, sessionctl.Request{Repo: "r", Name: "n"})
 	cmd() // first progress or done
 	// The TUI goes away before it took the Attacher.
@@ -976,7 +1029,8 @@ func TestScopeKeys(t *testing.T) {
 	}
 	// n opens the form for this repository, fixed.
 	run(m, keys(m, "n"), 1)
-	if m.form == nil || m.form.Field("repo").Kind() != prompt.Fixed || m.form.Field("repo").Value() != "sundae" {
+	// n opens the form with this repository picked; more can be added.
+	if m.form == nil || strings.Join(m.form.Field("repos").Values(), ",") != "sundae" {
 		t.Fatal("n did not open the form for the repository")
 	}
 	keys(m, "esc")
@@ -986,7 +1040,7 @@ func TestScopeKeys(t *testing.T) {
 		t.Fatalf("confirm:\n%s", view(m))
 	}
 	run(m, keys(m, "y"), 2)
-	if fmt.Sprint(src.ended) != "[sundae/tui]" {
+	if fmt.Sprint(src.ended) != "[tui]" {
 		t.Fatalf("ended %v", src.ended)
 	}
 	// A filter in the repository is its own; esc clears it.

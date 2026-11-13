@@ -201,8 +201,8 @@ type SnapshotError struct {
 }
 
 func (e *SnapshotError) Error() string {
-	return fmt.Sprintf("the snapshot of /sandbox failed: %v; session %s of %s was not ended. Fix the problem and end it again, or end it without a snapshot with: session end %s%s --force",
-		e.Err, e.Name, e.Repo, e.Repo, nameFlag(e.Name))
+	return fmt.Sprintf("the snapshot of /sandbox failed: %v; session %s was not ended. Fix the problem and end it again, or end it without a snapshot with: session end %s --force",
+		e.Err, e.Name, e.Name)
 }
 
 func (e *SnapshotError) Unwrap() []error { return []error{ErrSnapshotFailed, e.Err} }
@@ -223,14 +223,14 @@ type RestoreConflictError struct {
 }
 
 func (e *RestoreConflictError) Error() string {
-	return fmt.Sprintf("session %s of %s has a snapshot of /sandbox (%s), but its new sandbox already holds files from earlier work (%s); restoring replaces those the snapshot also has. Start it again with --restore to restore the snapshot over them, or --fresh to keep them",
-		e.Name, e.Repo, e.Snapshot.Describe(), strings.Join(e.Paths, ", "))
+	return fmt.Sprintf("session %s has a snapshot of /sandbox (%s), but its new sandbox already holds files from earlier work (%s); restoring replaces those the snapshot also has. Start it again with --restore to restore the snapshot over them, or --fresh to keep them",
+		e.Name, e.Snapshot.Describe(), strings.Join(e.Paths, ", "))
 }
 
 // Question is the yes/no question to ask the user.
 func (e *RestoreConflictError) Question() string {
-	return fmt.Sprintf("Session %s of %s has a snapshot of /sandbox (%s), but its new sandbox already holds files from earlier work: %s. Restoring replaces the files the snapshot also has and keeps the others. Restore the snapshot over them?",
-		e.Name, e.Repo, e.Snapshot.Describe(), strings.Join(e.Paths, ", "))
+	return fmt.Sprintf("Session %s has a snapshot of /sandbox (%s), but its new sandbox already holds files from earlier work: %s. Restoring replaces the files the snapshot also has and keeps the others. Restore the snapshot over them?",
+		e.Name, e.Snapshot.Describe(), strings.Join(e.Paths, ", "))
 }
 
 func (e *RestoreConflictError) Is(target error) bool { return target == ErrRestoreConflict }
@@ -274,12 +274,14 @@ func (i SnapshotInfo) Describe() string {
 // stored as JSON next to the snapshot: Sundae keeps no session state,
 // and the sandbox that would carry it is gone.
 type ParkedSnapshot struct {
-	UserID  int64  `json:"user_id"`
-	User    string `json:"user"`
-	Repo    string `json:"repo"`
-	Session string `json:"session"`
-	Sandbox string `json:"sandbox"`
-	Profile string `json:"profile,omitempty"`
+	UserID int64  `json:"user_id"`
+	User   string `json:"user"`
+	Repo   string `json:"repo"`
+	// Repos are all the session's repositories when it has more than one.
+	Repos   []string `json:"repos,omitempty"`
+	Session string   `json:"session"`
+	Sandbox string   `json:"sandbox"`
+	Profile string   `json:"profile,omitempty"`
 	// Image is the image the sandbox was created from, so it is created
 	// from it again.
 	Image string `json:"image,omitempty"`
@@ -291,6 +293,17 @@ type ParkedSnapshot struct {
 	Record events.Record `json:"record"`
 	// Size is the snapshot's size.
 	Size int64 `json:"size"`
+}
+
+// AllRepos returns the parked session's repositories, in order.
+func (p *ParkedSnapshot) AllRepos() []string {
+	if len(p.Repos) > 0 {
+		return p.Repos
+	}
+	if p.Repo != "" {
+		return []string{p.Repo}
+	}
+	return nil
 }
 
 // snapshotStore is the S3 snapshot store of snapshots.s3.

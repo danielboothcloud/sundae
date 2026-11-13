@@ -152,6 +152,11 @@ type Monitor struct {
 	warnedUnsupported bool
 	// listFailing reports that listings are failing, so that is logged once.
 	listFailing bool
+	// repoLists maps a sandbox to its session's current repository list,
+	// as Sundae last read or wrote it (see repos.go). reposMu guards it,
+	// not mu, so it can be read while mu is held.
+	reposMu   sync.Mutex
+	repoLists map[string][]string
 
 	// parks tracks background parks; parkSem bounds them.
 	parks   sync.WaitGroup
@@ -186,6 +191,7 @@ func NewMonitor(newClient func() (Client, error), cfg *config.Config, opts ...Mo
 		snaps:         newSnapshotStore(cfg),
 		fallback:      cfg.SnapshotFallback(),
 		entries:       map[string]*entry{},
+		repoLists:     map[string][]string{},
 		bridges:       map[string]int{},
 		parking:       map[string]chan struct{}{},
 		unsuspendable: map[string]string{},
@@ -282,17 +288,12 @@ func managedSandbox(sb *Sandbox) (userID int64, ok bool) {
 }
 
 // sessionOf returns the session a sandbox holds.
-func sessionOf(sb *Sandbox) events.Session {
+func (m *Monitor) sessionOf(sb *Sandbox) events.Session {
 	name := sb.Annotations[AnnotationSession]
 	if name == "" {
 		name = DefaultSessionName
 	}
-	return events.Session{
-		User:    sb.Annotations[AnnotationUser],
-		Repo:    sb.Annotations[AnnotationRepo],
-		Name:    name,
-		Sandbox: sb.Name,
-	}
+	return events.NewSession(sb.Annotations[AnnotationUser], name, sb.Name, m.SessionRepos(sb))
 }
 
 func isParkedPhase(p v1.SandboxPhase) bool {
@@ -361,7 +362,7 @@ func (m *Monitor) reconcile(sbs []*Sandbox) []string {
 			e = &entry{seed: seed, lastActive: now}
 			m.entries[sb.Name] = e
 		}
-		e.st.Session = sessionOf(sb)
+		e.st.Session = m.sessionOf(sb)
 		e.st.UserID = userID
 		e.st.Profile = sb.Annotations[AnnotationProfile]
 
@@ -795,7 +796,7 @@ func (m *Monitor) backup(ctx context.Context, client Client, sandbox string) *Sn
 	if !ok {
 		return nil
 	}
-	sess := sessionOf(sb)
+	sess := m.sessionOf(sb)
 	info, err := m.snaps.take(ctx, client, userID, sess, io.Discard)
 	if err != nil {
 		m.logger.Warn("cannot snapshot session before parking it", "sandbox", sandbox, "err", err)
@@ -829,7 +830,7 @@ func (m *Monitor) parkToSnapshot(ctx context.Context, client Client, sandbox, op
 	if sb.Status.Phase != v1.SandboxReady {
 		return fmt.Errorf("openshell: sandbox %q is %s; only a running session can be parked", sandbox, sb.Status.Phase)
 	}
-	sess := sessionOf(sb)
+	sess := m.sessionOf(sb)
 	info := taken
 	if info == nil {
 		info, err = m.snaps.take(ctx, client, userID, sess, io.Discard)
@@ -848,6 +849,7 @@ func (m *Monitor) parkToSnapshot(ctx context.Context, client Client, sandbox, op
 		UserID:  userID,
 		User:    sess.User,
 		Repo:    sess.Repo,
+		Repos:   sess.Repos,
 		Session: sess.Name,
 		Sandbox: sandbox,
 		Profile: sb.Annotations[AnnotationProfile],
@@ -1017,7 +1019,6 @@ func (m *Monitor) filter(keep func(*SessionStatus) bool) []SessionStatus {
 	slices.SortFunc(out, func(a, b SessionStatus) int {
 		return cmp.Or(
 			cmp.Compare(a.UserID, b.UserID),
-			strings.Compare(a.Session.Repo, b.Session.Repo),
 			strings.Compare(a.Session.Name, b.Session.Name),
 			strings.Compare(a.Session.Sandbox, b.Session.Sandbox),
 		)
@@ -1049,9 +1050,10 @@ func (m *Monitor) ForUser(userID int64) []SessionStatus {
 	return m.filter(func(st *SessionStatus) bool { return st.UserID == userID })
 }
 
-// ForRepo returns the statuses of the user's sessions of a repository.
+// ForRepo returns the statuses of the user's sessions holding a
+// repository.
 func (m *Monitor) ForRepo(userID int64, repo string) []SessionStatus {
-	return m.filter(func(st *SessionStatus) bool { return st.UserID == userID && st.Session.Repo == repo })
+	return m.filter(func(st *SessionStatus) bool { return st.UserID == userID && st.Session.HasRepo(repo) })
 }
 
 // Session returns the status of the user's named session of a repository;

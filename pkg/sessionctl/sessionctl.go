@@ -137,7 +137,7 @@ func List(ctx context.Context, mgr *openshell.Manager, mon *openshell.Monitor, u
 		if p := info.Snapshot; p != nil && rows[i].Status == nil {
 			// No sandbox to read: the status it had when it was parked.
 			rows[i].Status = &openshell.SessionStatus{
-				Session: events.Session{User: p.User, Repo: p.Repo, Name: p.Session, Sandbox: p.Sandbox},
+				Session: events.NewSession(p.User, p.Session, p.Sandbox, p.AllRepos()),
 				UserID:  p.UserID,
 				Profile: p.Profile,
 				Phase:   openshell.PhaseSnapshot,
@@ -175,9 +175,16 @@ func Since(t, now time.Time) string {
 
 // Request describes a session to start or resume for attaching.
 type Request struct {
-	// Repo is the repository as the user named it.
-	Repo string
-	// Name is the session name; "" is openshell.DefaultSessionName.
+	// Repos are the repositories, as the user named them, the session must
+	// hold: a new session is created with them; an existing one gets those
+	// it lacks added. Repo is a single one, used when Repos is empty.
+	Repos []string
+	Repo  string
+	// RemoveRepos are taken out of an existing session.
+	RemoveRepos []string
+	// Name is the session name. Empty: for Create, DefaultName of the
+	// first repository; otherwise the session holding that repository
+	// (Resolve).
 	Name string
 	// Profile and Image apply when Create makes a new session.
 	Profile string
@@ -192,6 +199,17 @@ type Request struct {
 	Restore openshell.RestoreMode
 	// Progress receives human-readable progress lines. May be nil.
 	Progress io.Writer
+}
+
+// repos returns the repositories req names.
+func (req Request) repos() []string {
+	if len(req.Repos) > 0 {
+		return req.Repos
+	}
+	if req.Repo != "" {
+		return []string{req.Repo}
+	}
+	return nil
 }
 
 // Prepared is a session started or resumed and ready to attach to. Its
@@ -209,22 +227,142 @@ func (p *Prepared) Close() {
 	}
 }
 
-// Prepare checks that the caller may read the repository, counts a bridge
-// on the session with the context's Monitor, and starts (Create) or resumes
-// the session. On success the bridge stays counted until the Prepared is
-// closed; on error it is closed already.
+// RepoSpec returns how a session clones and configures repo: the caller
+// must be able to read it.
+func RepoSpec(ctx context.Context, repo string) (openshell.RepoSpec, error) {
+	be := backend.FromContext(ctx)
+	user := proto.UserFromContext(ctx)
+	if user == nil {
+		return openshell.RepoSpec{}, proto.ErrUnauthorized
+	}
+	if be.AccessLevelForUser(ctx, utils.SanitizeRepo(repo), user) < access.ReadOnlyAccess {
+		return openshell.RepoSpec{}, fmt.Errorf("%s: %w", repo, proto.ErrRepoNotFound)
+	}
+	rr, err := be.Repository(ctx, repo)
+	if err != nil {
+		return openshell.RepoSpec{}, fmt.Errorf("%s: %w", repo, err)
+	}
+	// Commits in the session are made as the repository's forge
+	// identity, else the default one, else as whatever the sandbox says.
+	identity, err := GitIdentity(config.FromContext(ctx), rr)
+	if err != nil {
+		return openshell.RepoSpec{}, err
+	}
+	return openshell.RepoSpec{Name: rr.Name(), VCS: rr.Vcs(), GitIdentity: identity}, nil
+}
+
+// ErrAmbiguous is returned by Resolve when several sessions hold the
+// repository named.
+var ErrAmbiguous = errors.New("several sessions hold the repository")
+
+// Resolve returns the name of the user's session arg names: the session
+// called arg, else the only session holding the repository arg. Sessions
+// are looked up with the gateway.
+func Resolve(ctx context.Context, mgr *openshell.Manager, user proto.User, arg string) (string, error) {
+	if user == nil {
+		return "", proto.ErrUnauthorized
+	}
+	infos, err := mgr.List(ctx, user)
+	if err != nil {
+		return "", err //nolint:wrapcheck
+	}
+	return resolveIn(infos, arg)
+}
+
+func resolveIn(infos []openshell.Info, arg string) (string, error) {
+	for _, i := range infos {
+		if i.Name == arg {
+			return arg, nil
+		}
+	}
+	repo := utils.SanitizeRepo(arg)
+	var names []string
+	for _, i := range infos {
+		if i.HasRepo(repo) {
+			names = append(names, i.Name)
+		}
+	}
+	switch len(names) {
+	case 0:
+		return "", fmt.Errorf("%w: no session is called %s or holds it", openshell.ErrNoSession, arg)
+	case 1:
+		return names[0], nil
+	}
+	return "", fmt.Errorf("%w %s: %s; name one", ErrAmbiguous, repo, strings.Join(names, ", "))
+}
+
+// DefaultName returns the name `session start <repo>` uses for repo when
+// none is given: openshell.DefaultSessionNameFor(repo), unless a session
+// of that name holds other repositories without repo; then the first of
+// <name>-2, <name>-3, ... that is free or holds repo.
+func DefaultName(infos []openshell.Info, repo string) string {
+	base := openshell.DefaultSessionNameFor(repo)
+	taken := func(name string) bool {
+		for _, i := range infos {
+			if i.Name == name {
+				return !i.HasRepo(repo)
+			}
+		}
+		return false
+	}
+	if !taken(base) {
+		return base
+	}
+	for n := 2; ; n++ {
+		suffix := "-" + strconv.Itoa(n)
+		name := base
+		if len(name)+len(suffix) > 32 {
+			name = strings.TrimRight(name[:32-len(suffix)], "-")
+		}
+		if name += suffix; !taken(name) {
+			return name
+		}
+	}
+}
+
+// Prepare checks that the caller may read the repositories, counts a
+// bridge on the session with the context's Monitor, and starts (Create)
+// or resumes the session. On success the bridge stays counted until the
+// Prepared is closed; on error it is closed already.
 func Prepare(ctx context.Context, mgr *openshell.Manager, req Request) (_ *Prepared, err error) {
 	be := backend.FromContext(ctx)
 	user := proto.UserFromContext(ctx)
 	if user == nil {
 		return nil, proto.ErrUnauthorized
 	}
-	if be.AccessLevelForUser(ctx, utils.SanitizeRepo(req.Repo), user) < access.ReadOnlyAccess {
-		return nil, proto.ErrRepoNotFound
+	specs := make([]openshell.RepoSpec, 0, len(req.repos()))
+	for _, r := range req.repos() {
+		sp, err := RepoSpec(ctx, r)
+		if err != nil {
+			return nil, err
+		}
+		specs = append(specs, sp)
 	}
-	rr, err := be.Repository(ctx, req.Repo)
-	if err != nil {
-		return nil, err //nolint:wrapcheck
+	if req.Create && len(specs) == 0 {
+		return nil, errors.New("a new session needs at least one repository")
+	}
+	remove := make([]string, 0, len(req.RemoveRepos))
+	for _, r := range req.RemoveRepos {
+		remove = append(remove, utils.SanitizeRepo(r))
+	}
+
+	name := req.Name
+	if name == "" && len(specs) > 0 {
+		infos, lerr := mgr.List(ctx, user)
+		switch {
+		case req.Create && lerr != nil:
+			// Without the list, no clash can be seen: the start reports
+			// why the gateway cannot be reached.
+			name = openshell.DefaultSessionNameFor(specs[0].Name)
+		case lerr != nil:
+			return nil, lerr //nolint:wrapcheck
+		case req.Create:
+			name = DefaultName(infos, specs[0].Name)
+		default:
+			if name, err = resolveIn(infos, specs[0].Name); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	// Count the bridge from here until it closes, whichever way this
@@ -232,40 +370,39 @@ func Prepare(ctx context.Context, mgr *openshell.Manager, req Request) (_ *Prepa
 	// attached. An invalid name counts against a sandbox that cannot exist,
 	// briefly, and Start rejects it.
 	closeBridge := openshell.MonitorFromContext(ctx).OpenBridge(ctx,
-		openshell.SessionSandboxName(user.Username(), rr.Name(), req.Name))
+		openshell.SessionSandboxName(user.Username(), name))
 	defer func() {
 		if err != nil {
 			closeBridge()
 		}
 	}()
 
-	// A new session's profile: --profile, else the repository's own
-	// (`repo profile`), else the sessions.repos match, else none.
+	// A new session's profile: --profile, else the first repository's own
+	// (`repo profile`) that has one, else the first sessions.repos match,
+	// else none.
 	var repoProfile string
 	if req.Create && req.Profile == "" {
-		if repoProfile, err = be.RepoProfile(ctx, rr.Name()); err != nil {
-			return nil, err //nolint:wrapcheck
+		for _, sp := range specs {
+			if repoProfile, err = be.RepoProfile(ctx, sp.Name); err != nil {
+				return nil, err //nolint:wrapcheck
+			}
+			if repoProfile != "" {
+				break
+			}
 		}
-	}
-
-	// Commits in the session are made as the repository's forge identity,
-	// else the default one, else as whatever the sandbox says.
-	identity, err := GitIdentity(config.FromContext(ctx), rr)
-	if err != nil {
-		return nil, err
 	}
 
 	opts := openshell.StartOptions{
 		User:        user,
-		Repo:        rr.Name(),
-		VCS:         rr.Vcs(),
-		Name:        req.Name,
+		Repos:       specs,
+		RemoveRepos: remove,
+		ResolveRepo: func(repo string) (openshell.RepoSpec, error) { return RepoSpec(ctx, repo) },
+		Name:        name,
 		Profile:     req.Profile,
 		RepoProfile: repoProfile,
 		Image:       req.Image,
 		Term:        req.Term,
 		Restore:     req.Restore,
-		GitIdentity: identity,
 		Progress:    req.Progress,
 	}
 	var s *openshell.Session
@@ -323,9 +460,9 @@ func (p *Prepared) Attach(ctx context.Context, term openshell.Terminal) (int, er
 }
 
 // AttachCommand is the command that attaches to the user's named session
-// of a repository from a terminal, for a server whose public SSH URL is
-// publicURL: "ssh -t [-p port] host session attach repo -n name".
-func AttachCommand(publicURL, repo, name string) string {
+// from a terminal, for a server whose public SSH URL is publicURL: "ssh -t
+// [-p port] host session attach name".
+func AttachCommand(publicURL, name string) string {
 	if name == "" {
 		name = openshell.DefaultSessionName
 	}
@@ -340,5 +477,5 @@ func AttachCommand(publicURL, repo, name string) string {
 	if port != "" && port != "22" {
 		cmd += "-p " + port + " "
 	}
-	return fmt.Sprintf("%s%s session attach %s -n %s", cmd, host, repo, name)
+	return fmt.Sprintf("%s%s session attach %s", cmd, host, name)
 }

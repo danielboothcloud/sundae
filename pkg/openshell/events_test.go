@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -59,9 +60,9 @@ func TestStartPublishesLifecycle(t *testing.T) {
 	if steps(got) != "created,ready" {
 		t.Fatalf("first start = %s", steps(got))
 	}
-	want := events.Session{User: "alice", Repo: "infra", Name: "main", Sandbox: "sundae-alice-infra"}
+	want := events.Session{User: "alice", Repo: "infra", Name: "main", Sandbox: SessionSandboxName("alice", "main")}
 	for _, l := range got {
-		if l.Session != want || l.Op != "" || l.Reason != "" {
+		if !reflect.DeepEqual(l.Session, want) || l.Op != "" || l.Reason != "" {
 			t.Fatalf("lifecycle = %+v", l)
 		}
 	}
@@ -79,11 +80,11 @@ func TestStartPublishesResumeOfStoppedSandbox(t *testing.T) {
 	h := newHarness(t)
 	sub := withBus(t, h)
 	h.fc.AddSandbox("default", &types.Sandbox{
-		Name:   "sundae-alice-r",
+		Name:   SessionSandboxName("alice", "main"),
 		Labels: ownerLabels(alice),
 		Status: types.SandboxStatus{Phase: types.SandboxStopped},
 	})
-	h.exec.box("sundae-alice-r").dirs["/sandbox/r"] = true
+	h.exec.box(SessionSandboxName("alice", "main")).dirs["/sandbox/r"] = true
 	if _, err := h.mgr.Start(context.Background(), StartOptions{User: alice, Repo: "r"}); err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +107,7 @@ func TestStartPublishesFailure(t *testing.T) {
 		if steps(got) != "created,failed" {
 			t.Fatalf("steps = %s", steps(got))
 		}
-		if f := got[1]; f.Op != "start" || !strings.Contains(f.Reason, "boom") || f.Session.Sandbox != "sundae-alice-r" {
+		if f := got[1]; f.Op != "start" || !strings.Contains(f.Reason, "boom") || f.Session.Sandbox != SessionSandboxName("alice", "main") {
 			t.Fatalf("failed = %+v", f)
 		}
 	})
@@ -127,7 +128,7 @@ func TestStartPublishesFailure(t *testing.T) {
 		h := newHarness(t)
 		sub := withBus(t, h)
 		h.fc.AddSandbox("default", &types.Sandbox{
-			Name:   "sundae-alice-r",
+			Name:   SessionSandboxName("alice", "main"),
 			Labels: map[string]string{LabelUserID: "99"},
 			Status: types.SandboxStatus{Phase: types.SandboxReady},
 		})
@@ -158,16 +159,16 @@ func TestEndPublishesLifecycle(t *testing.T) {
 	}
 	drain(t, sub)
 
-	if _, err := h.mgr.End(ctx, alice, "r", ""); err != nil {
+	if _, err := h.mgr.End(ctx, alice, ""); err != nil {
 		t.Fatal(err)
 	}
 	got := drain(t, sub)
-	if steps(got) != "ended" || got[0].Session.Sandbox != "sundae-alice-r" || got[0].Session.Repo != "r" {
+	if steps(got) != "ended" || got[0].Session.Sandbox != SessionSandboxName("alice", "main") || got[0].Session.Repo != "r" {
 		t.Fatalf("lifecycle = %+v", got)
 	}
 
 	// Ending an absent session publishes nothing.
-	if _, err := h.mgr.End(ctx, alice, "r", ""); err != nil {
+	if _, err := h.mgr.End(ctx, alice, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := drain(t, sub); len(got) != 0 {
@@ -175,8 +176,8 @@ func TestEndPublishesLifecycle(t *testing.T) {
 	}
 
 	// A sandbox that is not alice's fails.
-	h.fc.AddSandbox("default", &types.Sandbox{Name: "sundae-alice-x", Labels: map[string]string{LabelUserID: "99"}})
-	if _, err := h.mgr.End(ctx, alice, "x", ""); !errors.Is(err, ErrNotOwned) {
+	h.fc.AddSandbox("default", &types.Sandbox{Name: SessionSandboxName("alice", "main"), Labels: map[string]string{LabelUserID: "99"}})
+	if _, err := h.mgr.End(ctx, alice, ""); !errors.Is(err, ErrNotOwned) {
 		t.Fatalf("err = %v", err)
 	}
 	if got := drain(t, sub); steps(got) != "failed" || got[0].Op != "end" {
@@ -194,7 +195,7 @@ func TestManagerWithoutBus(t *testing.T) {
 	if _, err := h.mgr.Start(context.Background(), StartOptions{User: alice, Repo: "r"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.mgr.End(context.Background(), alice, "r", ""); err != nil {
+	if _, err := h.mgr.End(context.Background(), alice, ""); err != nil {
 		t.Fatal(err)
 	}
 	// WithEvents(nil) is the same.
@@ -230,9 +231,9 @@ func TestResumeAndNamedSessionLifecycle(t *testing.T) {
 	if steps(got) != "created,ready,resumed,ready" {
 		t.Fatalf("steps = %s", steps(got))
 	}
-	want := events.Session{User: "alice", Repo: "r", Name: "two", Sandbox: SessionSandboxName("alice", "r", "two")}
+	want := events.Session{User: "alice", Repo: "r", Name: "two", Sandbox: SessionSandboxName("alice", "two")}
 	for _, l := range got {
-		if l.Session != want {
+		if !reflect.DeepEqual(l.Session, want) {
 			t.Fatalf("session = %+v, want %+v", l.Session, want)
 		}
 	}

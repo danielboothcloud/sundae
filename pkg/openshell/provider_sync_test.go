@@ -573,7 +573,7 @@ func TestStartFailsOnFailingDeclaredProvider(t *testing.T) {
 		!strings.Contains(err.Error(), `session two: profile "agent" lists a provider Sundae cannot sync: OpenShell provider "my-github" (openshell.providers) failed to sync to the gateway: read credentials_dir`) {
 		t.Fatalf("err = %v", err)
 	}
-	if _, err := h.fc.Sandboxes().Get(ctx, "default", SessionSandboxName("alice", "r", "two")); !IsNotFound(err) {
+	if _, err := h.fc.Sandboxes().Get(ctx, "default", SessionSandboxName("alice", "two")); !IsNotFound(err) {
 		t.Fatalf("sandbox created: %v", err)
 	}
 	// Starting the existing session fails too; attaching warns.

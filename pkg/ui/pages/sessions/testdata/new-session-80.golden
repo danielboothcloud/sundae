@@ -1,7 +1,7 @@
 
  New session
 
-   Repository   ‹ sundae ›
-   Name         claude-1
-   Profile      ‹ claude ›   ghcr.io/me/agent-claude:latest · claude
-   Attach       yes
+   Repositories   ‹ [x] sundae ›   sundae
+   Name           sundae
+   Profile        ‹ claude ›   ghcr.io/me/agent-claude:latest · claude
+   Attach         yes

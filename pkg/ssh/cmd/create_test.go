@@ -78,7 +78,7 @@ func TestRepoCreateTemplateProfileStart(t *testing.T) {
 	is.True(strings.Contains(stdout, "jj git clone"))
 	for _, want := range []string{
 		"Created repository app", "Initialised from template base", "Session profile: claude",
-		"Starting sandbox sundae-alice-app", "Session main of app is running", "Attach with: session attach app",
+		"Starting sandbox " + openshell.SessionSandboxName("alice", "app"), "Session app (app) is running", "Attach with: session attach app",
 	} {
 		is.True(strings.Contains(stderr, want)) // missing: want
 	}
@@ -92,7 +92,7 @@ func TestRepoCreateTemplateProfileStart(t *testing.T) {
 	is.Equal(p, "claude")
 
 	// The session was started detached, from the profile.
-	sb := fc.sandboxes["sundae-alice-app"]
+	sb := fc.sandboxes[openshell.SessionSandboxName("alice", "app")]
 	is.True(sb != nil)
 	is.Equal(sb.Annotations[openshell.AnnotationProfile], "claude")
 	is.Equal(len(fc.interactive), 0)
@@ -173,10 +173,10 @@ func TestRepoProfileCommand(t *testing.T) {
 	noPty := context.WithValue(ctx, sshutils.ContextKeySession, &fakeSSHSession{noPty: true})
 	_, _, err = runSessionCmd(t, noPty, "start", "r", "-d")
 	is.NoErr(err)
-	is.Equal(fc.sandboxes["sundae-alice-r"].Annotations[openshell.AnnotationProfile], "shell")
+	is.Equal(fc.sandboxes[openshell.SessionSandboxName("alice", "r")].Annotations[openshell.AnnotationProfile], "shell")
 	_, _, err = runSessionCmd(t, noPty, "start", "r", "-d", "--name", "two", "--profile", "claude")
 	is.NoErr(err)
-	is.Equal(fc.sandboxes[openshell.SessionSandboxName("alice", "r", "two")].Annotations[openshell.AnnotationProfile], "claude")
+	is.Equal(fc.sandboxes[openshell.SessionSandboxName("alice", "two")].Annotations[openshell.AnnotationProfile], "claude")
 
 	// Unset: the glob applies again.
 	is.NoErr(runRepo(t, ctx, "profile", "r", "--unset"))
@@ -185,7 +185,7 @@ func TestRepoProfileCommand(t *testing.T) {
 	is.Equal(stdout, "\n")
 	_, _, err = runSessionCmd(t, noPty, "start", "r", "-d", "--name", "three")
 	is.NoErr(err)
-	is.Equal(fc.sandboxes[openshell.SessionSandboxName("alice", "r", "three")].Annotations[openshell.AnnotationProfile], "claude")
+	is.Equal(fc.sandboxes[openshell.SessionSandboxName("alice", "three")].Annotations[openshell.AnnotationProfile], "claude")
 
 	// A reader who is not a collaborator may read but not set it; a
 	// private repository is not found.

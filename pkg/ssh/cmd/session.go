@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2/table"
-	"github.com/danielboothcloud/sundae/pkg/backend"
 	"github.com/danielboothcloud/sundae/pkg/config"
 	"github.com/danielboothcloud/sundae/pkg/openshell"
 	"github.com/danielboothcloud/sundae/pkg/proto"
@@ -39,8 +38,10 @@ func SessionCommand() *cobra.Command {
 	}
 
 	cmd.AddCommand(
+		sessionNewCommand(),
 		sessionStartCommand(),
 		sessionAttachCommand(),
+		sessionReposCommand(),
 		sessionListCommand(),
 		sessionSignalsCommand(),
 		sessionParkCommand(),
@@ -56,18 +57,84 @@ func sessionStartCommand() *cobra.Command {
 	var detach, fresh, restore bool
 	cmd := &cobra.Command{
 		Use:   "start REPOSITORY",
-		Short: "Start or resume an agent session for a repository (requires ssh -t unless --detach)",
-		Long: `Start or resume an agent session for a repository, then attach to it.
+		Short: "Start or resume a session for one repository (requires ssh -t unless --detach)",
+		Long: `Start or resume an agent session holding a repository, then attach to it:
+the one-repository shorthand of "session new".
 
-Each session has its own OpenShell sandbox with the repository cloned into
-/sandbox/<repo>, and runs its program (openshell.command, or the profile's)
-in an osewa session there. Sessions are named per repository: --name picks
-one, "main" by default, so several agents can work on one repository.
+The session is named after the repository's last path segment unless --name
+says otherwise; when a session of that name holds other repositories, a
+numbered name (tool-2) is used. If the session exists, it is resumed and
+gets the repository added if it lacks it.
 
-A new session is created from --profile, else from the profile
-sessions.repos assigns to the repository, else from openshell.image and
-openshell.command; --image overrides the image. Both only apply when the
-session is created.
+` + sessionCreateHelp,
+		Args: cobra.ExactArgs(1),
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if err := checkStartFlags(cmd, detach, fresh, restore); err != nil {
+				return err
+			}
+			return checkIfReadable(cmd, args)
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			req := sessionctl.Request{Repo: args[0], Name: name, Profile: profile, Image: image, Create: true}
+			req.Restore = restoreMode(fresh, restore)
+			return runSession(cmd, req, detach)
+		},
+	}
+	addCreateFlags(cmd, &name, &profile, &image, &detach, &fresh, &restore)
+	return cmd
+}
+
+func sessionNewCommand() *cobra.Command {
+	var repos []string
+	var profile, image string
+	var detach, fresh, restore bool
+	cmd := &cobra.Command{
+		Use:   "new NAME --repo REPOSITORY [--repo REPOSITORY...]",
+		Short: "Create (or resume) a named session holding one or more repositories",
+		Long: `Create an agent session called NAME holding the repositories given with
+--repo, each cloned into /sandbox/<repository>, then attach to it. Names are
+1 to 32 lowercase letters, digits and hyphens, unique per user.
+
+If the session exists, it is resumed and gets the repositories it lacks
+added. "session repos" adds and removes repositories later.
+
+` + sessionCreateHelp,
+		Args: cobra.ExactArgs(1),
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if len(repos) == 0 {
+				return errors.New("name at least one repository with --repo")
+			}
+			if !openshell.ValidSessionName(args[0]) {
+				return openshell.ErrInvalidSessionName
+			}
+			if err := checkStartFlags(cmd, detach, fresh, restore); err != nil {
+				return err
+			}
+			for _, r := range repos {
+				if err := checkIfReadable(cmd, []string{r}); err != nil {
+					return fmt.Errorf("%s: %w", r, err)
+				}
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			req := sessionctl.Request{Repos: repos, Name: args[0], Profile: profile, Image: image, Create: true}
+			req.Restore = restoreMode(fresh, restore)
+			return runSession(cmd, req, detach)
+		},
+	}
+	cmd.Flags().StringArrayVarP(&repos, "repo", "r", nil, "Repository the session holds (repeat for several)")
+	addCreateFlags(cmd, nil, &profile, &image, &detach, &fresh, &restore)
+	return cmd
+}
+
+// sessionCreateHelp is what start and new say about creating a session.
+const sessionCreateHelp = `A new session gets its own OpenShell sandbox and runs its program
+(openshell.command, or the profile's) in an osewa session, in the checkout
+of its only repository, else in /sandbox. Its profile is --profile, else the
+first repository's own profile ("repo profile"), else the first
+sessions.repos match among its repositories, else none; --image overrides
+the image. Both only apply when the session is created.
 
 Detach with ~. (after a newline), or just close the connection: the program
 keeps running. "session attach" re-attaches and "session end" deletes the
@@ -76,73 +143,166 @@ session is resumed first.
 
 With S3 snapshots on (snapshots.s3), a session that has a snapshot (taken by
 "session end" or a park) gets /sandbox restored from it when its sandbox is
-created. --fresh starts from a fresh clone instead; the snapshot is kept
+created. --fresh starts from fresh clones instead; the snapshot is kept
 until the next one replaces it. When the new sandbox already holds files
 from earlier work, you are asked whether to restore over them; --restore
-answers yes.`,
-		Args: cobra.ExactArgs(1),
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			if !detach {
-				if err := checkTerminal(cmd); err != nil {
-					return fmt.Errorf("%w, or --detach", err)
-				}
-			}
-			if fresh && restore {
-				return errors.New("--fresh and --restore are mutually exclusive")
-			}
-			return checkIfReadable(cmd, args)
-		},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			opts := openshell.StartOptions{
-				Name:    name,
-				Profile: profile,
-				Image:   image,
-			}
-			switch {
-			case fresh:
-				opts.Restore = openshell.RestoreSkip
-			case restore:
-				opts.Restore = openshell.RestoreOver
-			}
-			return runSession(cmd, args[0], opts, true, detach)
-		},
+answers yes.`
+
+// addCreateFlags adds the flags start and new share. name may be nil.
+func addCreateFlags(cmd *cobra.Command, name, profile, image *string, detach, fresh, restore *bool) {
+	if name != nil {
+		cmd.Flags().StringVarP(name, "name", "n", "", "Session name (default: from the repository)")
 	}
-
-	cmd.Flags().StringVarP(&name, "name", "n", "", `Session name (default "main")`)
-	cmd.Flags().StringVarP(&profile, "profile", "p", "", "Profile to create the session from (ignored when it already exists)")
-	cmd.Flags().StringVar(&image, "image", "", "Sandbox image to use when the sandbox is created (ignored when it already exists)")
-	cmd.Flags().BoolVarP(&detach, "detach", "d", false, "Start the session without attaching to it")
-	cmd.Flags().BoolVar(&fresh, "fresh", false, "Do not restore the session's S3 snapshot into a new sandbox")
-	cmd.Flags().BoolVar(&restore, "restore", false, "Restore the session's S3 snapshot even over files the new sandbox already holds")
-
-	return cmd
+	cmd.Flags().StringVarP(profile, "profile", "p", "", "Profile to create the session from (ignored when it already exists)")
+	cmd.Flags().StringVar(image, "image", "", "Sandbox image to use when the sandbox is created (ignored when it already exists)")
+	cmd.Flags().BoolVarP(detach, "detach", "d", false, "Start the session without attaching to it")
+	cmd.Flags().BoolVar(fresh, "fresh", false, "Do not restore the session's S3 snapshot into a new sandbox")
+	cmd.Flags().BoolVar(restore, "restore", false, "Restore the session's S3 snapshot even over files the new sandbox already holds")
 }
+
+// checkStartFlags checks the terminal and the snapshot flags.
+func checkStartFlags(cmd *cobra.Command, detach, fresh, restore bool) error {
+	if !detach {
+		if err := checkTerminal(cmd); err != nil {
+			return fmt.Errorf("%w, or --detach", err)
+		}
+	}
+	if fresh && restore {
+		return errors.New("--fresh and --restore are mutually exclusive")
+	}
+	return nil
+}
+
+func restoreMode(fresh, restore bool) openshell.RestoreMode {
+	switch {
+	case fresh:
+		return openshell.RestoreSkip
+	case restore:
+		return openshell.RestoreOver
+	}
+	return openshell.RestoreAuto
+}
+
+// sessionArgHelp says what a SESSION argument names.
+const sessionArgHelp = `SESSION is a session name, or a repository held by exactly one of your
+sessions.`
 
 func sessionAttachCommand() *cobra.Command {
 	var name string
 	cmd := &cobra.Command{
-		Use:   "attach REPOSITORY",
+		Use:   "attach SESSION",
 		Short: "Attach to a running agent session (requires ssh -t)",
-		Long: `Attach to an existing agent session of a repository.
+		Long: `Attach to an existing agent session.
 
 The session is resumed first if it is parked, and its program is started
 again if it is not running. Detach with ~. (after a newline), or close the
-connection; the program keeps running.`,
+connection; the program keeps running.
+
+` + sessionArgHelp,
 		Args: cobra.ExactArgs(1),
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			if err := checkTerminal(cmd); err != nil {
-				return err
-			}
-			return checkIfReadable(cmd, args)
+		PreRunE: func(cmd *cobra.Command, _ []string) error {
+			return checkTerminal(cmd)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSession(cmd, args[0], openshell.StartOptions{Name: name}, false, false)
+			n, err := resolveSession(cmd, args[0], name)
+			if err != nil {
+				return err
+			}
+			return runSession(cmd, sessionctl.Request{Name: n}, false)
 		},
 	}
-
-	cmd.Flags().StringVarP(&name, "name", "n", "", `Session name (default "main")`)
-
+	addLegacyNameFlag(cmd, &name)
 	return cmd
+}
+
+// addLegacyNameFlag adds the hidden -n flag of the commands that took a
+// repository and a session name before sessions held several
+// repositories: with it, the argument is ignored and -n names the session.
+func addLegacyNameFlag(cmd *cobra.Command, name *string) {
+	cmd.Flags().StringVarP(name, "name", "n", "", "Session name")
+	_ = cmd.Flags().MarkHidden("name")
+}
+
+// resolveSession returns the session a SESSION argument names; legacy is
+// the hidden -n flag, which wins.
+func resolveSession(cmd *cobra.Command, arg, legacy string) (string, error) {
+	if legacy != "" {
+		return legacy, nil
+	}
+	ctx := cmd.Context()
+	client, err := newOpenShellClient(config.FromContext(ctx))
+	if err != nil {
+		return "", err
+	}
+	defer client.Close()                                                                     //nolint:errcheck
+	return sessionctl.Resolve(ctx, newManager(ctx, client), proto.UserFromContext(ctx), arg) //nolint:wrapcheck
+}
+
+func sessionReposCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "repos SESSION [add|remove REPOSITORY...]",
+		Short: "List, add or remove the repositories of a session",
+		Long: `List the repositories of a session, or add or remove some.
+
+Adding clones the repositories into the running session (resuming it first
+if parked) without attaching. Removing takes them out of the session's list;
+their checkouts stay in /sandbox. A session keeps at least one repository.
+The session's program keeps running, in the directory it started in.
+
+` + sessionArgHelp,
+		Args: cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name, err := resolveSession(cmd, args[0], "")
+			if err != nil {
+				return err
+			}
+			if len(args) == 1 {
+				return listSessionRepos(cmd, name)
+			}
+			if len(args) < 3 {
+				return errors.New("name at least one repository to add or remove")
+			}
+			req := sessionctl.Request{Name: name}
+			switch args[1] {
+			case "add":
+				for _, r := range args[2:] {
+					if err := checkIfReadable(cmd, []string{r}); err != nil {
+						return fmt.Errorf("%s: %w", r, err)
+					}
+				}
+				req.Repos = args[2:]
+			case "remove", "rm":
+				req.RemoveRepos = args[2:]
+			default:
+				return fmt.Errorf("unknown action %q: add or remove", args[1])
+			}
+			return runSession(cmd, req, true)
+		},
+	}
+	return cmd
+}
+
+// listSessionRepos prints the repositories of the user's session.
+func listSessionRepos(cmd *cobra.Command, name string) error {
+	ctx := cmd.Context()
+	client, err := newOpenShellClient(config.FromContext(ctx))
+	if err != nil {
+		return err
+	}
+	defer client.Close() //nolint:errcheck
+	infos, err := newManager(ctx, client).List(ctx, proto.UserFromContext(ctx))
+	if err != nil {
+		return err
+	}
+	for _, i := range infos {
+		if i.Name == name {
+			for _, r := range i.Repos {
+				cmd.Println(r)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: %q", openshell.ErrNoSession, name)
 }
 
 // newManager returns a Manager for a command, publishing on the context's
@@ -151,17 +311,12 @@ func newManager(ctx context.Context, client openshell.Client) *openshell.Manager
 	return sessionctl.NewManager(ctx, client)
 }
 
-// runSession starts (create) or resumes the session, then attaches the SSH
-// terminal to it unless detach is set.
-func runSession(cmd *cobra.Command, repo string, opts openshell.StartOptions, create, detach bool) error {
+// runSession starts (req.Create) or resumes the session, then attaches the
+// SSH terminal to it unless detach is set.
+func runSession(cmd *cobra.Command, req sessionctl.Request, detach bool) error {
 	ctx := cmd.Context()
 	cfg := config.FromContext(ctx)
-	be := backend.FromContext(ctx)
 	sess := sshutils.SessionFromContext(ctx)
-
-	if _, err := be.Repository(ctx, repo); err != nil {
-		return err
-	}
 
 	client, err := newOpenShellClient(cfg)
 	if err != nil {
@@ -169,15 +324,7 @@ func runSession(cmd *cobra.Command, repo string, opts openshell.StartOptions, cr
 	}
 	defer client.Close() //nolint:errcheck
 
-	req := sessionctl.Request{
-		Repo:     repo,
-		Name:     opts.Name,
-		Profile:  opts.Profile,
-		Image:    opts.Image,
-		Create:   create,
-		Restore:  opts.Restore,
-		Progress: cmd.ErrOrStderr(),
-	}
+	req.Progress = cmd.ErrOrStderr()
 	tty := false
 	if sess != nil {
 		if pty, _, ok := sess.Pty(); ok {
@@ -210,8 +357,8 @@ func runSession(cmd *cobra.Command, repo string, opts openshell.StartOptions, cr
 		if s.Restored != nil {
 			cmd.PrintErrf("Restored /sandbox from %s (%s).\n", s.Restored.URL, s.Restored.Describe())
 		}
-		cmd.PrintErrf("Session %s of %s is running in sandbox %s.\n", s.Name, s.Repo, s.Sandbox)
-		cmd.PrintErrf("Attach with: session attach %s%s\n", s.Repo, nameArg(s.Name))
+		cmd.PrintErrf("Session %s (%s) is running in sandbox %s.\n", s.Name, strings.Join(s.Repos, ", "), s.Sandbox)
+		cmd.PrintErrf("Attach with: session attach %s\n", s.Name)
 		return nil
 	}
 
@@ -284,15 +431,6 @@ type sshSession interface {
 	Exit(code int) error
 }
 
-// nameArg returns the --name argument selecting a session, or "" for the
-// default session.
-func nameArg(name string) string {
-	if name == "" || name == openshell.DefaultSessionName {
-		return ""
-	}
-	return " --name " + name
-}
-
 // sessionRow is one session of `session ls`.
 type sessionRow = sessionctl.Row
 
@@ -301,8 +439,8 @@ var sessionColumns = []struct {
 	header string
 	value  func(sessionRow, time.Time) string
 }{
-	{"Repository", func(r sessionRow, _ time.Time) string { return r.Info.Repo }},
 	{"Name", func(r sessionRow, _ time.Time) string { return r.Info.Name }},
+	{"Repositories", func(r sessionRow, _ time.Time) string { return strings.Join(r.Info.Repos, ", ") }},
 	{"Profile", func(r sessionRow, _ time.Time) string { return orDash(r.Info.Profile) }},
 	{"Sandbox", func(r sessionRow, _ time.Time) string { return r.Info.Sandbox }},
 	{"Phase", func(r sessionRow, _ time.Time) string { return orDash(r.Info.Phase) }},
@@ -333,9 +471,11 @@ const maxMessage = 60
 // sessionJSON is one session of `session ls --json`. Text from the program
 // (app, title, msg) is sanitised but not cut.
 type sessionJSON struct {
-	Repo    string `json:"repo"`
-	Name    string `json:"name"`
-	Profile string `json:"profile,omitempty"`
+	Name string `json:"name"`
+	// Repo is the first repository; Repos are all of them.
+	Repo    string   `json:"repo"`
+	Repos   []string `json:"repos"`
+	Profile string   `json:"profile,omitempty"`
 	// Providers are the OpenShell providers attached to the session's
 	// sandbox.
 	Providers []string `json:"providers,omitempty"`
@@ -374,6 +514,7 @@ func sessionToJSON(r sessionRow) sessionJSON {
 	rec := r.Record()
 	j := sessionJSON{
 		Repo:      r.Info.Repo,
+		Repos:     r.Info.Repos,
 		Name:      r.Info.Name,
 		Profile:   r.Info.Profile,
 		Providers: r.Info.Providers,
@@ -425,7 +566,7 @@ func sessionListCommand() *cobra.Command {
 		Use:     "ls",
 		Aliases: []string{"list"},
 		Short:   "List your agent sessions and what their agents are doing",
-		Long: `List your agent sessions: repository, name, profile, sandbox, phase,
+		Long: `List your agent sessions: name, repositories, profile, sandbox, phase,
 and the agent's status (OSC 7501) as Sundae last read it: state, message,
 how many clients are attached, and when the state last changed.
 
@@ -486,11 +627,11 @@ was parked. Listing never resumes a parked session.`,
 func sessionParkCommand() *cobra.Command {
 	var name string
 	cmd := &cobra.Command{
-		Use:   "park REPOSITORY",
+		Use:   "park SESSION",
 		Short: "Park (suspend) an agent session now",
 		Long: `Park an agent session: suspend its sandbox, keeping its memory where the
 OpenShell compute driver supports it, so it uses no CPU until it is resumed.
-"session start", "session attach" and "session resume" resume it.
+"session attach" and "session resume" resume it.
 
 A session with an open bridge is not parked; detach first. Sessions are also
 parked automatically after sessions.suspend.after with nobody attached and
@@ -499,57 +640,61 @@ no working status.
 Where the gateway cannot suspend and sessions.suspend.fallback is snapshot,
 the session is parked to an S3 snapshot instead: /sandbox is saved and the
 sandbox deleted. That stops its program; resuming recreates the sandbox,
-restores /sandbox and starts the program again.`,
-		Args:    cobra.ExactArgs(1),
-		PreRunE: checkIfReadable,
+restores /sandbox and starts the program again.
+
+` + sessionArgHelp,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
+			n, err := resolveSession(cmd, args[0], name)
+			if err != nil {
+				return err
+			}
 			client, err := newOpenShellClient(config.FromContext(ctx))
 			if err != nil {
 				return err
 			}
 			defer client.Close() //nolint:errcheck
 
-			// Like end, no repository lookup: repoArg is the name the
-			// sandbox name derives from.
-			repo := repoArg(args)
-			parked, toSnapshot, err := newManager(ctx, client).ParkSession(ctx, proto.UserFromContext(ctx), repo, name)
+			parked, toSnapshot, err := newManager(ctx, client).ParkSession(ctx, proto.UserFromContext(ctx), n)
 			if err != nil {
 				return err
 			}
-			if name == "" {
-				name = openshell.DefaultSessionName
-			}
 			switch {
 			case parked && toSnapshot:
-				cmd.PrintErrf("Session %s of %s parked to an S3 snapshot: its sandbox was deleted and its program stopped. Resume it with: session resume %s%s\n", name, repo, repo, nameArg(name))
+				cmd.PrintErrf("Session %s parked to an S3 snapshot: its sandbox was deleted and its program stopped. Resume it with: session resume %s\n", n, n)
 			case parked:
-				cmd.PrintErrf("Session %s of %s parked. Resume it with: session resume %s%s\n", name, repo, repo, nameArg(name))
+				cmd.PrintErrf("Session %s parked. Resume it with: session resume %s\n", n, n)
 			default:
-				cmd.PrintErrf("Session %s of %s is already parked\n", name, repo)
+				cmd.PrintErrf("Session %s is already parked\n", n)
 			}
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&name, "name", "n", "", `Session name (default "main")`)
+	addLegacyNameFlag(cmd, &name)
 	return cmd
 }
 
 func sessionResumeCommand() *cobra.Command {
 	var name string
 	cmd := &cobra.Command{
-		Use:   "resume REPOSITORY",
+		Use:   "resume SESSION",
 		Short: "Resume a parked agent session without attaching",
 		Long: `Resume an agent session without attaching to it: resume its sandbox if it
-is parked, renew its git credentials, and start its program again if it is
-not running. Like "session attach --detach"; it never creates a session.`,
-		Args:    cobra.ExactArgs(1),
-		PreRunE: checkIfReadable,
+is parked, renew its git credentials, clone repositories it lacks, and start
+its program again if it is not running. It never creates a session.
+
+` + sessionArgHelp,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSession(cmd, args[0], openshell.StartOptions{Name: name}, false, true)
+			n, err := resolveSession(cmd, args[0], name)
+			if err != nil {
+				return err
+			}
+			return runSession(cmd, sessionctl.Request{Name: n}, true)
 		},
 	}
-	cmd.Flags().StringVarP(&name, "name", "n", "", `Session name (default "main")`)
+	addLegacyNameFlag(cmd, &name)
 	return cmd
 }
 
@@ -557,32 +702,37 @@ func sessionEndCommand() *cobra.Command {
 	var name string
 	var force bool
 	cmd := &cobra.Command{
-		Use:     "end REPOSITORY",
+		Use:     "end SESSION",
 		Aliases: []string{"stop", "rm"},
 		Short:   "End an agent session, deleting its sandbox",
 		Long: `End an agent session, deleting its sandbox and revoking its git
-credentials. Other sessions of the repository are left running.
+credentials.
 
 With S3 snapshots on end (snapshots.s3.on), /sandbox is saved to S3 first,
-replacing the session's previous snapshot, and "session start" restores it.
-When the snapshot fails the session is not ended; --force ends it anyway,
-without a snapshot. A session parked to its snapshot is ended by forgetting
-that it is parked; its snapshot is kept.`,
-		Args:    cobra.ExactArgs(1),
-		PreRunE: checkIfReadable,
+replacing the session's previous snapshot, and starting the session again
+restores it. When the snapshot fails the session is not ended; --force ends
+it anyway, without a snapshot. A session parked to its snapshot is ended by
+forgetting that it is parked; its snapshot is kept.
+
+` + sessionArgHelp,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
+			n, err := resolveSession(cmd, args[0], name)
+			if errors.Is(err, openshell.ErrNoSession) {
+				cmd.PrintErrln("No session to end")
+				return nil
+			}
+			if err != nil {
+				return err
+			}
 			client, err := newOpenShellClient(config.FromContext(ctx))
 			if err != nil {
 				return err
 			}
 			defer client.Close() //nolint:errcheck
 
-			// No repository lookup: a session must stay endable after its
-			// repository is deleted or renamed. repoArg is the same
-			// sanitized name Start derives the sandbox name from.
-			mgr := newManager(ctx, client)
-			res, err := mgr.EndSession(ctx, proto.UserFromContext(ctx), repoArg(args), name, openshell.EndOptions{
+			res, err := newManager(ctx, client).EndSession(ctx, proto.UserFromContext(ctx), n, openshell.EndOptions{
 				Force:    force,
 				Progress: cmd.ErrOrStderr(),
 			})
@@ -604,7 +754,7 @@ that it is parked; its snapshot is kept.`,
 		},
 	}
 
-	cmd.Flags().StringVarP(&name, "name", "n", "", `Session name (default "main")`)
+	addLegacyNameFlag(cmd, &name)
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "End the session even when its snapshot fails")
 
 	return cmd

@@ -50,6 +50,8 @@ const (
 type KeyMap struct {
 	Attach    key.Binding
 	New       key.Binding
+	AddRepo   key.Binding
+	DropRepo  key.Binding
 	End       key.Binding
 	Park      key.Binding
 	Copy      key.Binding
@@ -70,6 +72,8 @@ func DefaultKeyMap() KeyMap {
 	return KeyMap{
 		Attach:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "attach")),
 		New:       key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new")),
+		AddRepo:   key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add repos")),
+		DropRepo:  key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "remove repos")),
 		End:       key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "end")),
 		Park:      key.NewBinding(key.WithKeys("z"), key.WithHelp("z", "park/resume")),
 		Copy:      key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "copy attach command")),
@@ -110,12 +114,15 @@ type (
 		pre   prefill
 	}
 	actionMsg struct {
-		key, verb  string
-		repo, name string
-		done       bool
-		err        error
+		key, verb string
+		repos     []string
+		name      string
+		done      bool
+		err       error
 		// row is the session acted on.
 		row sessionctl.Row
+		// changed are the repositories added or removed.
+		changed []string
 	}
 )
 
@@ -130,11 +137,15 @@ func IsMsg(msg tea.Msg) bool {
 	return false
 }
 
-// prefill is what a new-session form opens with.
+// prefill is what a new-session form opens with; with edit set, the
+// add-repositories (edit "add") or remove-repositories (edit "remove")
+// form of the session target instead.
 type prefill struct {
-	repo    string
+	repos   []string
 	fixed   bool
 	profile string
+	edit    string
+	target  sessionctl.Row
 }
 
 // Sessions is the Sessions tab.
@@ -181,7 +192,10 @@ type Sessions struct {
 	sigQuery  string
 
 	// Overlays.
-	form    *prompt.Form
+	form *prompt.Form
+	// editing is the add- or remove-repositories form's session while it
+	// is open.
+	editing *prefill
 	confirm *prompt.Confirm
 	// onYes is what a yes to the confirm does.
 	onYes   func() tea.Cmd
@@ -317,7 +331,7 @@ func (m *Sessions) SelectedName() (name string, index, total int) {
 // OpenNewSession opens the new-session form for repo; fixed keeps the
 // repository from being changed (the Repositories tab's s key).
 func (m *Sessions) OpenNewSession(repo string, fixed bool) tea.Cmd {
-	return m.reposCmd(prefill{repo: repo, fixed: fixed})
+	return m.reposCmd(prefill{repos: []string{repo}, fixed: fixed})
 }
 
 // listCmd lists the sessions, unless a listing is under way: then it
@@ -418,6 +432,10 @@ func (m *Sessions) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 			m.notice = notice{text: "Cannot list repositories: " + msg.err.Error(), err: true}
 			return m, nil
 		}
+		if msg.pre.edit != "" {
+			m.form = m.editReposForm(msg.repos, msg.pre)
+			return m, nil
+		}
 		if len(msg.repos) == 0 && !msg.pre.fixed {
 			m.notice = notice{text: "No repository to start a session for.", err: true}
 			return m, nil
@@ -481,7 +499,6 @@ func (m *Sessions) sortRows() {
 		return cmp.Or(
 			a.State().Rank()-b.State().Rank(),
 			b.Changed().Compare(a.Changed()),
-			strings.Compare(a.Info.Repo, b.Info.Repo),
 			strings.Compare(a.Info.Name, b.Info.Name),
 		)
 	})
@@ -594,11 +611,22 @@ func (m *Sessions) scopedRows() []sessionctl.Row {
 	}
 	var out []sessionctl.Row
 	for _, r := range m.rows {
-		if r.Info.Repo == m.scope {
+		if slices.Contains(rowRepos(r), m.scope) {
 			out = append(out, r)
 		}
 	}
 	return out
+}
+
+// rowRepos returns a session's repositories.
+func rowRepos(r sessionctl.Row) []string {
+	if len(r.Info.Repos) > 0 {
+		return r.Info.Repos
+	}
+	if r.Info.Repo != "" {
+		return []string{r.Info.Repo}
+	}
+	return nil
 }
 
 // visibleRows returns the sessions of the scope the filter selects.
@@ -610,7 +638,7 @@ func (m *Sessions) visibleRows() []sessionctl.Row {
 	q := strings.ToLower(m.rowQuery)
 	var out []sessionctl.Row
 	for _, r := range rows {
-		text := strings.ToLower(strings.Join([]string{r.Info.Repo, r.Info.Name, r.Words(), m.message(r)}, " "))
+		text := strings.ToLower(strings.Join(append(slices.Clone(rowRepos(r)), r.Info.Name, r.Words(), m.message(r)), " "))
 		if strings.Contains(text, q) {
 			out = append(out, r)
 		}
@@ -666,9 +694,14 @@ func (m *Sessions) onKey(msg tea.KeyPressMsg) tea.Cmd {
 		case prompt.Submitted:
 			f := m.form
 			m.form = nil
+			if m.editing != nil {
+				ed := m.editing
+				m.editing = nil
+				return m.editReposCmd(ed.target, ed.edit, f.Field("repos").Values())
+			}
 			return m.startCmd(f)
 		case prompt.Cancelled:
-			m.form = nil
+			m.form, m.editing = nil, nil
 		}
 		return cmd
 	case m.op != nil:
@@ -702,7 +735,7 @@ func (m *Sessions) onKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.listCmd()
 	case key.Matches(msg, m.keys.New):
 		if m.scope != "" {
-			return m.reposCmd(prefill{repo: m.scope, fixed: true})
+			return m.reposCmd(prefill{repos: []string{m.scope}})
 		}
 		return m.reposCmd(prefill{})
 	case key.Matches(msg, km.Up):
@@ -792,10 +825,25 @@ func (m *Sessions) onSessionsKey(msg tea.KeyPressMsg) tea.Cmd {
 	if !ok || m.listErr != nil {
 		return nil
 	}
-	label := sessionLabel(r.Info.Repo, r.Info.Name)
+	label := sessionLabel(r.Info.Name, rowRepos(r))
 	switch {
 	case key.Matches(msg, m.keys.Attach):
-		return m.attachCmd(r.Info.Repo, r.Info.Name, r.Info.Sandbox, r.Parked())
+		return m.attachCmd(rowRepos(r), r.Info.Name, r.Info.Sandbox, r.Parked())
+	case key.Matches(msg, m.keys.AddRepo):
+		if m.busy[r.Info.Sandbox] != "" {
+			return nil
+		}
+		return m.reposCmd(prefill{edit: "add", target: r})
+	case key.Matches(msg, m.keys.DropRepo):
+		if m.busy[r.Info.Sandbox] != "" {
+			return nil
+		}
+		if len(rowRepos(r)) < 2 {
+			m.notice = notice{text: label + " has one repository; a session keeps at least one (x ends it)."}
+			return nil
+		}
+		m.form = m.editReposForm(nil, prefill{edit: "remove", target: r})
+		return nil
 	case key.Matches(msg, m.keys.End):
 		m.target = r
 		question := "End " + label + "?  The sandbox and any unpushed work are deleted."
@@ -817,7 +865,7 @@ func (m *Sessions) onSessionsKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.parkCmd(r)
 	case key.Matches(msg, m.keys.Copy):
 		m.copied = r.Info.Sandbox
-		return tea.SetClipboard(m.src.AttachCommand(r.Info.Repo, r.Info.Name))
+		return tea.SetClipboard(m.src.AttachCommand(r.Info.Name))
 	}
 	return nil
 }
@@ -852,30 +900,30 @@ func (m *Sessions) launch(s signals.Signal) tea.Cmd {
 	}
 	if i := m.rowIndex(sess.Sandbox); i >= 0 {
 		r := m.rows[i]
-		return m.attachCmd(r.Info.Repo, r.Info.Name, r.Info.Sandbox, r.Parked())
+		return m.attachCmd(rowRepos(r), r.Info.Name, r.Info.Sandbox, r.Parked())
 	}
 	if m.listErr != nil || !m.loaded {
-		m.notice = notice{text: "Cannot tell whether " + sessionLabel(sess.Repo, sess.Name) + " is running: the session list is not loaded.", err: true}
+		m.notice = notice{text: "Cannot tell whether " + sessionLabel(sess.Name, sess.AllRepos()) + " is running: the session list is not loaded.", err: true}
 		return nil
 	}
-	return m.reposCmd(prefill{repo: sess.Repo, profile: m.profiles[sess.Sandbox]})
+	return m.reposCmd(prefill{repos: sess.AllRepos(), profile: m.profiles[sess.Sandbox]})
 }
 
 // attachCmd prepares the session (resuming it when parked) and then
 // attaches to it.
-func (m *Sessions) attachCmd(repo, name, key string, parked bool) tea.Cmd {
+func (m *Sessions) attachCmd(repos []string, name, key string, parked bool) tea.Cmd {
 	if m.handoff == nil {
 		m.notice = notice{text: errNoTerminal.Error(), err: true}
 		return nil
 	}
-	title := "Attaching to " + sessionLabel(repo, name) + " …  detach with ~."
-	op, ctx := newOperation(m.ctx, title, repo, name, true)
+	title := "Attaching to " + sessionLabel(name, repos) + " …  detach with ~."
+	op, ctx := newOperation(m.ctx, title, repos, name, true)
 	op.key = key
 	m.op, m.opLines = op, nil
 	if parked {
 		m.opLines = []string{"Resuming…"}
 	}
-	return op.run(ctx, m.src, sessionctl.Request{Repo: repo, Name: name, Term: m.term()})
+	return op.run(ctx, m.src, sessionctl.Request{Name: name, Term: m.term()})
 }
 
 // StartNew starts a new session of repo, as the new-session form does with
@@ -890,25 +938,32 @@ func (m *Sessions) StartNew(repo, profile string, attach bool) tea.Cmd {
 	if profile == "" {
 		profile = m.src.RepoProfile(repo)
 	}
-	return m.start(repo, m.defaultName(repo, profile), profile, attach)
+	return m.start([]string{repo}, m.defaultName([]string{repo}), profile, attach)
 }
 
 // startCmd starts the session the new-session form describes.
 func (m *Sessions) startCmd(f *prompt.Form) tea.Cmd {
-	repo, name, profile := f.Field("repo").Value(), f.Field("name").Value(), f.Field("profile").Value()
-	return m.start(repo, name, profile, f.Field("attach").On())
+	var repos []string
+	if fd := f.Field("repos"); fd.Kind() == prompt.Multi {
+		repos = fd.Values()
+	} else {
+		repos = []string{fd.Value()}
+	}
+	name, profile := f.Field("name").Value(), f.Field("profile").Value()
+	return m.start(repos, name, profile, f.Field("attach").On())
 }
 
-// start creates the named session and attaches to it when attach is set.
-func (m *Sessions) start(repo, name, profile string, attach bool) tea.Cmd {
+// start creates the named session of repos and attaches to it when attach
+// is set.
+func (m *Sessions) start(repos []string, name, profile string, attach bool) tea.Cmd {
 	if attach && m.handoff == nil {
 		attach = false
 		m.notice = notice{text: errNoTerminal.Error(), err: true}
 	}
-	title := "Starting " + sessionLabel(repo, name) + " …"
-	op, ctx := newOperation(m.ctx, title, repo, name, attach)
+	title := "Starting " + sessionLabel(name, repos) + " …"
+	op, ctx := newOperation(m.ctx, title, repos, name, attach)
 	m.op, m.opLines = op, nil
-	return op.run(ctx, m.src, sessionctl.Request{Repo: repo, Name: name, Profile: profile, Create: true, Term: m.term()})
+	return op.run(ctx, m.src, sessionctl.Request{Repos: repos, Name: name, Profile: profile, Create: true, Term: m.term()})
 }
 
 // term is the TERM given to the attach client.
@@ -938,7 +993,7 @@ func (m *Sessions) onOp(op *operation) tea.Cmd {
 		return op.waitCmd(m.ctx)
 	}
 	m.op = nil
-	label := sessionLabel(op.repo, op.name)
+	label := sessionLabel(op.name, op.repos)
 	if err != nil {
 		op.cancel()
 		var conflict *openshell.RestoreConflictError
@@ -964,11 +1019,11 @@ func (m *Sessions) onOp(op *operation) tea.Cmd {
 	if s := att.Session(); s != nil {
 		m.selKey = s.Sandbox
 	}
-	return attachCmd(m.ctx, m.handoff, att, op.repo, op.name, op.title)
+	return attachCmd(m.ctx, m.handoff, att, op.repos, op.name, op.title)
 }
 
 func (m *Sessions) onAttachDone(msg attachDoneMsg) tea.Cmd {
-	label := sessionLabel(msg.repo, msg.name)
+	label := sessionLabel(msg.name, msg.repos)
 	switch {
 	case msg.err != nil:
 		m.notice = notice{text: "✗ " + label + ": " + msg.err.Error(), err: true}
@@ -1000,7 +1055,7 @@ func conflictNotice(label string, e *openshell.RestoreConflictError) notice {
 
 // rerun starts op's preparation again, restoring as restore says.
 func (m *Sessions) rerun(op *operation, restore openshell.RestoreMode) tea.Cmd {
-	again, ctx := newOperation(m.ctx, op.title, op.repo, op.name, op.attach)
+	again, ctx := newOperation(m.ctx, op.title, op.repos, op.name, op.attach)
 	again.key = op.key
 	m.op, m.opLines = again, nil
 	m.notice = notice{}
@@ -1013,8 +1068,8 @@ func (m *Sessions) endCmd(r sessionctl.Row, force bool) tea.Cmd {
 	m.busy[r.Info.Sandbox] = "ending"
 	ctx, src := m.ctx, m.src
 	return func() tea.Msg {
-		existed, err := src.End(ctx, r.Info.Repo, r.Info.Name, force)
-		return actionMsg{key: r.Info.Sandbox, verb: "end", repo: r.Info.Repo, name: r.Info.Name, done: existed, err: err, row: r}
+		existed, err := src.End(ctx, r.Info.Name, force)
+		return actionMsg{key: r.Info.Sandbox, verb: "end", repos: rowRepos(r), name: r.Info.Name, done: existed, err: err, row: r}
 	}
 }
 
@@ -1022,8 +1077,8 @@ func (m *Sessions) parkCmd(r sessionctl.Row) tea.Cmd {
 	m.busy[r.Info.Sandbox] = "parking"
 	ctx, src := m.ctx, m.src
 	return func() tea.Msg {
-		parked, err := src.Park(ctx, r.Info.Repo, r.Info.Name)
-		return actionMsg{key: r.Info.Sandbox, verb: "park", repo: r.Info.Repo, name: r.Info.Name, done: parked, err: err}
+		parked, err := src.Park(ctx, r.Info.Name)
+		return actionMsg{key: r.Info.Sandbox, verb: "park", repos: rowRepos(r), name: r.Info.Name, done: parked, err: err}
 	}
 }
 
@@ -1031,17 +1086,41 @@ func (m *Sessions) resumeCmd(r sessionctl.Row, restore openshell.RestoreMode) te
 	m.busy[r.Info.Sandbox] = "resuming"
 	ctx, src := m.ctx, m.src
 	return func() tea.Msg {
-		att, err := src.Prepare(ctx, sessionctl.Request{Repo: r.Info.Repo, Name: r.Info.Name, Restore: restore})
+		att, err := src.Prepare(ctx, sessionctl.Request{Name: r.Info.Name, Restore: restore})
 		if att != nil {
 			att.Close()
 		}
-		return actionMsg{key: r.Info.Sandbox, verb: "resume", repo: r.Info.Repo, name: r.Info.Name, done: err == nil, err: err, row: r}
+		return actionMsg{key: r.Info.Sandbox, verb: "resume", repos: rowRepos(r), name: r.Info.Name, done: err == nil, err: err, row: r}
+	}
+}
+
+// editReposCmd adds repositories to the session (verb "add") or removes
+// them ("remove"), resuming it if parked, without attaching.
+func (m *Sessions) editReposCmd(r sessionctl.Row, verb string, repos []string) tea.Cmd {
+	m.busy[r.Info.Sandbox] = map[string]string{"add": "adding", "remove": "removing"}[verb]
+	ctx, src := m.ctx, m.src
+	req := sessionctl.Request{Name: r.Info.Name, Term: m.term()}
+	if verb == "add" {
+		req.Repos = repos
+	} else {
+		req.RemoveRepos = repos
+	}
+	return func() tea.Msg {
+		att, err := src.Prepare(ctx, req)
+		after := rowRepos(r)
+		if att != nil {
+			if s := att.Session(); s != nil {
+				after = s.Repos
+			}
+			att.Close()
+		}
+		return actionMsg{key: r.Info.Sandbox, verb: verb, repos: after, name: r.Info.Name, done: err == nil, err: err, row: r, changed: repos}
 	}
 }
 
 func (m *Sessions) onAction(msg actionMsg) tea.Cmd {
 	delete(m.busy, msg.key)
-	label := sessionLabel(msg.repo, msg.name)
+	label := sessionLabel(msg.name, msg.repos)
 	var conflict *openshell.RestoreConflictError
 	switch {
 	case msg.verb == "end" && errors.Is(msg.err, openshell.ErrSnapshotFailed):
@@ -1067,33 +1146,57 @@ func (m *Sessions) onAction(msg actionMsg) tea.Cmd {
 		m.notice = notice{text: label + " is already parked."}
 	case msg.verb == "resume":
 		m.notice = notice{text: "Resumed " + label + "."}
+	case msg.verb == "add":
+		m.notice = notice{text: "Added " + strings.Join(msg.changed, ", ") + " to " + label + "."}
+	case msg.verb == "remove":
+		m.notice = notice{text: "Removed " + strings.Join(msg.changed, ", ") + " from " + label + "; their checkouts stay in /sandbox."}
 	}
 	return m.listCmd()
 }
 
-// newSessionForm returns the new-session form (section 5a).
+// newSessionForm returns the new-session form (section 5a): its
+// repositories (any number; with fixed, the prefilled one only), name,
+// profile and whether to attach.
 func (m *Sessions) newSessionForm(repos []string, pre prefill) *prompt.Form {
-	repo := pre.repo
-	if repo == "" && len(repos) > 0 {
-		repo = repos[0]
-		if r, ok := m.selected(); ok && slices.Contains(repos, r.Info.Repo) {
-			repo = r.Info.Repo
+	picked := pre.repos
+	if len(picked) == 0 && len(repos) > 0 {
+		picked = []string{repos[0]}
+		if r, ok := m.selected(); ok {
+			if rr := rowRepos(r); len(rr) > 0 && slices.Contains(repos, rr[0]) {
+				picked = []string{rr[0]}
+			}
 		}
 	}
 	var repoField *prompt.Field
-	if pre.fixed {
-		repoField = prompt.FixedField("repo", "Repository", repo)
+	if pre.fixed && len(picked) == 1 {
+		repoField = prompt.FixedField("repos", "Repositories", picked[0])
 	} else {
-		opts := make([]prompt.Option, len(repos))
-		for i, r := range repos {
-			opts[i] = prompt.Option{Value: r}
+		opts := make([]prompt.Option, 0, len(repos)+len(picked))
+		for _, r := range repos {
+			opts = append(opts, prompt.Option{Value: r})
 		}
-		repoField = prompt.ChoiceField("repo", "Repository", opts, repo, true)
+		// A prefilled repository is offered even when the listing missed
+		// it (Prepare checks access either way).
+		for _, r := range picked {
+			if !slices.Contains(repos, r) {
+				opts = append(opts, prompt.Option{Value: r})
+			}
+		}
+		repoField = prompt.MultiField("repos", "Repositories", opts, picked)
+	}
+	firstRepo := func(f *prompt.Field) string {
+		if f.Kind() == prompt.Multi {
+			if v := f.Values(); len(v) > 0 {
+				return v[0]
+			}
+			return ""
+		}
+		return f.Value()
 	}
 
 	profile := pre.profile
-	if profile == "" {
-		profile = m.src.RepoProfile(repo)
+	if profile == "" && len(picked) > 0 {
+		profile = m.src.RepoProfile(picked[0])
 	}
 	var popts []prompt.Option
 	for _, p := range m.src.Profiles() {
@@ -1103,7 +1206,7 @@ func (m *Sessions) newSessionForm(repos []string, pre prefill) *prompt.Form {
 		popts = []prompt.Option{{Value: "", Label: "default", Detail: m.src.Command("")}}
 	}
 	profileField := prompt.ChoiceField("profile", "Profile", popts, profile, false)
-	nameField := prompt.TextField("name", "Name", m.defaultName(repo, profileField.Value()), func(name string) error {
+	nameField := prompt.TextField("name", "Name", m.defaultName(picked), func(name string) error {
 		if !openshell.ValidSessionName(name) {
 			return openshell.ErrInvalidSessionName
 		}
@@ -1113,26 +1216,65 @@ func (m *Sessions) newSessionForm(repos []string, pre prefill) *prompt.Form {
 		repoField, nameField, profileField, prompt.ToggleField("attach", "Attach", true))
 	profileTouched := pre.profile != ""
 	f.OnChange = func(f *prompt.Form, key string) {
-		repo := f.Field("repo").Value()
+		first := firstRepo(f.Field("repos"))
 		switch key {
-		case "repo":
-			if !profileTouched {
-				f.Field("profile").SetValue(m.src.RepoProfile(repo))
+		case "repos":
+			if !profileTouched && first != "" {
+				f.Field("profile").SetValue(m.src.RepoProfile(first))
 			}
 		case "profile":
 			profileTouched = true
 		}
 		if name := f.Field("name"); !name.Edited() {
-			name.SetValue(m.defaultName(repo, f.Field("profile").Value()))
+			var reps []string
+			if first != "" {
+				reps = []string{first}
+			}
+			name.SetValue(m.defaultName(reps))
 		}
 	}
 	f.Validate = func(f *prompt.Form) error {
-		repo, name := f.Field("repo").Value(), f.Field("name").Value()
-		if m.exists(repo, name) {
-			return fmt.Errorf("%s already exists; pick another name, or attach to it from the list", sessionLabel(repo, name))
+		if name := f.Field("name").Value(); m.exists(name) {
+			return fmt.Errorf("session %s already exists; pick another name, or attach to it from the list", name)
 		}
 		return nil
 	}
+	return f
+}
+
+// editReposForm returns the form that adds repositories to a session
+// (pre.edit "add", choosing among repos it lacks) or removes some
+// ("remove", among its own; at least one stays).
+func (m *Sessions) editReposForm(repos []string, pre prefill) *prompt.Form {
+	r := pre.target
+	have := rowRepos(r)
+	var opts []prompt.Option
+	title := "Add repositories to " + sessionLabel(r.Info.Name, have)
+	submit := "add"
+	if pre.edit == "remove" {
+		title = "Remove repositories from " + sessionLabel(r.Info.Name, have)
+		submit = "remove"
+		for _, repo := range have {
+			opts = append(opts, prompt.Option{Value: repo})
+		}
+	} else {
+		for _, repo := range repos {
+			if !slices.Contains(have, repo) {
+				opts = append(opts, prompt.Option{Value: repo})
+			}
+		}
+	}
+	f := prompt.NewForm(m.common, title, submit, prompt.MultiField("repos", "Repositories", opts, nil))
+	if pre.edit == "remove" {
+		f.Validate = func(f *prompt.Form) error {
+			if len(f.Field("repos").Values()) >= len(have) {
+				return errors.New("a session keeps at least one repository; end it with x instead")
+			}
+			return nil
+		}
+	}
+	ed := pre
+	m.editing = &ed
 	return f
 }
 
@@ -1146,25 +1288,29 @@ func profileDetail(image, command string) string {
 	return strings.Join(parts, " · ")
 }
 
-// exists reports whether the user has the named session of repo.
-func (m *Sessions) exists(repo, name string) bool {
-	return slices.ContainsFunc(m.rows, func(r sessionctl.Row) bool {
-		return r.Info.Repo == repo && r.Info.Name == name
-	})
+// exists reports whether the user has a session called name.
+func (m *Sessions) exists(name string) bool {
+	return slices.ContainsFunc(m.rows, func(r sessionctl.Row) bool { return r.Info.Name == name })
 }
 
-// defaultName is a new session's name: the profile's name and the first
-// number not taken in the repository ("main" when there is no profile and
-// the repository has no main session).
-func (m *Sessions) defaultName(repo, profile string) string {
-	base := sessionNameBase(profile)
-	if profile == "" && !m.exists(repo, openshell.DefaultSessionName) {
-		return openshell.DefaultSessionName
+// defaultName is a new session's name: as `session start` names it, from
+// the first repository (sessionctl.DefaultName), and never one taken;
+// "main" (or main-2, ...) without a repository.
+func (m *Sessions) defaultName(repos []string) string {
+	infos := make([]openshell.Info, len(m.rows))
+	for i, r := range m.rows {
+		infos[i] = r.Info
 	}
-	for n := 1; ; n++ {
-		name := fmt.Sprintf("%s-%d", base, n)
-		if !m.exists(repo, name) {
-			return name
+	if len(repos) == 0 {
+		repos = []string{openshell.DefaultSessionName}
+	}
+	name := sessionctl.DefaultName(infos, repos[0])
+	if !m.exists(name) {
+		return name
+	}
+	for n := 2; ; n++ {
+		if c := fmt.Sprintf("%s-%d", name, n); !m.exists(c) {
+			return c
 		}
 	}
 }

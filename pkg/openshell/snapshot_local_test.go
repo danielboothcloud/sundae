@@ -181,7 +181,7 @@ func TestSnapshotPipelineLocal(t *testing.T) {
 		t.Fatal(err)
 	}
 	box := &localSandbox{root: root, spool: spool}
-	sess := events.Session{User: "alice", Repo: "r", Name: "main", Sandbox: "sundae-alice-r"}
+	sess := events.Session{User: "alice", Repo: "r", Name: "main", Sandbox: SessionSandboxName("alice", "main")}
 
 	var progress bytes.Buffer
 	info, err := snaps.take(ctx, box, 1, sess, &progress)
@@ -227,10 +227,10 @@ func TestSnapshotPipelineLocal(t *testing.T) {
 	newRoot := filepath.Join(t.TempDir(), "sandbox")
 	writeTree(t, newRoot, map[string]string{".bashrc": "# image\n", ".profile": "# image profile\n"})
 	box2 := &localSandbox{root: newRoot, spool: filepath.Join(t.TempDir(), "sundae")}
-	if found, err := probePaths(ctx, box2, "sundae-alice-r", "/sandbox/r", sundaeStateDir); err != nil || len(found) != 0 {
+	if found, err := probePaths(ctx, box2, SessionSandboxName("alice", "main"), "/sandbox/r", sundaeStateDir); err != nil || len(found) != 0 {
 		t.Fatalf("probe new = %v %v", found, err)
 	}
-	if err := snaps.restore(ctx, box2, 1, "sundae-alice-r"); err != nil {
+	if err := snaps.restore(ctx, box2, 1, SessionSandboxName("alice", "main")); err != nil {
 		t.Fatal(err)
 	}
 	got := readTree(t, newRoot)
@@ -243,7 +243,7 @@ func TestSnapshotPipelineLocal(t *testing.T) {
 	if fi, err := os.Stat(filepath.Join(newRoot, "r/main.go")); err != nil || fi.Mode().Perm() != 0o755 {
 		t.Fatalf("mode = %v %v", fi.Mode(), err)
 	}
-	if found, err := probePaths(ctx, box2, "sundae-alice-r", "/sandbox/r", sundaeStateDir); err != nil || strings.ReplaceAll(strings.Join(found, ","), newRoot, "/sandbox") != "/sandbox/r,/sandbox/.config/sundae" {
+	if found, err := probePaths(ctx, box2, SessionSandboxName("alice", "main"), "/sandbox/r", sundaeStateDir); err != nil || strings.ReplaceAll(strings.Join(found, ","), newRoot, "/sandbox") != "/sandbox/r,/sandbox/.config/sundae" {
 		t.Fatalf("probe restored = %v %v", found, err)
 	}
 
@@ -269,19 +269,19 @@ func TestSnapshotPipelineLocal(t *testing.T) {
 
 	// A corrupt object fails the restore.
 	srv.PutObject(snapKey, []byte("not gzip"), nil)
-	err = snaps.restore(ctx, &localSandbox{root: t.TempDir(), spool: t.TempDir()}, 1, "sundae-alice-r")
+	err = snaps.restore(ctx, &localSandbox{root: t.TempDir(), spool: t.TempDir()}, 1, SessionSandboxName("alice", "main"))
 	if err == nil || !strings.Contains(err.Error(), "decompress") {
 		t.Fatalf("corrupt restore = %v", err)
 	}
 	// A missing object fails the download.
 	srv.DeleteObject(snapKey)
-	err = snaps.restore(ctx, &localSandbox{root: t.TempDir(), spool: t.TempDir()}, 1, "sundae-alice-r")
+	err = snaps.restore(ctx, &localSandbox{root: t.TempDir(), spool: t.TempDir()}, 1, SessionSandboxName("alice", "main"))
 	if err == nil || !strings.Contains(err.Error(), "download") {
 		t.Fatalf("missing restore = %v", err)
 	}
 
 	// An archive over the limit is refused before any upload.
-	out, err := runScript(ctx, box, "sundae-alice-r", snapshotPackName, snapshotPackScript, nil, SandboxRoot, snapshotSpoolDir, "10")
+	out, err := runScript(ctx, box, SessionSandboxName("alice", "main"), snapshotPackName, snapshotPackScript, nil, SandboxRoot, snapshotSpoolDir, "10")
 	if err == nil || !strings.Contains(err.Error(), "exit status 3") || !strings.Contains(err.Error(), "more than the 10 bytes") {
 		t.Fatalf("pack over limit = %q %v", out, err)
 	}
@@ -347,7 +347,7 @@ func TestSnapshotPipelineS3(t *testing.T) {
 		bigSize = fi.Size()
 	}
 	box := &localSandbox{root: root, spool: spool}
-	sess := events.Session{User: "alice", Repo: "r", Name: "main", Sandbox: "sundae-alice-r"}
+	sess := events.Session{User: "alice", Repo: "r", Name: "main", Sandbox: SessionSandboxName("alice", "main")}
 
 	info, err := snaps.take(ctx, box, 1, sess, io.Discard)
 	if err != nil {
@@ -357,7 +357,7 @@ func TestSnapshotPipelineS3(t *testing.T) {
 	if info.Size < bigSize {
 		t.Fatalf("snapshot of %d bytes holds a %d byte file", info.Size, bigSize)
 	}
-	head, err := snaps.store.Head(ctx, snaps.key(1, "sundae-alice-r"))
+	head, err := snaps.store.Head(ctx, snaps.key(1, SessionSandboxName("alice", "main")))
 	if err != nil || head.Size != info.Size || head.Metadata["sundae-repo"] != "r" {
 		t.Fatalf("head = %+v, %v", head, err)
 	}
@@ -375,7 +375,7 @@ func TestSnapshotPipelineS3(t *testing.T) {
 	newRoot := filepath.Join(t.TempDir(), "sandbox")
 	writeTree(t, newRoot, map[string]string{".bashrc": "# image\n"})
 	box2 := &localSandbox{root: newRoot, spool: filepath.Join(t.TempDir(), "sundae")}
-	if err := snaps.restore(ctx, box2, 1, "sundae-alice-r"); err != nil {
+	if err := snaps.restore(ctx, box2, 1, SessionSandboxName("alice", "main")); err != nil {
 		t.Fatal(err)
 	}
 	got := readTree(t, newRoot)
@@ -404,7 +404,7 @@ func TestSnapshotPipelineS3(t *testing.T) {
 	if err := os.MkdirAll(newer, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := snaps.restore(ctx, &localSandbox{root: newer, spool: filepath.Join(t.TempDir(), "s")}, 1, "sundae-alice-r"); err != nil {
+	if err := snaps.restore(ctx, &localSandbox{root: newer, spool: filepath.Join(t.TempDir(), "s")}, 1, SessionSandboxName("alice", "main")); err != nil {
 		t.Fatal(err)
 	}
 	if got := readTree(t, newer)["r/main.go"]; got != "package main // v2\n" {
@@ -412,20 +412,20 @@ func TestSnapshotPipelineS3(t *testing.T) {
 	}
 
 	// The parked marker round-trips and lists.
-	m := ParkedSnapshot{UserID: 1, User: "alice", Repo: "r", Session: "main", Sandbox: "sundae-alice-r", Parked: time.Now().UTC().Truncate(time.Second), Op: ParkAuto}
+	m := ParkedSnapshot{UserID: 1, User: "alice", Repo: "r", Session: "main", Sandbox: SessionSandboxName("alice", "main"), Parked: time.Now().UTC().Truncate(time.Second), Op: ParkAuto}
 	if err := snaps.writeMarker(ctx, m); err != nil {
 		t.Fatal(err)
 	}
 	ms, err := snaps.listMarkers(ctx, 1)
-	if err != nil || len(ms) != 1 || ms[0].Sandbox != "sundae-alice-r" {
+	if err != nil || len(ms) != 1 || ms[0].Sandbox != SessionSandboxName("alice", "main") {
 		t.Fatalf("markers = %+v, %v", ms, err)
 	}
-	if err := snaps.deleteMarker(ctx, 1, "sundae-alice-r"); err != nil {
+	if err := snaps.deleteMarker(ctx, 1, SessionSandboxName("alice", "main")); err != nil {
 		t.Fatal(err)
 	}
 
 	// Clean up the snapshot.
-	if err := snaps.store.Delete(ctx, snaps.key(1, "sundae-alice-r")); err != nil {
+	if err := snaps.store.Delete(ctx, snaps.key(1, SessionSandboxName("alice", "main"))); err != nil {
 		t.Fatal(err)
 	}
 }

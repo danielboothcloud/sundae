@@ -222,7 +222,7 @@ func TestManagerPark(t *testing.T) {
 	}
 	drain(t, sub)
 
-	parked, err := h.mgr.Park(ctx, alice, "r", "two")
+	parked, err := h.mgr.Park(ctx, alice, "two")
 	if err != nil || !parked {
 		t.Fatalf("park: %v %v", parked, err)
 	}
@@ -235,7 +235,7 @@ func TestManagerPark(t *testing.T) {
 		t.Fatalf("lifecycle %+v", got)
 	}
 	// Parking again is a no-op.
-	if parked, err := h.mgr.Park(ctx, alice, "r", "two"); err != nil || parked {
+	if parked, err := h.mgr.Park(ctx, alice, "two"); err != nil || parked {
 		t.Fatalf("park again: %v %v", parked, err)
 	}
 	if got := drain(t, sub); len(got) != 0 {
@@ -243,33 +243,33 @@ func TestManagerPark(t *testing.T) {
 	}
 
 	// Absent, someone else's, not running, not Sundae's, bad name.
-	if _, err := h.mgr.Park(ctx, alice, "r", "nope"); !errors.Is(err, ErrNoSession) {
+	if _, err := h.mgr.Park(ctx, alice, "nope"); !errors.Is(err, ErrNoSession) {
 		t.Fatalf("absent: %v", err)
 	}
-	if _, err := h.mgr.Park(ctx, testUser{id: 9, name: "alice"}, "r", "two"); !errors.Is(err, ErrNotOwned) {
+	if _, err := h.mgr.Park(ctx, testUser{id: 9, name: "alice"}, "two"); !errors.Is(err, ErrNotOwned) {
 		t.Fatalf("foreign: %v", err)
 	}
 	h.fc.AddSandbox("default", &types.Sandbox{
-		Name:   SessionSandboxName("alice", "r", "stopped"),
-		Labels: ownerLabels(alice), Annotations: sessionAnnotations("alice", "r", "stopped", "", nil),
+		Name:   SessionSandboxName("alice", "stopped"),
+		Labels: ownerLabels(alice), Annotations: sessionAnnotations("alice", []string{"r"}, "stopped", "", nil),
 		Status: types.SandboxStatus{Phase: types.SandboxStopped},
 	})
-	if _, err := h.mgr.Park(ctx, alice, "r", "stopped"); err == nil || !strings.Contains(err.Error(), "only a running session can be parked") {
+	if _, err := h.mgr.Park(ctx, alice, "stopped"); err == nil || !strings.Contains(err.Error(), "only a running session can be parked") {
 		t.Fatalf("stopped: %v", err)
 	}
 	h.fc.AddSandbox("default", &types.Sandbox{
-		Name:        SessionSandboxName("alice", "r", "foreign"),
+		Name:        SessionSandboxName("alice", "foreign"),
 		Labels:      map[string]string{LabelUserID: "1"}, // not managed
 		Annotations: map[string]string{AnnotationRepo: "r"},
 		Status:      types.SandboxStatus{Phase: types.SandboxReady},
 	})
-	if _, err := h.mgr.Park(ctx, alice, "r", "foreign"); err == nil || !strings.Contains(err.Error(), "not created by Sundae") {
+	if _, err := h.mgr.Park(ctx, alice, "foreign"); err == nil || !strings.Contains(err.Error(), "not created by Sundae") {
 		t.Fatalf("unmanaged: %v", err)
 	}
-	if _, err := h.mgr.Park(ctx, alice, "r", "Bad"); !errors.Is(err, ErrInvalidSessionName) {
+	if _, err := h.mgr.Park(ctx, alice, "Bad"); !errors.Is(err, ErrInvalidSessionName) {
 		t.Fatalf("bad name: %v", err)
 	}
-	if _, err := h.mgr.Park(ctx, nil, "r", ""); err == nil {
+	if _, err := h.mgr.Park(ctx, nil, ""); err == nil {
 		t.Fatal("anonymous park")
 	}
 
@@ -282,16 +282,16 @@ func TestManagerPark(t *testing.T) {
 		t.Fatal(err)
 	}
 	closeBridge := mon.OpenBridge(ctx, main.Sandbox)
-	if _, err := h.mgr.Park(ctx, alice, "r", ""); !errors.Is(err, ErrBridgeOpen) {
+	if _, err := h.mgr.Park(ctx, alice, ""); !errors.Is(err, ErrBridgeOpen) {
 		t.Fatalf("bridge open: %v", err)
 	}
 	closeBridge()
 	mon.unsuspendable[main.Sandbox] = "compute driver does not support sandbox suspend"
-	if _, err := h.mgr.Park(ctx, alice, "r", ""); !IsSuspendUnsupported(err) || !strings.Contains(err.Error(), "cannot suspend") {
+	if _, err := h.mgr.Park(ctx, alice, ""); !IsSuspendUnsupported(err) || !strings.Contains(err.Error(), "cannot suspend") {
 		t.Fatalf("unsupported: %v", err)
 	}
 	delete(mon.unsuspendable, main.Sandbox)
-	if parked, err := h.mgr.Park(ctx, alice, "r", ""); err != nil || !parked {
+	if parked, err := h.mgr.Park(ctx, alice, ""); err != nil || !parked {
 		t.Fatalf("park main: %v %v", parked, err)
 	}
 	if got := drain(t, sub); steps(got) != "created,ready,parked" {

@@ -295,15 +295,15 @@ func (s *Selection) Close() {
 	}
 }
 
-// OpenNewSession opens the Sessions tab's new-session form for repo, with
-// the repository fixed (the Repositories tab's s key).
+// OpenNewSession opens the Sessions tab's new-session form with repo
+// picked; more repositories can be added (the Repositories tab's s key).
 func (s *Selection) OpenNewSession(repo string) tea.Cmd {
 	if s.sessions == nil {
 		return nil
 	}
 	cmd := s.selectPane(sessionsPane)
 	s.bindSessions()
-	return tea.Batch(cmd, s.sessions.OpenNewSession(repo, true))
+	return tea.Batch(cmd, s.sessions.OpenNewSession(repo, false))
 }
 
 // selectPane makes p the active tab.

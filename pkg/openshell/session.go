@@ -123,12 +123,8 @@ func NewManager(client Client, tokens TokenStore, cfg *config.Config, opts ...Ma
 }
 
 // lifecycle publishes a lifecycle step of one of the user's sessions.
-func (m *Manager) lifecycle(user proto.User, repo, name, sandbox string, step events.Lifecycle, op string, err error) {
-	m.publish(user, events.SessionLifecycle{
-		Session: events.Session{User: user.Username(), Repo: repo, Name: name, Sandbox: sandbox},
-		Step:    step,
-		Op:      op,
-	}, err)
+func (m *Manager) lifecycle(user proto.User, sess events.Session, step events.Lifecycle, op string, err error) {
+	m.publish(user, events.SessionLifecycle{Session: sess, Step: step, Op: op}, err)
 }
 
 // publish publishes a lifecycle step, with err as its reason.
@@ -146,20 +142,32 @@ func (m *Manager) publish(user proto.User, l events.SessionLifecycle, err error)
 type StartOptions struct {
 	// User is the authenticated caller. Required.
 	User proto.User
-	// Repo is the canonical repository name.
+	// Repos are the repositories the session must hold: a new session is
+	// created with them, in order; an existing one gets those it lacks
+	// added. Resume may leave it empty.
+	Repos []RepoSpec
+	// Repo, VCS and GitIdentity are a single repository, used when Repos
+	// is empty.
 	Repo string
-	// VCS selects the clone tool.
-	VCS proto.VCS
+	VCS  proto.VCS
+	// RemoveRepos are taken out of an existing session's list. Their
+	// checkouts stay in /sandbox.
+	RemoveRepos []string
+	// ResolveRepo returns the spec of a repository the session holds but
+	// Repos does not name (to clone it, or set its git identity). nil, or
+	// an error, leaves that repository as it is.
+	ResolveRepo func(name string) (RepoSpec, error)
 	// Name is the session name. Empty is DefaultSessionName.
 	Name string
 	// Profile names the sessions.profiles entry to create the session from.
-	// Empty uses RepoProfile, else the sessions.repos match for Repo, if
-	// any. Start only; it is ignored, with a warning, for a session that
-	// already exists.
+	// Empty uses RepoProfile, else the first sessions.repos match among the
+	// repositories, in order, if any. Start only; it is ignored, with a
+	// warning, for a session that already exists.
 	Profile string
-	// RepoProfile is the repository's own default profile (`repo
-	// profile`), used when Profile is empty. One that is no longer in
-	// sessions.profiles is skipped with a warning.
+	// RepoProfile is the default profile of the first repository, in
+	// order, that has one (`repo profile`), used when Profile is empty.
+	// One that is no longer in sessions.profiles is skipped with a
+	// warning.
 	RepoProfile string
 	// Image overrides the image when the sandbox is created. Start only;
 	// ignored, with a warning, for a session that already exists.
@@ -170,21 +178,30 @@ type StartOptions struct {
 	// newly created sandbox (snapshots.s3). The zero value restores it
 	// unless the new sandbox already holds earlier work.
 	Restore RestoreMode
-	// GitIdentity is the name and email commits in the checkout are made
-	// as: set in the checkout's git and jj repository config on every
-	// start and attach, and given to the first clone. The zero value
-	// leaves the sandbox's identity alone.
+	// GitIdentity is Repo's; see RepoSpec.
 	GitIdentity config.GitIdentity
 	// Progress receives human-readable progress messages. May be nil.
 	Progress io.Writer
+}
+
+// repoSpecs returns the repositories opts names.
+func (opts StartOptions) repoSpecs() []RepoSpec {
+	if len(opts.Repos) > 0 {
+		return opts.Repos
+	}
+	if opts.Repo != "" {
+		return []RepoSpec{{Name: opts.Repo, VCS: opts.VCS, GitIdentity: opts.GitIdentity}}
+	}
+	return nil
 }
 
 // Session is a started session, ready to attach to.
 type Session struct {
 	// Name is the session name.
 	Name string
-	// Repo is the repository name.
-	Repo string
+	// Repo is the session's first repository; Repos are all of them.
+	Repo  string
+	Repos []string
 	// Sandbox is the sandbox name.
 	Sandbox string
 	// Profile is the profile the session was created from; empty for none.
@@ -199,9 +216,10 @@ type Session struct {
 	ProviderChanges ProviderChanges
 	// Created reports whether the sandbox was created by this call.
 	Created bool
-	// Cloned reports whether this call cloned the repository.
-	Cloned bool
-	// WorkDir is the repository checkout inside the sandbox.
+	// Cloned are the repositories this call cloned.
+	Cloned []string
+	// WorkDir is where the program runs: the checkout of the session's
+	// only repository, else /sandbox.
 	WorkDir string
 	// Command is the session's program, running in an osewa session.
 	Command []string
@@ -229,8 +247,10 @@ func (s *Session) AttachCommand() []string {
 
 // Info describes one of a user's sessions.
 type Info struct {
-	// Repo is the repository name.
-	Repo string
+	// Repo is the session's first repository; Repos are all of them, in
+	// order (see SessionRepos).
+	Repo  string
+	Repos []string
 	// Name is the session name.
 	Name string
 	// Profile is the profile the session was created from; empty for none.
@@ -262,10 +282,11 @@ func sessionName(name string) (string, error) {
 	return name, nil
 }
 
-// Start ensures the user's named session for the repository is running:
-// it creates the sandbox (from the session's profile) or resumes it, clones
-// the repository on first use, renews the sandbox's git credentials, sets
-// the session's git identity in the checkout (opts.GitIdentity), makes
+// Start ensures the user's named session is running: it creates the
+// sandbox (from the session's profile) or resumes it, updates its
+// repository list (opts.Repos, opts.RemoveRepos), clones each repository
+// on first use, renews the sandbox's git credentials, sets each
+// repository's git identity in its checkout, makes
 // sure osewa is installed, serving and enrolled, and starts the session's
 // program in an osewa session unless it is running already. The returned
 // Session is ready to Attach to.
@@ -296,6 +317,18 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 	if err != nil {
 		return nil, err
 	}
+	specs := opts.repoSpecs()
+	wanted := make([]string, 0, len(specs))
+	specOf := map[string]RepoSpec{}
+	for _, sp := range specs {
+		if sp.Name == "" {
+			return nil, errors.New("openshell: a repository with no name")
+		}
+		if _, ok := specOf[sp.Name]; !ok {
+			wanted = append(wanted, sp.Name)
+		}
+		specOf[sp.Name] = sp
+	}
 
 	// Input errors are returned before anything is published.
 	var (
@@ -303,13 +336,16 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 		p       config.SessionProfile
 	)
 	if create {
-		profile, p, err = m.resolveProfile(opts.Repo, opts.Profile, opts.RepoProfile, progress)
+		profile, p, err = m.resolveProfile(wanted, opts.Profile, opts.RepoProfile, progress)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	sandbox := SessionSandboxName(opts.User.Username(), opts.Repo, name)
+	sandbox := SessionSandboxName(opts.User.Username(), name)
+	// The session's repositories, as far as known before the sandbox is
+	// read: what the events say until then.
+	repos := wanted
 	op := "start"
 	if !create {
 		op = "attach"
@@ -318,7 +354,7 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 		// Attaching to a session that does not exist is not a failure of
 		// the session, nor is a restore that needs the user's answer.
 		if err != nil && !errors.Is(err, ErrNoSession) && !errors.Is(err, ErrRestoreConflict) {
-			m.lifecycle(opts.User, opts.Repo, name, sandbox, events.LifecycleFailed, op, err)
+			m.lifecycle(opts.User, events.NewSession(opts.User.Username(), name, sandbox, repos), events.LifecycleFailed, op, err)
 		}
 	}()
 
@@ -338,6 +374,9 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 	existing, getErr := m.client.GetSandbox(ctx, sandbox)
 	if getErr != nil {
 		existing = nil
+	}
+	if existing != nil {
+		repos = mergeRepos(m.monitor.SessionRepos(existing), wanted, opts.RemoveRepos)
 	}
 	unparked := existing != nil && isParkedPhase(existing.Status.Phase)
 	var parked *ParkedSnapshot
@@ -362,6 +401,12 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 		create, unparked = true, true
 		profile = parked.Profile
 		p = m.sessions.Profiles[profile]
+		repos = mergeRepos(parked.AllRepos(), wanted, opts.RemoveRepos)
+	}
+	if len(repos) == 0 {
+		if create {
+			return nil, errors.New("openshell: a session needs at least one repository")
+		}
 	}
 
 	// A start fails when the session's profile lists a provider declared
@@ -418,7 +463,7 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 		sb, created, err = m.client.EnsureSandbox(ctx, sandbox, SandboxRequest{
 			Image:       image,
 			Labels:      ownerLabels(opts.User),
-			Annotations: sessionAnnotations(opts.User.Username(), opts.Repo, name, profile, p.Providers),
+			Annotations: sessionAnnotations(opts.User.Username(), repos, name, profile, p.Providers),
 			Providers:   p.Providers,
 		})
 		var missing *MissingProviderError
@@ -432,17 +477,21 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 		fmt.Fprintf(progress, "Resuming sandbox %s...\n", sandbox) //nolint:errcheck
 		sb, err = m.client.ResumeSandbox(ctx, sandbox, ownerLabels(opts.User))
 		if IsNotFound(err) {
-			return nil, fmt.Errorf("%w: %q for %s; start it with \"session start %s%s\"", ErrNoSession, name, opts.Repo, opts.Repo, nameFlag(name))
+			return nil, fmt.Errorf("%w: %q; create it with \"session new %s --repo <repository>\"", ErrNoSession, name, name)
 		}
 		if err != nil {
 			return nil, err
 		}
 	}
 	m.monitor.noteReady(sandbox)
+	if !created && existing == nil && parked == nil {
+		// Created by a concurrent start after the look above.
+		repos = mergeRepos(m.monitor.SessionRepos(sb), wanted, opts.RemoveRepos)
+	}
 	if created {
-		m.lifecycle(opts.User, opts.Repo, name, sandbox, events.LifecycleCreated, "", nil)
+		m.lifecycle(opts.User, events.NewSession(opts.User.Username(), name, sandbox, repos), events.LifecycleCreated, "", nil)
 	} else {
-		m.lifecycle(opts.User, opts.Repo, name, sandbox, events.LifecycleResumed, "", nil)
+		m.lifecycle(opts.User, events.NewSession(opts.User.Username(), name, sandbox, repos), events.LifecycleResumed, "", nil)
 		// The sandbox records the profile it was created from.
 		profile = sb.Annotations[AnnotationProfile]
 		if opts.Image != "" {
@@ -466,16 +515,15 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 
 	s := &Session{
 		Name:            name,
-		Repo:            opts.Repo,
 		Sandbox:         sandbox,
 		Profile:         profile,
 		Providers:       m.sessionProviders(profile, sb),
 		ProviderChanges: changes,
 		Created:         created,
 		Unparked:        unparked && (!created || parked != nil),
-		WorkDir:         path.Join(SandboxRoot, opts.Repo),
 		Command:         command,
 	}
+	s.setRepos(repos)
 
 	// Restore the session's snapshot into a sandbox this call created,
 	// before the clone check, so a restored checkout is resumed rather
@@ -501,25 +549,76 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 		return nil, err
 	}
 
-	exists, err := m.dirExists(ctx, sandbox, s.WorkDir)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		fmt.Fprintf(progress, "Cloning %s into %s...\n", opts.Repo, s.WorkDir) //nolint:errcheck
-		if err := m.clone(ctx, sandbox, opts.VCS, opts.Repo, s.WorkDir, opts.GitIdentity); err != nil {
+	// The session's current list: what the Monitor knows, else the
+	// sandbox's list file (`session repos` may have changed it since the
+	// sandbox was created; a snapshot restored above brought it back),
+	// else the list the sandbox was created with. The file is only
+	// written when the list differs from that.
+	base, known := m.monitor.knownRepos(sandbox)
+	if !known && (!created || s.Restored != nil) {
+		onDisk, err := m.readRepos(ctx, sandbox)
+		if err != nil {
 			return nil, err
 		}
-		s.Cloned = true
+		base, known = onDisk, onDisk != nil
 	}
+	if !known {
+		base = annotatedRepos(sb.Annotations)
+		if len(base) == 0 {
+			base = repos
+		}
+	}
+	s.setRepos(mergeRepos(base, wanted, opts.RemoveRepos))
+	if len(s.Repos) == 0 {
+		return nil, fmt.Errorf("session %s has no repositories left; add one with \"session repos %s add <repository>\"", name, name)
+	}
+	if !slices.Equal(s.Repos, base) {
+		if err := m.writeRepos(ctx, sandbox, s.Repos); err != nil {
+			return nil, err
+		}
+	}
+	m.monitor.rememberRepos(sandbox, s.Repos)
+	repos = s.Repos
 
-	// Set the session's git identity in the checkout on every start and
-	// attach, so a changed identity reaches existing checkouts. A failure
-	// leaves the session usable: it is reported, not fatal.
-	if opts.GitIdentity.IsSet() {
-		if err := m.writeGitIdentity(ctx, sandbox, s.WorkDir, opts.GitIdentity); err != nil {
-			m.logger.Warn("cannot set the git identity", "sandbox", sandbox, "err", err)
-			fmt.Fprintf(progress, "Warning: could not set the git identity %s in %s; commits may use another identity: %v\n", opts.GitIdentity, s.WorkDir, err) //nolint:errcheck
+	for _, repo := range s.Repos {
+		sp, ok := specOf[repo]
+		if !ok {
+			if opts.ResolveRepo == nil {
+				sp = RepoSpec{Name: repo}
+			} else if sp, err = opts.ResolveRepo(repo); err != nil {
+				// Deleted, renamed, or no longer readable: its checkout,
+				// if any, stays as it is.
+				fmt.Fprintf(progress, "Warning: skipping %s: %v\n", repo, err) //nolint:errcheck
+				continue
+			}
+		}
+		dir := repoDir(repo)
+		exists, err := m.dirExists(ctx, sandbox, dir)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			fmt.Fprintf(progress, "Cloning %s into %s...\n", repo, dir) //nolint:errcheck
+			if err := m.clone(ctx, sandbox, sp.VCS, repo, dir, sp.GitIdentity); err != nil {
+				return nil, err
+			}
+			s.Cloned = append(s.Cloned, repo)
+		}
+
+		// Set the repository's git identity in its checkout on every
+		// start and attach, so a changed identity reaches existing
+		// checkouts. A failure leaves the session usable: it is
+		// reported, not fatal.
+		if sp.GitIdentity.IsSet() {
+			if err := m.writeGitIdentity(ctx, sandbox, dir, sp.GitIdentity); err != nil {
+				m.logger.Warn("cannot set the git identity", "sandbox", sandbox, "repo", repo, "err", err)
+				fmt.Fprintf(progress, "Warning: could not set the git identity %s in %s; commits may use another identity: %v\n", sp.GitIdentity, dir, err) //nolint:errcheck
+			}
+		}
+	}
+	for _, r := range opts.RemoveRepos {
+		if !slices.Contains(s.Repos, r) {
+			fmt.Fprintf(progress, "Removed %s from session %s; its checkout %s stays in the sandbox\n", r, name, repoDir(r)) //nolint:errcheck
 		}
 	}
 
@@ -571,8 +670,24 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 		s.Env["TERM"] = opts.Term
 	}
 
-	m.lifecycle(opts.User, opts.Repo, name, sandbox, events.LifecycleReady, "", nil)
+	m.lifecycle(opts.User, events.NewSession(opts.User.Username(), name, sandbox, s.Repos), events.LifecycleReady, "", nil)
 	return s, nil
+}
+
+// setRepos sets the session's repositories and the directory its program
+// runs in.
+func (s *Session) setRepos(repos []string) {
+	s.Repos = slices.Clone(repos)
+	s.Repo = ""
+	if len(repos) > 0 {
+		s.Repo = repos[0]
+	}
+	s.WorkDir = sessionWorkDir(repos)
+}
+
+// event returns the session's events.Session.
+func (s *Session) event(user string) events.Session {
+	return events.NewSession(user, s.Name, s.Sandbox, s.Repos)
 }
 
 // profileProviders returns the OpenShell providers the sessions of profile
@@ -689,7 +804,12 @@ func (m *Manager) restoreSnapshot(ctx context.Context, opts StartOptions, op str
 		// without asking. Sundae's own state or the checkout can only
 		// be there from earlier work, e.g. a volume that outlived its
 		// sandbox; replacing that is the user's call.
-		found, err := probePaths(ctx, m.client, s.Sandbox, s.WorkDir, sundaeStateDir)
+		var paths []string
+		for _, r := range s.Repos {
+			paths = append(paths, repoDir(r))
+		}
+		paths = append(paths, sundaeStateDir)
+		found, err := probePaths(ctx, m.client, s.Sandbox, paths...)
 		if err != nil {
 			return nil, err
 		}
@@ -703,7 +823,7 @@ func (m *Manager) restoreSnapshot(ctx context.Context, opts StartOptions, op str
 		return nil, fmt.Errorf("openshell: restore the snapshot of session %s (%s): %w", s.Name, info.URL, err)
 	}
 	m.publish(opts.User, events.SessionLifecycle{
-		Session: events.Session{User: opts.User.Username(), Repo: s.Repo, Name: s.Name, Sandbox: s.Sandbox},
+		Session: s.event(opts.User.Username()),
 		Step:    events.LifecycleRestored,
 		Op:      op,
 		Bytes:   info.Size,
@@ -723,21 +843,20 @@ func (m *Manager) discardSandbox(sandbox string) {
 	}
 }
 
-// Park suspends the sandbox of the user's named session for the repository
-// (`session park`). It reports whether it parked it: a session that is
+// Park suspends the sandbox of the user's named session (`session park`). It reports whether it parked it: a session that is
 // parked already is a successful no-op. It refuses a session with an open
 // bridge, one that is not running, and sandboxes Sundae did not create,
 // and publishes parked (Op ParkManual) on success. start and attach resume
 // the session.
-func (m *Manager) Park(ctx context.Context, user proto.User, repo, name string) (bool, error) {
-	parked, _, err := m.ParkSession(ctx, user, repo, name)
+func (m *Manager) Park(ctx context.Context, user proto.User, name string) (bool, error) {
+	parked, _, err := m.ParkSession(ctx, user, name)
 	return parked, err
 }
 
 // ParkSession is Park, also reporting whether the session was parked to
 // its S3 snapshot (sessions.suspend.fallback: snapshot) rather than
 // suspended: its sandbox deleted and its program stopped.
-func (m *Manager) ParkSession(ctx context.Context, user proto.User, repo, name string) (parked, snapshot bool, err error) {
+func (m *Manager) ParkSession(ctx context.Context, user proto.User, name string) (parked, snapshot bool, err error) {
 	if user == nil {
 		return false, false, proto.ErrUnauthorized
 	}
@@ -745,7 +864,7 @@ func (m *Manager) ParkSession(ctx context.Context, user proto.User, repo, name s
 	if err != nil {
 		return false, false, err
 	}
-	sandbox := SessionSandboxName(user.Username(), repo, name)
+	sandbox := SessionSandboxName(user.Username(), name)
 	sb, err := m.client.GetSandbox(ctx, sandbox)
 	switch {
 	case IsNotFound(err) && m.snaps != nil:
@@ -753,9 +872,9 @@ func (m *Manager) ParkSession(ctx context.Context, user proto.User, repo, name s
 		if p, merr := m.snaps.readMarker(ctx, user.ID(), sandbox); merr == nil && p != nil {
 			return false, true, nil
 		}
-		return false, false, fmt.Errorf("%w: %q for %s", ErrNoSession, name, repo)
+		return false, false, fmt.Errorf("%w: %q", ErrNoSession, name)
 	case IsNotFound(err):
-		return false, false, fmt.Errorf("%w: %q for %s", ErrNoSession, name, repo)
+		return false, false, fmt.Errorf("%w: %q", ErrNoSession, name)
 	case err != nil:
 		return false, false, fmt.Errorf("openshell: get sandbox %q: %w", sandbox, err)
 	case !owns(sb, ownerLabels(user)):
@@ -769,7 +888,7 @@ func (m *Manager) ParkSession(ctx context.Context, user proto.User, repo, name s
 	case v1.SandboxSuspended, v1.SandboxSuspending:
 		return false, false, nil
 	default:
-		return false, false, fmt.Errorf("session %s of %s is %s; only a running session can be parked", name, repo, sb.Status.Phase)
+		return false, false, fmt.Errorf("session %s is %s; only a running session can be parked", name, sb.Status.Phase)
 	}
 
 	snapshot, err = m.monitor.ParkSession(ctx, m.client, sandbox)
@@ -780,7 +899,7 @@ func (m *Manager) ParkSession(ctx context.Context, user proto.User, repo, name s
 		return false, false, err
 	}
 	m.publish(user, events.SessionLifecycle{
-		Session:  events.Session{User: user.Username(), Repo: repo, Name: name, Sandbox: sandbox},
+		Session:  events.NewSession(user.Username(), name, sandbox, m.monitor.SessionRepos(sb)),
 		Step:     events.LifecycleParked,
 		Op:       ParkManual,
 		Snapshot: snapshot,
@@ -788,21 +907,13 @@ func (m *Manager) ParkSession(ctx context.Context, user proto.User, repo, name s
 	return true, snapshot, nil
 }
 
-// nameFlag returns the --name flag selecting session name, or "" for the
-// default session.
-func nameFlag(name string) string {
-	if name == DefaultSessionName {
-		return ""
-	}
-	return " --name " + name
-}
-
-// resolveProfile returns the profile a new session for repo is created from:
-// explicit when set, else the repository's own profile (repoSetting), else
-// the sessions.repos match, else none (""). An explicit profile that is not
+// resolveProfile returns the profile a new session of repos is created
+// from: explicit when set, else the first repository's own profile that
+// has one (repoSetting), else the first sessions.repos match among the
+// repositories, in order, else none (""). An explicit profile that is not
 // configured is an error; a repository profile that no longer is falls
 // through to the next, with a warning on progress.
-func (m *Manager) resolveProfile(repo, explicit, repoSetting string, progress io.Writer) (string, config.SessionProfile, error) {
+func (m *Manager) resolveProfile(repos []string, explicit, repoSetting string, progress io.Writer) (string, config.SessionProfile, error) {
 	name := explicit
 	if name == "" && repoSetting != "" {
 		if _, ok := m.sessions.Profiles[repoSetting]; ok {
@@ -811,7 +922,10 @@ func (m *Manager) resolveProfile(repo, explicit, repoSetting string, progress io
 			fmt.Fprintf(progress, "Warning: the repository's profile %q is no longer configured; ignoring it\n", repoSetting) //nolint:errcheck
 		}
 	}
-	if name == "" {
+	for _, repo := range repos {
+		if name != "" {
+			break
+		}
 		name = m.sessions.RepoProfile(repo)
 	}
 	if name == "" {
@@ -883,15 +997,13 @@ type EndResult struct {
 }
 
 // End is EndSession without options: a failed snapshot stops it.
-func (m *Manager) End(ctx context.Context, user proto.User, repo, name string) (bool, error) {
-	r, err := m.EndSession(ctx, user, repo, name, EndOptions{})
+func (m *Manager) End(ctx context.Context, user proto.User, name string) (bool, error) {
+	r, err := m.EndSession(ctx, user, name, EndOptions{})
 	return r.Existed, err
 }
 
-// EndSession deletes the sandbox of the user's named session for the
-// repository and revokes its access tokens. Other sessions of the
-// repository are left alone. Ending an absent session is a successful
-// no-op.
+// EndSession deletes the sandbox of the user's named session and revokes
+// its access tokens. Ending an absent session is a successful no-op.
 //
 // With snapshots.s3.on including end, /sandbox is snapshotted first; when
 // that fails the session is not ended and a *SnapshotError is returned,
@@ -901,7 +1013,7 @@ func (m *Manager) End(ctx context.Context, user proto.User, repo, name string) (
 // It publishes snapshotted when the snapshot is stored, ended once the
 // sandbox is deleted, and failed when the sandbox could not be looked up,
 // snapshotted or deleted. Ending an absent session publishes nothing.
-func (m *Manager) EndSession(ctx context.Context, user proto.User, repo, name string, o EndOptions) (EndResult, error) {
+func (m *Manager) EndSession(ctx context.Context, user proto.User, name string, o EndOptions) (EndResult, error) {
 	var res EndResult
 	if user == nil {
 		return res, proto.ErrUnauthorized
@@ -915,8 +1027,8 @@ func (m *Manager) EndSession(ctx context.Context, user proto.User, repo, name st
 		progress = io.Discard
 	}
 
-	sandbox := SessionSandboxName(user.Username(), repo, name)
-	sess := events.Session{User: user.Username(), Repo: repo, Name: name, Sandbox: sandbox}
+	sandbox := SessionSandboxName(user.Username(), name)
+	sess := events.NewSession(user.Username(), name, sandbox, nil)
 	failed := func(op string, err error) (EndResult, error) {
 		m.publish(user, events.SessionLifecycle{Session: sess, Step: events.LifecycleFailed, Op: op}, err)
 		return res, err
@@ -939,6 +1051,8 @@ func (m *Manager) EndSession(ctx context.Context, user proto.User, repo, name st
 		return failed("end", fmt.Errorf("openshell: get sandbox %q: %w", sandbox, err))
 	case !owns(sb, ownerLabels(user)):
 		return failed("end", ErrNotOwned)
+	default:
+		sess = events.NewSession(user.Username(), name, sandbox, m.monitor.SessionRepos(sb))
 	}
 
 	if !existed && m.snaps != nil {
@@ -947,6 +1061,7 @@ func (m *Manager) EndSession(ctx context.Context, user proto.User, repo, name st
 		case err != nil && !o.Force:
 			return failed("end", fmt.Errorf("openshell: look up whether session %s is parked to a snapshot: %w (session end --force ends it anyway)", name, err))
 		case parked != nil:
+			sess = events.NewSession(user.Username(), name, sandbox, parked.AllRepos())
 			if err := m.snaps.deleteMarker(ctx, user.ID(), sandbox); err != nil {
 				return failed("end", err)
 			}
@@ -963,7 +1078,7 @@ func (m *Manager) EndSession(ctx context.Context, user proto.User, repo, name st
 				res.Snapshot = info
 				m.publish(user, events.SessionLifecycle{Session: sess, Step: events.LifecycleSnapshotted, Op: "end", Bytes: info.Size}, nil)
 			case !o.Force:
-				return failed("snapshot", &SnapshotError{Repo: repo, Name: name, Err: serr})
+				return failed("snapshot", &SnapshotError{Repo: strings.Join(sess.AllRepos(), ", "), Name: name, Err: serr})
 			default:
 				res.SnapshotErr = serr
 				m.publish(user, events.SessionLifecycle{Session: sess, Step: events.LifecycleFailed, Op: "snapshot"}, serr)
@@ -981,6 +1096,7 @@ func (m *Manager) EndSession(ctx context.Context, user proto.User, repo, name st
 				m.logger.Warn("cannot clear a parked marker", "sandbox", sandbox, "err", err)
 			}
 		}
+		m.monitor.forgetRepos(sandbox)
 		// The session is gone even if revoking its tokens below fails.
 		m.publish(user, events.SessionLifecycle{Session: sess, Step: events.LifecycleEnded}, nil)
 	}
@@ -1009,7 +1125,7 @@ func (m *Manager) snapshotForEnd(ctx context.Context, user proto.User, sess even
 	return m.snaps.take(ctx, m.client, user.ID(), sess, progress)
 }
 
-// List returns the user's sessions sorted by repository and session name.
+// List returns the user's sessions sorted by session name.
 func (m *Manager) List(ctx context.Context, user proto.User) ([]Info, error) {
 	if user == nil {
 		return nil, proto.ErrUnauthorized
@@ -1027,8 +1143,10 @@ func (m *Manager) List(ctx context.Context, user proto.User) ([]Info, error) {
 			// Created before named sessions.
 			name = DefaultSessionName
 		}
+		repos := m.monitor.SessionRepos(sb)
 		infos = append(infos, Info{
-			Repo:      sb.Annotations[AnnotationRepo],
+			Repo:      first(repos),
+			Repos:     repos,
 			Name:      name,
 			Profile:   sb.Annotations[AnnotationProfile],
 			Providers: slices.Clone(sb.Spec.Providers),
@@ -1040,9 +1158,6 @@ func (m *Manager) List(ctx context.Context, user proto.User) ([]Info, error) {
 		infos = m.withParkedSnapshots(ctx, user, sbs, infos)
 	}
 	slices.SortFunc(infos, func(a, b Info) int {
-		if c := strings.Compare(a.Repo, b.Repo); c != 0 {
-			return c
-		}
 		if c := strings.Compare(a.Name, b.Name); c != 0 {
 			return c
 		}
@@ -1067,6 +1182,7 @@ func (m *Manager) withParkedSnapshots(ctx context.Context, user proto.User, sbs 
 		}
 		infos = append(infos, Info{
 			Repo:     p.Repo,
+			Repos:    p.AllRepos(),
 			Name:     p.Session,
 			Profile:  p.Profile,
 			Sandbox:  p.Sandbox,
@@ -1190,11 +1306,14 @@ func ownerLabels(user proto.User) map[string]string {
 	}
 }
 
-func sessionAnnotations(user, repo, name, profile string, providers []string) map[string]string {
+func sessionAnnotations(user string, repos []string, name, profile string, providers []string) map[string]string {
 	a := map[string]string{
 		AnnotationUser:    user,
-		AnnotationRepo:    repo,
+		AnnotationRepos:   strings.Join(repos, ","),
 		AnnotationSession: name,
+	}
+	if len(repos) > 0 {
+		a[AnnotationRepo] = repos[0]
 	}
 	if profile != "" {
 		a[AnnotationProfile] = profile
@@ -1283,3 +1402,14 @@ func Bridge(ctx context.Context, term Terminal, is InteractiveSession) (int, err
 
 	return code, err //nolint:wrapcheck
 }
+
+// first returns the first of ss; "" for none.
+func first(ss []string) string {
+	if len(ss) == 0 {
+		return ""
+	}
+	return ss[0]
+}
+
+// HasRepo reports whether repo is one of the session's repositories.
+func (i Info) HasRepo(repo string) bool { return slices.Contains(i.Repos, repo) }

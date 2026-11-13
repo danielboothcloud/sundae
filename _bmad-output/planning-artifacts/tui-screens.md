@@ -264,3 +264,18 @@ Where the build differs from the screens above (sections 4, 6, 8, 9, 10).
 - **In-repo Sessions tab** shows the home Sessions tab's model narrowed to the repository; each scope (home, each repository) keeps its own cursor, pane and filters, and Signals follows again after a switch. Its end-session confirm shows inside the tab (the repository page's footer is the help). `esc` first closes a form or confirm, clears the filter or cancels a start, and only then leaves the repository. Status bar: `<repo>  <session>  1 of 2  *  ? Help  ▲1 ✓1 ●2`, the summary always in its narrow form.
 - **Narrow repository page**: its tabs collapse to `‹ Sessions ›` whenever they do not fit, not only under 60 columns (at 50 columns the old tab strip already hid Sessions).
 - `forge ls --json` gains `list_error` and `syncing`, which the tab reads.
+
+## 13. Multi-repository sessions (2026-11-13)
+
+- A session is named per user and holds one or more repositories. Rows read
+  "repo / name" for one repository and "name (repo1, repo2, +N)" for more,
+  in the Sessions tab, the Signals pane, `session ls` and ntfy titles.
+- New-session form: **Repositories** is a multi-select (←→ move, space
+  picks, typing filters; values keep the order picked), then Name (defaults
+  to the first repository's last path segment), Profile, Attach.
+- Sessions pane keys added: `a` add repositories, `R` remove some (a
+  session keeps at least one). `s` on Repositories preselects the repository
+  instead of fixing it.
+- Repositories tab: `D` deletes the highlighted repository after a confirm.
+  Forges tab: `i`/`I` open a form choosing jj or git.
+- The in-repo Sessions tab lists every session holding the repository.

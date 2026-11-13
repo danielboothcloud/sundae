@@ -2,8 +2,6 @@ package openshell
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -18,144 +16,64 @@ import (
 
 var dnsLabel = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 
-func TestSandboxName(t *testing.T) {
-	cases := []struct {
-		user, repo string
-		want       string // exact name, or "" to only require a hashed name
-	}{
-		{"alice", "repo", "sundae-alice-repo"},
-		{"alice", "my-repo", "sundae-alice-my-repo"},
-		{"alice", "r2", "sundae-alice-r2"},
-		{"alice", "org/repo", ""},
-		{"alice", "Repo", ""},
-		{"alice", "my_repo", ""},
-		{"alice", "my.repo", ""},
-		{"al-ice", "repo", ""},
-		{"alice", strings.Repeat("x", 80), ""},
-	}
-	for _, tc := range cases {
-		got := SandboxName(tc.user, tc.repo)
-		if len(got) > maxNameLen || !dnsLabel.MatchString(got) {
-			t.Errorf("SandboxName(%q, %q) = %q: not a DNS label of <= 63 chars", tc.user, tc.repo, got)
-		}
-		if !strings.HasPrefix(got, "sundae-") {
-			t.Errorf("SandboxName(%q, %q) = %q: missing sundae- prefix", tc.user, tc.repo, got)
-		}
-		if tc.want != "" && got != tc.want {
-			t.Errorf("SandboxName(%q, %q) = %q, want %q", tc.user, tc.repo, got, tc.want)
-		}
-		if tc.want == "" && !regexp.MustCompile(`-[0-9a-f]{8}$`).MatchString(got) {
-			t.Errorf("SandboxName(%q, %q) = %q: expected a hash suffix", tc.user, tc.repo, got)
-		}
-		if again := SandboxName(tc.user, tc.repo); again != got {
-			t.Errorf("SandboxName not deterministic: %q vs %q", got, again)
-		}
-	}
-}
-
-func TestSandboxNameCollisions(t *testing.T) {
-	pairs := [][2][2]string{
-		{{"alice", "a/b"}, {"alice", "a-b"}},
-		{{"alice", "Repo"}, {"alice", "repo"}},
-		{{"alice", "a_b"}, {"alice", "a.b"}},
-		{{"foo-bar", "baz"}, {"foo", "bar-baz"}},
-		{{"alice", strings.Repeat("x", 80) + "1"}, {"alice", strings.Repeat("x", 80) + "2"}},
-	}
-	for _, p := range pairs {
-		a := SandboxName(p[0][0], p[0][1])
-		b := SandboxName(p[1][0], p[1][1])
-		if a == b {
-			t.Errorf("SandboxName(%v) == SandboxName(%v) == %q", p[0], p[1], a)
-		}
-	}
-}
-
-// A user must not be able to craft a repository name whose plain sandbox
-// name equals another user's hashed name.
-func TestSandboxNamePlainCannotForgeHashed(t *testing.T) {
-	victim := SandboxName("al-ice", "repo") // hashed: username has a hyphen
-	if !strings.Contains(victim, "--") {
-		t.Fatalf("hashed name %q lacks the -- separator", victim)
-	}
-	forged := strings.TrimPrefix(victim, "sundae-al-")
-	for _, repo := range []string{forged, strings.ReplaceAll(forged, "--", "-")} {
-		if got := SandboxName("al", repo); got == victim {
-			t.Errorf("SandboxName(al, %q) = %q forges the victim's name", repo, got)
-		}
-	}
-}
-
 func TestSessionSandboxName(t *testing.T) {
-	// The default session keeps the pre-named-session sandbox name, so
-	// existing sandboxes stay reachable.
-	for _, pair := range [][2]string{{"alice", "repo"}, {"al-ice", "org/Repo"}, {"alice", strings.Repeat("x", 80)}} {
-		want := SandboxName(pair[0], pair[1])
-		for _, name := range []string{"", DefaultSessionName} {
-			if got := SessionSandboxName(pair[0], pair[1], name); got != want {
-				t.Errorf("SessionSandboxName(%q, %q, %q) = %q, want %q", pair[0], pair[1], name, got, want)
-			}
+	label := regexp.MustCompile(`^sd-[0-9a-f]{16}$`)
+	for _, tc := range []struct{ user, session string }{
+		{"alice", "main"},
+		{"alice", "a-very-long-session-name-of-32ch"},
+		{"Bob.Smith", "tool"},
+		{"x", "y"},
+	} {
+		got := SessionSandboxName(tc.user, tc.session)
+		// OpenShell 0.1.8 refuses sandbox names over 19 characters.
+		if !label.MatchString(got) || len(got) > 19 {
+			t.Errorf("SessionSandboxName(%q, %q) = %q: not sd- and 16 hex digits", tc.user, tc.session, got)
 		}
-	}
-
-	hashed := regexp.MustCompile(`^sundae-[a-z0-9-]*[a-z0-9]--[0-9a-f]{8}$`)
-	cases := []struct {
-		user, repo, name string
-		prefix           string // the readable part before the hash
-	}{
-		{"alice", "repo", "review", "sundae-alice-repo-review"},
-		{"alice", "org/repo", "b2", "sundae-alice-org-repo-b2"},
-		{"al-ice", "repo", "x", "sundae-al-ice-repo-x"},
-		// Long user and repository parts are cut; the session name stays.
-		{"alice", strings.Repeat("r", 80), strings.Repeat("s", 32), ""},
-		{strings.Repeat("u", 70), strings.Repeat("r", 70), "review", ""},
-	}
-	for _, tc := range cases {
-		got := SessionSandboxName(tc.user, tc.repo, tc.name)
-		if len(got) > maxNameLen || !dnsLabel.MatchString(got) || !hashed.MatchString(got) {
-			t.Errorf("SessionSandboxName(%q, %q, %q) = %q: not a hashed DNS label of <= 63 chars", tc.user, tc.repo, tc.name, got)
-		}
-		if tc.prefix != "" && !strings.HasPrefix(got, tc.prefix+"--") {
-			t.Errorf("SessionSandboxName(%q, %q, %q) = %q, want prefix %q", tc.user, tc.repo, tc.name, got, tc.prefix)
-		}
-		if !strings.Contains(strings.TrimSuffix(got, got[len(got)-10:]), tc.name) {
-			t.Errorf("SessionSandboxName(%q, %q, %q) = %q: session name not readable", tc.user, tc.repo, tc.name, got)
-		}
-		if again := SessionSandboxName(tc.user, tc.repo, tc.name); again != got {
+		if again := SessionSandboxName(tc.user, tc.session); again != got {
 			t.Errorf("not deterministic: %q vs %q", got, again)
 		}
 	}
-	if got := SessionSandboxName("alice", "repo", "review"); got != "sundae-alice-repo-review--"+mustHash("alice\x00repo\x00review") {
-		t.Errorf("hash = %q", got)
+	if SessionSandboxName("alice", "") != SessionSandboxName("alice", DefaultSessionName) {
+		t.Error("an empty session name is not the default one")
+	}
+	// The NUL separator keeps the pairs apart.
+	pairs := [][2][2]string{
+		{{"al", "ice-main"}, {"al-ice", "main"}},
+		{{"alice", "main"}, {"bob", "main"}},
+		{{"alice", "a"}, {"alice", "b"}},
+	}
+	for _, p := range pairs {
+		if a, b := SessionSandboxName(p[0][0], p[0][1]), SessionSandboxName(p[1][0], p[1][1]); a == b {
+			t.Errorf("%v and %v both get %q", p[0], p[1], a)
+		}
 	}
 }
 
-func mustHash(s string) string {
-	sum := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(sum[:])[:8]
+func TestDefaultSessionNameFor(t *testing.T) {
+	for repo, want := range map[string]string{
+		"tool":                         "tool",
+		"github/me/My_Tool.git":        "my-tool",
+		"gitlab/a/b/c-d":               "c-d",
+		"x/" + strings.Repeat("a", 40): strings.Repeat("a", 32),
+		"x/---":                        DefaultSessionName,
+		"":                             DefaultSessionName,
+	} {
+		if got := DefaultSessionNameFor(repo); got != want {
+			t.Errorf("DefaultSessionNameFor(%q) = %q, want %q", repo, got, want)
+		}
+	}
 }
 
-func TestSessionSandboxNameCollisions(t *testing.T) {
-	// A named session never takes another pair's default sandbox name,
-	// plain or hashed, nor another named session's.
-	names := map[string]string{}
-	add := func(what, name string) {
-		if prev, ok := names[name]; ok {
-			t.Errorf("%s and %s share the sandbox name %q", prev, what, name)
-		}
-		names[name] = what
+func TestMergeRepos(t *testing.T) {
+	got := mergeRepos([]string{"a", "b"}, []string{"c", "a", "d"}, []string{"b", "d"})
+	if strings.Join(got, ",") != "a,c" {
+		t.Fatalf("merge = %v", got)
 	}
-	for _, user := range []string{"alice", "al-ice", "al"} {
-		for _, repo := range []string{"r", "r-x", "r-review", "ice-r", "r/x", "R"} {
-			add(user+"/"+repo+" main", SessionSandboxName(user, repo, ""))
-			for _, s := range []string{"x", "review", "r", "main2"} {
-				add(user+"/"+repo+" "+s, SessionSandboxName(user, repo, s))
-			}
-		}
+	if got := sessionWorkDir([]string{"x/y"}); got != "/sandbox/x/y" {
+		t.Fatalf("one repository: %s", got)
 	}
-	// "r" + session "x" vs repository "r-x": the plain name of the latter
-	// is not the former's readable prefix plus nothing.
-	if SessionSandboxName("alice", "r", "x") == SandboxName("alice", "r-x") {
-		t.Error("named session collides with a plain default name")
+	if got := sessionWorkDir([]string{"x", "y"}); got != SandboxRoot {
+		t.Fatalf("two repositories: %s", got)
 	}
 }
 

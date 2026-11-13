@@ -1,6 +1,7 @@
 package sessionctl
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -15,16 +16,51 @@ import (
 
 func TestAttachCommand(t *testing.T) {
 	for _, tc := range []struct {
-		url, repo, name, want string
+		url, name, want string
 	}{
-		{"ssh://git.example.com", "infra", "claude-1", "ssh -t git.example.com session attach infra -n claude-1"},
-		{"ssh://git.example.com:22", "infra", "", "ssh -t git.example.com session attach infra -n main"},
-		{"ssh://localhost:23231", "sundae", "tui", "ssh -t -p 23231 localhost session attach sundae -n tui"},
-		{"ssh://me@host:2222", "r", "x", "ssh -t -p 2222 me@host session attach r -n x"},
-		{"git.example.com", "r", "x", "ssh -t git.example.com session attach r -n x"},
+		{"ssh://git.example.com", "claude-1", "ssh -t git.example.com session attach claude-1"},
+		{"ssh://git.example.com:22", "", "ssh -t git.example.com session attach main"},
+		{"ssh://localhost:23231", "tui", "ssh -t -p 23231 localhost session attach tui"},
+		{"ssh://me@host:2222", "x", "ssh -t -p 2222 me@host session attach x"},
+		{"git.example.com", "x", "ssh -t git.example.com session attach x"},
 	} {
-		if got := AttachCommand(tc.url, tc.repo, tc.name); got != tc.want {
-			t.Errorf("AttachCommand(%q, %q, %q) = %q, want %q", tc.url, tc.repo, tc.name, got, tc.want)
+		if got := AttachCommand(tc.url, tc.name); got != tc.want {
+			t.Errorf("AttachCommand(%q, %q) = %q, want %q", tc.url, tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestResolveAndDefaultName(t *testing.T) {
+	infos := []openshell.Info{
+		{Name: "tool", Repos: []string{"github/me/tool"}},
+		{Name: "app", Repos: []string{"github/me/app", "github/me/lib"}},
+		{Name: "lib", Repos: []string{"x/other"}},
+		{Name: "both", Repos: []string{"x/shared"}},
+		{Name: "both-2", Repos: []string{"x/shared", "x/more"}},
+	}
+	for arg, want := range map[string]string{
+		"tool":          "tool",
+		"github/me/lib": "app",
+		"app":           "app",
+	} {
+		if got, err := resolveIn(infos, arg); err != nil || got != want {
+			t.Errorf("resolveIn(%q) = %q, %v; want %q", arg, got, err, want)
+		}
+	}
+	if _, err := resolveIn(infos, "x/shared"); !errors.Is(err, ErrAmbiguous) {
+		t.Errorf("ambiguous: %v", err)
+	}
+	if _, err := resolveIn(infos, "nope"); !errors.Is(err, openshell.ErrNoSession) {
+		t.Errorf("absent: %v", err)
+	}
+
+	for repo, want := range map[string]string{
+		"github/me/tool": "tool",  // the session of that name holds it
+		"other/lib":      "lib-2", // "lib" holds something else
+		"new/thing":      "thing",
+	} {
+		if got := DefaultName(infos, repo); got != want {
+			t.Errorf("DefaultName(%q) = %q, want %q", repo, got, want)
 		}
 	}
 }

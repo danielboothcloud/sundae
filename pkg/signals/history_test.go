@@ -510,3 +510,33 @@ func TestRendering(t *testing.T) {
 		t.Errorf("sanitize = %q", got)
 	}
 }
+
+func TestSessionLabelAndRepoQuery(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		repos []string
+		want  string
+	}{
+		{"main", []string{"infra"}, "infra / main"},
+		{"bundle", []string{"a", "b"}, "bundle (a, b)"},
+		{"big", []string{"a", "b", "c", "d"}, "big (a, b, +2)"},
+		{"", nil, "main"},
+	} {
+		if got := SessionLabel(tc.name, tc.repos); got != tc.want {
+			t.Errorf("SessionLabel(%q, %v) = %q, want %q", tc.name, tc.repos, got, tc.want)
+		}
+	}
+	// A repository query matches every session holding it.
+	s := Signal{Event: events.SessionStatusEvent(7, events.SessionStatus{
+		Session: events.NewSession("alice", "bundle", "sd-x", []string{"a", "b"}),
+		Record:  events.Record{State: events.StateDone},
+	})}
+	for repo, want := range map[string]bool{"a": true, "b": true, "c": false} {
+		if got := (Query{UserID: 7, Repo: repo}).Match(s); got != want {
+			t.Errorf("Match(repo %s) = %v", repo, got)
+		}
+	}
+	if w := s.Where(); w != "bundle (a, b)" {
+		t.Errorf("Where = %q", w)
+	}
+}

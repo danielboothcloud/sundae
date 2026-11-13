@@ -54,16 +54,16 @@ func (m *Sessions) narrow() bool { return m.common.Width < NarrowWidth }
 // repository page's both are when narrow.
 func (m *Sessions) collapsed() bool { return m.narrow() }
 
-// where is a session's "repo / name"; just the name when the tab is
-// scoped to its repository.
-func (m *Sessions) where(repo, name string) string {
-	if m.scope != "" && repo == m.scope {
+// where names a session; just the name when the tab is scoped to its only
+// repository.
+func (m *Sessions) where(name string, repos []string) string {
+	if m.scope != "" && len(repos) == 1 && repos[0] == m.scope {
 		if name == "" {
 			name = openshell.DefaultSessionName
 		}
 		return signals.Sanitize(name, 0)
 	}
-	return sessionLabel(repo, name)
+	return sessionLabel(name, repos)
 }
 
 // View implements tea.Model.
@@ -296,7 +296,7 @@ func (m *Sessions) sessionRow(r sessionctl.Row, selected bool, w int) []string {
 	cw := max(w-base.GetHorizontalFrameSize(), 10)
 	ss := stateStyle(st, r.State())
 	glyph := ss.Render(r.State().Glyph())
-	where := m.where(r.Info.Repo, r.Info.Name)
+	where := m.where(r.Info.Name, rowRepos(r))
 	words := m.words(r)
 	age := sessionctl.Since(r.Changed(), m.now())
 	if age == "-" {
@@ -478,6 +478,7 @@ func (m *Sessions) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		nav,
 		{m.keys.Attach, m.keys.New, m.keys.End, m.keys.Park},
+		{m.keys.AddRepo, m.keys.DropRepo},
 		{m.keys.Copy, m.keys.Filter, m.keys.Clear, pane, m.keys.Retry},
 	}
 }

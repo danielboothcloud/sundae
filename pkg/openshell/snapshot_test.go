@@ -293,7 +293,7 @@ func (h *snapHarness) archive(t *testing.T, key string) map[string]string {
 	}
 }
 
-const snapKey = "sundae/sessions/1/sundae-alice-r.tar.gz"
+var snapKey = "sundae/sessions/1/" + SessionSandboxName("alice", "main") + ".tar.gz"
 
 // work puts files into the session's sandbox: the checkout, osewa state and
 // credential-like files.
@@ -354,7 +354,7 @@ func TestEndSnapshotsThenDeletes(t *testing.T) {
 	h.lifecycles()
 
 	var progress bytes.Buffer
-	res, err := h.mgr.EndSession(ctx, alice, "r", "", EndOptions{Progress: &progress})
+	res, err := h.mgr.EndSession(ctx, alice, "", EndOptions{Progress: &progress})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,11 +432,11 @@ func TestEndSnapshotFailureKeepsSession(t *testing.T) {
 		}
 		return 0
 	})
-	existed, err := h.mgr.End(ctx, alice, "r", "")
+	existed, err := h.mgr.End(ctx, alice, "")
 	if !errors.Is(err, ErrSnapshotFailed) || existed {
 		t.Fatalf("end = %v, %v", existed, err)
 	}
-	if !strings.Contains(err.Error(), "HTTP 503") || !strings.Contains(err.Error(), "session end r --force") {
+	if !strings.Contains(err.Error(), "HTTP 503") || !strings.Contains(err.Error(), "session end main --force") {
 		t.Fatalf("err = %v", err)
 	}
 	if !h.exists(t, s.Sandbox) {
@@ -455,14 +455,14 @@ func TestEndSnapshotFailureKeepsSession(t *testing.T) {
 	// The pack fails (an unreadable file): same.
 	h.s3.SetFail(nil)
 	h.exec.snap.packExit = 1
-	if _, err := h.mgr.End(ctx, alice, "r", ""); !errors.Is(err, ErrSnapshotFailed) || !strings.Contains(err.Error(), "Permission denied") {
+	if _, err := h.mgr.End(ctx, alice, ""); !errors.Is(err, ErrSnapshotFailed) || !strings.Contains(err.Error(), "Permission denied") {
 		t.Fatalf("end = %v", err)
 	}
 	h.lifecycles()
 
 	// --force ends it without the snapshot.
 	var progress bytes.Buffer
-	res, err := h.mgr.EndSession(ctx, alice, "r", "", EndOptions{Force: true, Progress: &progress})
+	res, err := h.mgr.EndSession(ctx, alice, "", EndOptions{Force: true, Progress: &progress})
 	if err != nil || !res.Existed || res.Snapshot != nil || res.SnapshotErr == nil {
 		t.Fatalf("forced end = %+v, %v", res, err)
 	}
@@ -484,11 +484,11 @@ func TestEndResumesParkedSandboxToSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.mgr.Park(ctx, alice, "r", ""); err != nil {
+	if _, err := h.mgr.Park(ctx, alice, ""); err != nil {
 		t.Fatal(err)
 	}
 	var progress bytes.Buffer
-	res, err := h.mgr.EndSession(ctx, alice, "r", "", EndOptions{Progress: &progress})
+	res, err := h.mgr.EndSession(ctx, alice, "", EndOptions{Progress: &progress})
 	if err != nil || res.Snapshot == nil {
 		t.Fatalf("end = %+v, %v", res, err)
 	}
@@ -505,11 +505,11 @@ func TestSnapshotTooLarge(t *testing.T) {
 	}
 	// The pack script refuses an archive over the single-PUT limit.
 	h.exec.snap.packExit = 3
-	_, err := h.mgr.End(ctx, alice, "r", "")
+	_, err := h.mgr.End(ctx, alice, "")
 	if !errors.Is(err, ErrSnapshotFailed) {
 		t.Fatalf("end = %v", err)
 	}
-	pack := h.exec.last("sundae-alice-r", snapshotPackName)
+	pack := h.exec.last(SessionSandboxName("alice", "main"), snapshotPackName)
 	if pack.args()[2] != "5368709120" {
 		t.Fatalf("pack limit = %v", pack.args()[:3])
 	}
@@ -523,7 +523,7 @@ func TestStartRestoresSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	work(h, s.Sandbox)
-	if _, err := h.mgr.End(ctx, alice, "r", ""); err != nil {
+	if _, err := h.mgr.End(ctx, alice, ""); err != nil {
 		t.Fatal(err)
 	}
 	freshVolume(h, s.Sandbox)
@@ -535,7 +535,7 @@ func TestStartRestoresSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !s.Created || s.Cloned || s.Restored == nil || s.Restored.URL != "s3://snapshots/"+snapKey || s.Unparked {
+	if !s.Created || len(s.Cloned) > 0 || s.Restored == nil || s.Restored.URL != "s3://snapshots/"+snapKey || s.Unparked {
 		t.Fatalf("session = %+v", s)
 	}
 	b := h.exec.box(s.Sandbox)
@@ -547,7 +547,7 @@ func TestStartRestoresSnapshot(t *testing.T) {
 	}
 	// Restored before the credentials and the clone check; osewa is
 	// enrolled afresh.
-	want := []string{snapshotProbeName, snapshotRestoreName, gitCredentialsName, osewaProbeName, osewaServerName, osewaEnrollName, osewaHostsName, osewaListName, osewaNewName}
+	want := []string{snapshotProbeName, snapshotRestoreName, gitCredentialsName, readReposName, osewaProbeName, osewaServerName, osewaEnrollName, osewaHostsName, osewaListName, osewaNewName}
 	if got := h.exec.scripts(s.Sandbox); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("scripts = %v, want %v", got, want)
 	}
@@ -581,7 +581,7 @@ func TestStartFreshSkipsSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !s.Cloned || s.Restored != nil || slices.Contains(h.exec.scripts(s.Sandbox), snapshotRestoreName) {
+	if len(s.Cloned) == 0 || s.Restored != nil || slices.Contains(h.exec.scripts(s.Sandbox), snapshotRestoreName) {
 		t.Fatalf("session = %+v scripts = %v", s, h.exec.scripts(s.Sandbox))
 	}
 	// Kept until the next snapshot replaces it.
@@ -598,7 +598,7 @@ func TestStartRestoreConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 	work(h, s.Sandbox)
-	if _, err := h.mgr.End(ctx, alice, "r", ""); err != nil {
+	if _, err := h.mgr.End(ctx, alice, ""); err != nil {
 		t.Fatal(err)
 	}
 	// The fake keeps the deleted sandbox's files, like a volume that
@@ -652,10 +652,10 @@ func TestRestoreFailureDeletesSandbox(t *testing.T) {
 		t.Fatalf("start = %v", err)
 	}
 	// Not half-started: no sandbox, no token, no clone, no osewa.
-	if h.exists(t, "sundae-alice-r") {
+	if h.exists(t, SessionSandboxName("alice", "main")) {
 		t.Fatal("sandbox left after a failed restore")
 	}
-	if len(h.tokens.named(TokenName("sundae-alice-r"))) != 0 || len(h.exec.clones()) != 0 {
+	if len(h.tokens.named(TokenName(SessionSandboxName("alice", "main")))) != 0 || len(h.exec.clones()) != 0 {
 		t.Fatal("session half-started")
 	}
 	if got := strings.Join(h.lifecycles(), ","); got != "created,failed restore" {
@@ -664,7 +664,7 @@ func TestRestoreFailureDeletesSandbox(t *testing.T) {
 
 	// The store is unreachable while looking the snapshot up: same.
 	h.s3.SetFail(func(*http.Request, string) int { return http.StatusInternalServerError })
-	if _, err := h.mgr.Start(ctx, StartOptions{User: alice, Repo: "r"}); err == nil || h.exists(t, "sundae-alice-r") {
+	if _, err := h.mgr.Start(ctx, StartOptions{User: alice, Repo: "r"}); err == nil || h.exists(t, SessionSandboxName("alice", "main")) {
 		t.Fatalf("start with S3 down = %v", err)
 	}
 }
@@ -680,7 +680,7 @@ func TestFallbackParkAndResume(t *testing.T) {
 	h.lifecycles()
 
 	// The gateway cannot suspend: the session is parked to its snapshot.
-	parked, snapshot, err := h.mgr.ParkSession(ctx, alice, "r", "")
+	parked, snapshot, err := h.mgr.ParkSession(ctx, alice, "")
 	if err != nil || !parked || !snapshot {
 		t.Fatalf("park = %v %v %v", parked, snapshot, err)
 	}
@@ -691,7 +691,7 @@ func TestFallbackParkAndResume(t *testing.T) {
 		t.Fatalf("events = %s", got)
 	}
 	var marker ParkedSnapshot
-	o, ok := h.s3.Object("sundae/sessions/1/sundae-alice-r.parked.json")
+	o, ok := h.s3.Object("sundae/sessions/1/" + SessionSandboxName("alice", "main") + ".parked.json")
 	if !ok || json.Unmarshal(o.Body, &marker) != nil {
 		t.Fatalf("marker = %v %s", ok, o.Body)
 	}
@@ -699,7 +699,7 @@ func TestFallbackParkAndResume(t *testing.T) {
 		t.Fatalf("marker = %+v", marker)
 	}
 	// Parking again is a no-op, and says it is parked to its snapshot.
-	if parked, snapshot, err := h.mgr.ParkSession(ctx, alice, "r", ""); err != nil || parked || !snapshot {
+	if parked, snapshot, err := h.mgr.ParkSession(ctx, alice, ""); err != nil || parked || !snapshot {
 		t.Fatalf("park again = %v %v %v", parked, snapshot, err)
 	}
 
@@ -721,7 +721,7 @@ func TestFallbackParkAndResume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !s.Created || !s.Unparked || !s.Started || s.Restored == nil || s.Cloned {
+	if !s.Created || !s.Unparked || !s.Started || s.Restored == nil || len(s.Cloned) > 0 {
 		t.Fatalf("session = %+v", s)
 	}
 	for _, want := range []string{
@@ -739,7 +739,7 @@ func TestFallbackParkAndResume(t *testing.T) {
 	if sb.Spec.Template.Image != "default-image" {
 		t.Fatalf("image = %v", sb.Spec.Template)
 	}
-	if _, ok := h.s3.Object("sundae/sessions/1/sundae-alice-r.parked.json"); ok {
+	if _, ok := h.s3.Object("sundae/sessions/1/" + SessionSandboxName("alice", "main") + ".parked.json"); ok {
 		t.Fatal("marker kept after resume")
 	}
 	if got := strings.Join(h.lifecycles(), ","); got != "created,restored attach,ready" {
@@ -756,15 +756,15 @@ func TestEndParkedSnapshotSession(t *testing.T) {
 	if _, err := h.mgr.Start(ctx, StartOptions{User: alice, Repo: "r"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := h.mgr.ParkSession(ctx, alice, "r", ""); err != nil {
+	if _, _, err := h.mgr.ParkSession(ctx, alice, ""); err != nil {
 		t.Fatal(err)
 	}
 	h.lifecycles()
-	res, err := h.mgr.EndSession(ctx, alice, "r", "", EndOptions{})
+	res, err := h.mgr.EndSession(ctx, alice, "", EndOptions{})
 	if err != nil || !res.Existed || !res.Parked {
 		t.Fatalf("end = %+v, %v", res, err)
 	}
-	if _, ok := h.s3.Object("sundae/sessions/1/sundae-alice-r.parked.json"); ok {
+	if _, ok := h.s3.Object("sundae/sessions/1/" + SessionSandboxName("alice", "main") + ".parked.json"); ok {
 		t.Fatal("marker kept")
 	}
 	if _, ok := h.s3.Object(snapKey); !ok {
@@ -777,7 +777,7 @@ func TestEndParkedSnapshotSession(t *testing.T) {
 		t.Fatalf("list = %+v", infos)
 	}
 	// Nothing left to end.
-	if existed, err := h.mgr.End(ctx, alice, "r", ""); err != nil || existed {
+	if existed, err := h.mgr.End(ctx, alice, ""); err != nil || existed {
 		t.Fatalf("end again = %v %v", existed, err)
 	}
 }
@@ -791,13 +791,13 @@ func TestFallbackParkFailureKeepsSandbox(t *testing.T) {
 	}
 	h.lifecycles()
 	h.exec.snap.curlExit = 7
-	if _, _, err := h.mgr.ParkSession(ctx, alice, "r", ""); err == nil || !strings.Contains(err.Error(), "curl exit status 7") {
+	if _, _, err := h.mgr.ParkSession(ctx, alice, ""); err == nil || !strings.Contains(err.Error(), "curl exit status 7") {
 		t.Fatalf("park = %v", err)
 	}
 	if !h.exists(t, s.Sandbox) {
 		t.Fatal("sandbox deleted without a snapshot")
 	}
-	if _, ok := h.s3.Object("sundae/sessions/1/sundae-alice-r.parked.json"); ok {
+	if _, ok := h.s3.Object("sundae/sessions/1/" + SessionSandboxName("alice", "main") + ".parked.json"); ok {
 		t.Fatal("marker written without a snapshot")
 	}
 	if got := strings.Join(h.lifecycles(), ","); got != "failed snapshot" {
@@ -809,10 +809,10 @@ func TestFallbackParkFailureKeepsSandbox(t *testing.T) {
 	if _, err := h2.mgr.Start(ctx, StartOptions{User: alice, Repo: "r"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h2.mgr.Park(ctx, alice, "r", ""); !IsSuspendUnsupported(err) || !strings.Contains(err.Error(), "sessions.suspend.fallback: snapshot") {
+	if _, err := h2.mgr.Park(ctx, alice, ""); !IsSuspendUnsupported(err) || !strings.Contains(err.Error(), "sessions.suspend.fallback: snapshot") {
 		t.Fatalf("park without fallback = %v", err)
 	}
-	if !h2.exists(t, "sundae-alice-r") {
+	if !h2.exists(t, SessionSandboxName("alice", "main")) {
 		t.Fatal("sandbox deleted without the fallback")
 	}
 }
@@ -843,7 +843,7 @@ func TestAutoParkFallback(t *testing.T) {
 		t.Fatalf("events = %s", got)
 	}
 	var marker ParkedSnapshot
-	o, _ := h.s3.Object("sundae/sessions/1/sundae-alice-r.parked.json")
+	o, _ := h.s3.Object("sundae/sessions/1/" + SessionSandboxName("alice", "main") + ".parked.json")
 	if err := json.Unmarshal(o.Body, &marker); err != nil || marker.Op != ParkAuto || marker.Record.Msg != "waiting" {
 		t.Fatalf("marker = %+v, %v", marker, err)
 	}
@@ -860,7 +860,7 @@ func TestParkBackupSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.lifecycles()
-	parked, snapshot, err := h.mgr.ParkSession(ctx, alice, "r", "")
+	parked, snapshot, err := h.mgr.ParkSession(ctx, alice, "")
 	if err != nil || !parked || snapshot {
 		t.Fatalf("park = %v %v %v", parked, snapshot, err)
 	}
@@ -881,7 +881,7 @@ func TestParkBackupSnapshot(t *testing.T) {
 	}
 	h.lifecycles()
 	h.exec.snap.packExit = 2
-	if parked, _, err := h.mgr.ParkSession(ctx, alice, "r", ""); err != nil || !parked {
+	if parked, _, err := h.mgr.ParkSession(ctx, alice, ""); err != nil || !parked {
 		t.Fatalf("park after a failed backup = %v %v", parked, err)
 	}
 	if got := strings.Join(h.lifecycles(), ","); got != "failed snapshot,parked park" {
@@ -895,10 +895,10 @@ func TestSnapshotsOffTouchNothing(t *testing.T) {
 	if _, err := h.mgr.Start(ctx, StartOptions{User: alice, Repo: "r"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.mgr.End(ctx, alice, "r", ""); err != nil {
+	if _, err := h.mgr.End(ctx, alice, ""); err != nil {
 		t.Fatal(err)
 	}
-	for _, sc := range h.exec.scripts("sundae-alice-r") {
+	for _, sc := range h.exec.scripts(SessionSandboxName("alice", "main")) {
 		if strings.HasPrefix(sc, "sundae-snapshot") {
 			t.Fatalf("ran %s with snapshots off", sc)
 		}
@@ -938,6 +938,6 @@ func s3PutOpts() s3store.PutOptions {
 	return s3store.PutOptions{
 		ContentMD5:  "1B2M2Y8AsgTpgAmY7PhCfg==",
 		ContentType: "application/gzip",
-		Metadata:    snapshotMeta(events.Session{User: "alice", Repo: "r", Name: "main", Sandbox: "sundae-alice-r"}),
+		Metadata:    snapshotMeta(events.Session{User: "alice", Repo: "r", Name: "main", Sandbox: SessionSandboxName("alice", "main")}),
 	}
 }

@@ -6,8 +6,8 @@ import (
 
 	"github.com/danielboothcloud/sundae/pkg/backend"
 	"github.com/danielboothcloud/sundae/pkg/config"
-	"github.com/danielboothcloud/sundae/pkg/openshell"
 	"github.com/danielboothcloud/sundae/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/sessionctl"
 	"github.com/spf13/cobra"
 )
 
@@ -87,7 +87,7 @@ repository start from (see "repo profile"); a template may set one too.
 			if start {
 				// The repository's profile is resolved as for any new
 				// session: --profile, the template's, sessions.repos.
-				if err := runSession(cmd, r.Name(), openshell.StartOptions{Profile: profile}, true, true); err != nil {
+				if err := runSession(cmd, sessionctl.Request{Repo: r.Name(), Profile: profile, Create: true}, true); err != nil {
 					return fmt.Errorf("repository %s was created, but its session did not start: %w", r.Name(), err)
 				}
 			}

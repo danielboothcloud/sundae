@@ -288,7 +288,7 @@ func TestNewRepoFormStartsSession(t *testing.T) {
 	press(ui, tea.KeyEnter, 1)
 	waitFor(t, ui, "the session start", func() bool { return len(src.started()) == 1 })
 	req := src.started()[0]
-	if req.Repo != "svc" || req.Name != "shell-1" || req.Profile != "shell" || !req.Create {
+	if strings.Join(req.Repos, ",") != "svc" || req.Name != "svc" || req.Profile != "shell" || !req.Create {
 		t.Fatalf("request %+v", req)
 	}
 	// The Sessions tab shows it; without a terminal to hand over it is

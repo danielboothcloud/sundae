@@ -117,7 +117,7 @@ func (q Query) Match(s Signal) bool {
 	if !ok {
 		return false
 	}
-	if q.Repo != "" && sess.Repo != q.Repo {
+	if q.Repo != "" && !sess.HasRepo(q.Repo) {
 		return false
 	}
 	if q.Session != "" && sess.DisplayName() != q.Session {
@@ -136,7 +136,7 @@ func (q Query) Match(s Signal) bool {
 // lower-case string.
 func (s Signal) contains(lower string) bool {
 	sess, _ := s.session()
-	fields := []string{sess.Repo, sess.DisplayName(), s.State().Word()}
+	fields := append(append([]string{}, sess.AllRepos()...), sess.DisplayName(), s.State().Word())
 	if st := s.Status; st != nil {
 		r := st.Record
 		fields = append(fields, r.ID, string(r.Kind), r.App, r.Title, r.Msg)

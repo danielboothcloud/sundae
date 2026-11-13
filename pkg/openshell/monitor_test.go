@@ -145,12 +145,12 @@ func (c *monitorClient) suspendCount(sandbox string) int {
 
 // addSession adds a sandbox Sundae created for the user's session.
 func (c *monitorClient) addSession(user testUser, repo, name string, phase types.SandboxPhase) string {
-	sandbox := SessionSandboxName(user.name, repo, name)
+	sandbox := SessionSandboxName(user.name, name)
 	labels := ownerLabels(user)
 	c.fc.AddSandbox("default", &types.Sandbox{
 		Name:        sandbox,
 		Labels:      labels,
-		Annotations: sessionAnnotations(user.name, repo, name, "", nil),
+		Annotations: sessionAnnotations(user.name, []string{repo}, name, "", nil),
 		Status:      types.SandboxStatus{Phase: phase},
 	})
 	return sandbox
@@ -644,7 +644,7 @@ func TestMonitorConcurrencyBound(t *testing.T) {
 	h.mon.concurrency = 3
 	var sandboxes []string
 	for i := range 10 {
-		sb := h.mc.addSession(alice, fmt.Sprintf("r%d", i), "main", types.SandboxReady)
+		sb := h.mc.addSession(alice, fmt.Sprintf("r%d", i), fmt.Sprintf("s%d", i), types.SandboxReady)
 		h.mc.set(sb, "o1", osewaSessionInfo{ID: "o1"})
 		sandboxes = append(sandboxes, sb)
 	}
@@ -1067,7 +1067,7 @@ func TestMonitorReadAPI(t *testing.T) {
 	h := newMonitorHarness(t, nil)
 	a1 := h.mc.addSession(alice, "infra", "main", types.SandboxReady)
 	a2 := h.mc.addSession(alice, "infra", "review", types.SandboxReady)
-	a3 := h.mc.addSession(alice, "docs", "main", types.SandboxReady)
+	a3 := h.mc.addSession(alice, "docs", "docs", types.SandboxReady)
 	b1 := h.mc.addSession(bob, "infra", "main", types.SandboxReady)
 	for _, sb := range []string{a1, a2, a3, b1} {
 		h.mc.set(sb, "o1", osewaSessionInfo{ID: "o1", Status: st("idle", "", sb)})
@@ -1081,13 +1081,13 @@ func TestMonitorReadAPI(t *testing.T) {
 		}
 		return strings.Join(s, ",")
 	}
-	if got := names(h.mon.ForUser(alice.id)); got != "alice/docs/main,alice/infra/main,alice/infra/review" {
+	if got := names(h.mon.ForUser(alice.id)); got != "alice/docs/docs,alice/infra/main,alice/infra/review" {
 		t.Fatalf("ForUser = %s", got)
 	}
 	if got := names(h.mon.ForRepo(alice.id, "infra")); got != "alice/infra/main,alice/infra/review" {
 		t.Fatalf("ForRepo = %s", got)
 	}
-	if got := names(h.mon.All()); got != "alice/docs/main,alice/infra/main,alice/infra/review,bob/infra/main" {
+	if got := names(h.mon.All()); got != "alice/docs/docs,alice/infra/main,alice/infra/review,bob/infra/main" {
 		t.Fatalf("All = %s", got)
 	}
 	if st, ok := h.mon.Session(alice.id, "infra", ""); !ok || st.Session.Sandbox != a1 || st.Record.Msg != a1 {

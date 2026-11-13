@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"strings"
 	"sync"
 
 	tea "charm.land/bubbletea/v2"
@@ -41,8 +40,9 @@ var errNoTerminal = errors.New("attaching needs the SSH terminal; use the attach
 type operation struct {
 	// title is shown above the progress lines.
 	title string
-	// repo and name are the session's.
-	repo, name string
+	// repos and name are the session's.
+	repos []string
+	name  string
 	// attach reports whether to attach once prepared.
 	attach bool
 	// key is the session's sandbox, when it is listed.
@@ -68,9 +68,9 @@ type opMsg struct{ op *operation }
 
 // newOperation returns an operation running under a child of ctx; it is
 // abandoned when ctx is done.
-func newOperation(ctx context.Context, title, repo, name string, attach bool) (*operation, context.Context) {
+func newOperation(ctx context.Context, title string, repos []string, name string, attach bool) (*operation, context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
-	op := &operation{title: title, repo: repo, name: name, attach: attach, cancel: cancel, wake: make(chan struct{}, 1)}
+	op := &operation{title: title, repos: repos, name: name, attach: attach, cancel: cancel, wake: make(chan struct{}, 1)}
 	op.stop = context.AfterFunc(ctx, op.abandon)
 	return op, ctx
 }
@@ -212,13 +212,14 @@ func (a *attachExec) Run() error {
 
 // attachDoneMsg reports the end of an attach.
 type attachDoneMsg struct {
-	repo, name string
-	code       int
-	err        error
+	repos []string
+	name  string
+	code  int
+	err   error
 }
 
 // attachCmd hands the terminal to the prepared session.
-func attachCmd(ctx context.Context, h Handoff, att Attacher, repo, name, banner string) tea.Cmd {
+func attachCmd(ctx context.Context, h Handoff, att Attacher, repos []string, name, banner string) tea.Cmd {
 	term, release := h.Take()
 	ex := &attachExec{ctx: ctx, att: att, term: term, release: release, banner: banner}
 	return tea.Exec(ex, func(err error) tea.Msg {
@@ -227,14 +228,15 @@ func attachCmd(ctx context.Context, h Handoff, att Attacher, repo, name, banner 
 			release()
 			att.Close()
 		}
-		return attachDoneMsg{repo: repo, name: name, code: ex.code, err: errors.Join(err, ex.err)}
+		return attachDoneMsg{repos: repos, name: name, code: ex.code, err: errors.Join(err, ex.err)}
 	})
 }
 
-// sessionLabel is "repo / name".
-func sessionLabel(repo, name string) string {
+// sessionLabel names a session: "repo / name" for one repository, else
+// "name (repo1, repo2, +N)".
+func sessionLabel(name string, repos []string) string {
 	if name == "" {
 		name = openshell.DefaultSessionName
 	}
-	return strings.TrimSpace(signals.Sanitize(repo, 0) + " / " + signals.Sanitize(name, 0))
+	return signals.SessionLabel(name, repos)
 }

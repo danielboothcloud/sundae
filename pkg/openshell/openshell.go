@@ -48,10 +48,10 @@ const (
 	LabelManaged = "sundae.managed"
 	// AnnotationUser holds the owning Sundae username.
 	AnnotationUser = "sundae.user"
-	// AnnotationRepo holds the repository name the sandbox was created for.
+	// AnnotationRepo holds the first repository the session was created
+	// with; AnnotationRepos holds them all.
 	AnnotationRepo = "sundae.repo"
-	// AnnotationSession holds the session name. Sandboxes created before
-	// named sessions have none; they are the DefaultSessionName session.
+	// AnnotationSession holds the session name.
 	AnnotationSession = "sundae.session"
 	// AnnotationProfile holds the profile the session was created from;
 	// empty when none applied.
@@ -62,9 +62,8 @@ const (
 	// reconcile it with the profile's current list.
 	AnnotationProviders = "sundae.providers"
 
-	// DefaultSessionName is the session name used when none is given. Its
-	// sandbox keeps the name SandboxName gives, so sandboxes created before
-	// named sessions are its sessions.
+	// DefaultSessionName is the session name used when none is given and
+	// none can be derived from a repository.
 	DefaultSessionName = "main"
 
 	// readyTimeout bounds how long Ensure waits for a sandbox to become ready.
@@ -572,92 +571,22 @@ func labelSelector(labels map[string]string) string {
 	return strings.Join(parts, ",")
 }
 
-// maxNameLen is the maximum length of a DNS label.
-const maxNameLen = 63
+// sandboxNamePrefix starts every sandbox name Sundae gives.
+const sandboxNamePrefix = "sd-"
 
-// hashSep joins a sandbox name and its hash suffix.
-const hashSep = "--"
-
-// SandboxName returns the deterministic sandbox name for a user's session on
-// a repository: "sundae-<user>-<repo>" sanitized to a DNS label of at most 63
-// characters.
-//
-// A short hash of the raw (user, repo) pair is appended whenever the plain
-// form could be ambiguous or lossy: when sanitizing changed either part
-// (e.g. "a/b" and "a-b" would otherwise collide), when the username contains
-// a hyphen (so "foo-bar"+"baz" and "foo"+"bar-baz" stay distinct), or when the
-// name has to be truncated. Plain names are therefore unique per pair.
-//
-// The hash is joined with "--". Plain names never contain "--" (sanitizing
-// collapses hyphen runs, and such inputs are hashed), so a crafted plain
-// name can never equal another pair's hashed name.
-func SandboxName(user, repo string) string {
-	u, r := dnsClean(user), dnsClean(repo)
-	parts := []string{"sundae"}
-	for _, p := range []string{u, r} {
-		if p != "" {
-			parts = append(parts, p)
-		}
+// SessionSandboxName returns the deterministic sandbox name of a user's
+// named session: "sd-" and the first 16 hex digits of SHA-256 of the
+// username and session name joined by a NUL byte. 19 characters, the most
+// OpenShell 0.1.8 accepts for a sandbox name (MAX_ROUTABLE_NAME_LEN in
+// crates/openshell-server/src/grpc/mod.rs, checked on create), and a valid
+// DNS label. The session name and repositories are in the sandbox's
+// annotations; an empty session name is DefaultSessionName.
+func SessionSandboxName(user, session string) string {
+	if session == "" {
+		session = DefaultSessionName
 	}
-	name := strings.Join(parts, "-")
-
-	if u == user && r == repo && u != "" && r != "" &&
-		!strings.Contains(user, "-") && len(name) <= maxNameLen {
-		return name
-	}
-
-	sum := sha256.Sum256([]byte(user + "\x00" + repo))
-	suffix := hex.EncodeToString(sum[:])[:8]
-	if max := maxNameLen - len(suffix) - len(hashSep); len(name) > max {
-		name = strings.TrimRight(name[:max], "-")
-	}
-	return name + hashSep + suffix
-}
-
-// SessionSandboxName returns the deterministic sandbox name for a user's
-// named session on a repository.
-//
-// The DefaultSessionName session (or an empty name) keeps SandboxName(user,
-// repo), so sandboxes created before named sessions stay that session.
-//
-// Any other session is always hashed: "sundae-<user>-<repo>-<session>" with the
-// user and repository parts truncated so the session name stays readable,
-// then "--" and the first 8 hex digits of SHA-256 of user, repo and session
-// joined by NUL bytes. It can never equal a plain SandboxName, which never
-// contains "--", nor a hashed one, whose hash covers only user and repo,
-// except by a 32-bit hash collision, the same odds as between two hashed
-// SandboxNames.
-func SessionSandboxName(user, repo, session string) string {
-	if session == "" || session == DefaultSessionName {
-		return SandboxName(user, repo)
-	}
-
-	sum := sha256.Sum256([]byte(user + "\x00" + repo + "\x00" + session))
-	suffix := hashSep + hex.EncodeToString(sum[:])[:8]
-
-	s := dnsClean(session)
-	if max := maxNameLen - len(suffix) - len("sundae--x"); len(s) > max {
-		s = strings.TrimRight(s[:max], "-")
-	}
-
-	parts := []string{"sundae"}
-	for _, p := range []string{dnsClean(user), dnsClean(repo)} {
-		if p != "" {
-			parts = append(parts, p)
-		}
-	}
-	prefix := strings.Join(parts, "-")
-	room := maxNameLen - len(suffix)
-	if s != "" {
-		room -= len(s) + 1
-	}
-	if len(prefix) > room {
-		prefix = strings.TrimRight(prefix[:room], "-")
-	}
-	if s != "" {
-		prefix += "-" + s
-	}
-	return prefix + suffix
+	sum := sha256.Sum256([]byte(user + "\x00" + session))
+	return sandboxNamePrefix + hex.EncodeToString(sum[:])[:16]
 }
 
 // sessionNameRe matches a valid session name.

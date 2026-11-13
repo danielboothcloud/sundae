@@ -207,7 +207,7 @@ func TestStartMissingProvider(t *testing.T) {
 		!strings.Contains(err.Error(), `sessions.profiles.agent.providers lists OpenShell provider "nope", which does not exist on the gateway`) {
 		t.Fatalf("err = %v", err)
 	}
-	if _, err := h.fc.Sandboxes().Get(ctx, "default", "sundae-alice-r"); !IsNotFound(err) {
+	if _, err := h.fc.Sandboxes().Get(ctx, "default", SessionSandboxName("alice", "main")); !IsNotFound(err) {
 		t.Fatalf("sandbox left behind: %v", err)
 	}
 }
