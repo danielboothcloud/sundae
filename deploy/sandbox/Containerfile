@@ -6,7 +6,7 @@
 # See deploy/README.md for the full build and push commands:
 #
 #   podman build -f deploy/sandbox/Containerfile --platform linux/amd64 \
-#     -t ghcr.io/danielboothcloud/sundae-sandbox:<tag> deploy/sandbox
+#     -t <registry>/sundae-sandbox:<tag> deploy/sandbox
 #
 # What OpenShell 0.1.8 expects of a sandbox image, and what follows from it:
 #

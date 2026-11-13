@@ -5,8 +5,8 @@
 # SUNDAE_* environment variables unless you add them under `extraEnv`.
 
 image:
-  # Placeholder registry path: confirm it, or point it at your own registry.
-  repository: ghcr.io/danielboothcloud/sundae
+  # REQUIRED. Registry path of the Sundae image, e.g. ghcr.io/<owner>/sundae.
+  repository: ""
   # Defaults to the chart appVersion when empty.
   tag: ""
   # When set, takes precedence over the tag (repository@digest).
@@ -133,7 +133,7 @@ config:
     workspace: "default"
     # The default sandbox image. It must provide git and jj. Required when
     # enabled. Build one from deploy/sandbox/Containerfile, e.g.
-    # ghcr.io/danielboothcloud/sundae-sandbox:<tag>.
+    # <registry>/sundae-sandbox:<tag>.
     image: ""
     # Path to a file holding the gateway bearer token. Leave empty to have the
     # chart point it at the mounted openshell.gatewayToken secret, if any. Do

@@ -28,18 +28,18 @@ Nothing here has been deployed to a cluster yet. See
 
 ## 1. Build and push the images
 
-CI builds both images for linux/amd64 on every push to `main` or `develop`
-(`.github/workflows/images.yml`) and pushes them to
-`ghcr.io/danielboothcloud/sundae` and `ghcr.io/danielboothcloud/sundae-sandbox`,
-tagged with the short commit sha and the branch name. Build by hand only when
-you need another registry or architecture:
+On GitHub, CI builds both images for linux/amd64 on every push to `main` or
+`develop` (`.github/workflows/images.yml`) and pushes them to the repository
+owner's GHCR namespace, `ghcr.io/<owner>/sundae` and
+`ghcr.io/<owner>/sundae-sandbox`, tagged with the short commit sha and the
+branch name. Build by hand for another registry or architecture:
 
 Run from the repository root. Build for the architecture of the cluster nodes.
 
 ### Sundae
 
 ```sh
-IMAGE=ghcr.io/danielboothcloud/sundae   # placeholder: confirm the registry path
+IMAGE=<registry>/sundae              # e.g. ghcr.io/<owner>/sundae
 TAG="$(git rev-parse --short HEAD)"
 
 podman build -f Containerfile \
@@ -49,7 +49,7 @@ podman build -f Containerfile \
   --build-arg COMMIT_DATE="$(git log -1 --format=%cI)" \
   -t "$IMAGE:$TAG" .
 
-podman login ghcr.io
+podman login <registry host>
 podman push "$IMAGE:$TAG"
 ```
 
@@ -71,7 +71,7 @@ comments list what OpenShell expects of a sandbox image and what Sundae
 keeps in it.
 
 ```sh
-SANDBOX_IMAGE=ghcr.io/danielboothcloud/sundae-sandbox   # placeholder: confirm the registry path
+SANDBOX_IMAGE=<registry>/sundae-sandbox   # e.g. ghcr.io/<owner>/sundae-sandbox
 TAG="$(git rev-parse --short HEAD)"
 
 podman build -f deploy/sandbox/Containerfile \
@@ -97,14 +97,31 @@ Set `openshell.sandboxImage` to `$SANDBOX_IMAGE:$TAG` in step 2.
 
 ## 2. Set the values
 
-Edit [`environment.yaml`](environment.yaml), or pass the same keys with
-`--state-values-set`.
+[`environment.yaml`](environment.yaml) holds cluster-neutral defaults. Put
+your cluster's values in your own file, e.g. `deploy/my-cluster.local.yaml`
+(`*.local.yaml` is gitignored), and pass it to every helmfile command with
+`--state-values-file`; single keys can also be set with `--state-values-set`.
+
+```yaml
+# deploy/my-cluster.local.yaml
+openshell:
+  sandboxImage: <registry>/sundae-sandbox:<tag>
+sundae:
+  image:
+    repository: <registry>/sundae
+    tag: <tag>
+  initialAdminKeys:
+    - "ssh-ed25519 AAAA... you@example.com"
+  ssh:
+    serviceType: LoadBalancer
+    publicURL: "ssh://<ssh-host>:23231"
+```
 
 | Value | Required | What it is |
 | --- | --- | --- |
 | `openshell.sandboxImage` | yes | Default image for the sandboxes Sundae starts, built in step 1. |
 | `sundae.image.tag` | yes | The Sundae tag pushed in step 1. |
-| `sundae.image.repository` | check | Defaults to the placeholder `ghcr.io/danielboothcloud/sundae`. |
+| `sundae.image.repository` | yes | Registry path of the Sundae image pushed in step 1. |
 | `sundae.initialAdminKeys` | in practice | Admin public keys. Without one nobody can administer the server. |
 | `sundae.ssh.serviceType` | in practice | `LoadBalancer` or `NodePort` to reach SSH from outside the cluster. |
 | `sundae.ssh.publicURL` | in practice | The external SSH address, shown in clone URLs. |
@@ -118,7 +135,8 @@ If the image is private, add a pull secret through
 
 ## 3. Install
 
-Run from this directory. `hf` stands for `mise x helmfile@1.8.2 -- helmfile`.
+Run from this directory. `hf` stands for
+`helmfile --state-values-file my-cluster.local.yaml` (helmfile 1.x).
 
 ```sh
 # Render everything without touching the cluster. The --api-versions flag
@@ -161,7 +179,7 @@ root; it needs no cluster.
 ```sh
 mise x helmfile@1.8.2 -- helmfile -f deploy/helmfile.yaml -l name=sundae \
     template --skip-deps \
-    --state-values-set openshell.sandboxImage=ghcr.io/danielboothcloud/sundae-sandbox:abc1234 \
+    --state-values-set openshell.sandboxImage=<registry>/sundae-sandbox:<tag> \
     --state-values-set sundae.image.tag=abc1234 \
   | mise x yq@4 -- yq 'select(.kind == "ConfigMap") | .data["config.yaml"]' \
   > /tmp/sundae-config.yaml

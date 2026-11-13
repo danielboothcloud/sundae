@@ -413,7 +413,7 @@ openshell:
   workspace: "default"
   # Sandbox image when no profile sets one. It must provide git and jj
   # (deploy/sandbox/Containerfile builds one, with osewa).
-  image: "ghcr.io/danielboothcloud/sundae-sandbox:<tag>"
+  image: "<registry>/sundae-sandbox:<tag>"
   # Optional bearer token for the gateway. Prefer token_file, which keeps the
   # token out of this file. Set at most one of the two.
   #token: ""

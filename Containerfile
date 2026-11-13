@@ -7,7 +7,7 @@
 #     --build-arg VERSION="$(git describe --tags --always --dirty)" \
 #     --build-arg COMMIT_SHA="$(git rev-parse HEAD)" \
 #     --build-arg COMMIT_DATE="$(git log -1 --format=%cI)" \
-#     -t ghcr.io/danielboothcloud/sundae:<tag> .
+#     -t <registry>/sundae:<tag> .
 #
 # See deploy/README.md for the full build and push commands.
 

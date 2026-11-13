@@ -46,6 +46,9 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
 {{- define "sundae.image" -}}
+{{- if not .Values.image.repository -}}
+{{- fail "image.repository is required: the registry path of your Sundae image, e.g. ghcr.io/<owner>/sundae" -}}
+{{- end -}}
 {{- if .Values.image.digest -}}
 {{- printf "%s@%s" .Values.image.repository .Values.image.digest -}}
 {{- else -}}

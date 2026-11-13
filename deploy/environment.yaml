@@ -1,11 +1,14 @@
 # Environment-specific values for deploy/helmfile.yaml.
 #
-# Edit this file for your cluster, or leave it alone and override single values
-# on the command line:
+# These are cluster-neutral defaults. Keep your own values in a separate file
+# and pass it with --state-values-file (files named deploy/*.local.yaml are
+# gitignored), or override single values on the command line:
 #
+#   helmfile -f deploy/helmfile.yaml --state-values-file my-cluster.local.yaml sync
 #   helmfile -f deploy/helmfile.yaml \
-#     --state-values-set openshell.sandboxImage=ghcr.io/danielboothcloud/sundae-sandbox:abc1234 \
-#     --state-values-set sundae.image.tag=abc1234 sync
+#     --state-values-set openshell.sandboxImage=<registry>/sundae-sandbox:<tag> \
+#     --state-values-set sundae.image.repository=<registry>/sundae \
+#     --state-values-set sundae.image.tag=<tag> sync
 #
 # Values marked REQUIRED have no usable default; helmfile stops with a message
 # naming the value when one is empty.
@@ -24,7 +27,7 @@ openshell:
   # REQUIRED. The default image for the sandboxes Sundae starts. It must
   # provide git and jj, and the cluster must be able to pull it. Build it from
   # sandbox/Containerfile and push it (README.md, step 1, "Sandbox"), then set
-  # the image and tag you pushed here, e.g. ghcr.io/danielboothcloud/sundae-sandbox:abc1234.
+  # the image and tag you pushed here, e.g. ghcr.io/<owner>/sundae-sandbox:<tag>.
   sandboxImage: ""
 
   # Extra values for the OpenShell chart, merged over what helmfile sets (see
@@ -32,16 +35,16 @@ openshell:
   # has no default one:
   #   chartValues:
   #     server:
-  #       dataStorageClass: longhorn
-  #       workspaceStorageClass: longhorn
+  #       dataStorageClass: <storage-class>
+  #       workspaceStorageClass: <storage-class>
   chartValues: {}
 
 sundae:
   image:
-    # Placeholder registry path: confirm it, or point it at your own registry.
-    repository: ghcr.io/danielboothcloud/sundae
-    # REQUIRED. The tag you built and pushed (see README.md). No image is
-    # published for this fork, so there is no default.
+    # REQUIRED. Registry path of the Sundae image you built and pushed (see
+    # README.md, step 1), e.g. ghcr.io/<owner>/sundae.
+    repository: ""
+    # REQUIRED. The tag you pushed.
     tag: ""
 
   # Public SSH keys of the server administrators, authorized_keys format.
@@ -53,9 +56,12 @@ sundae:
     # How users reach the SSH server from outside the cluster: ClusterIP (only
     # reachable through `kubectl port-forward`), NodePort or LoadBalancer.
     serviceType: ClusterIP
-    # Annotations for the SSH Service, e.g. to request a fixed address from
-    # Cilium LB-IPAM:
+    # Annotations for the SSH Service, for whatever exposes it in your
+    # cluster, e.g. a fixed address from your load balancer or a Tailscale
+    # operator hostname:
     #   lbipam.cilium.io/ips: "192.0.2.10"
+    #   tailscale.com/expose: "true"
+    #   tailscale.com/hostname: sundae
     serviceAnnotations: {}
     # The address users put in `ssh` and `git clone` commands. Sundae only
     # shows it in clone URLs; set it once you know the external address.
