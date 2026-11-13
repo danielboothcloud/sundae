@@ -10,8 +10,8 @@
 # What OpenShell 0.1.8 expects of a sandbox image, and what follows from it:
 #
 # - A standard glibc Linux userland; distroless and scratch images are not
-#   supported. The base is the image OpenShell itself defaults to for
-#   sandboxes (nvcr.io/nvidia/base/ubuntu, Ubuntu 24.04).
+#   supported. The base is Fedora (quay.io/fedora/fedora); OpenShell's own
+#   default sandbox image is Ubuntu, and nothing here depends on either.
 # - The image's ENTRYPOINT and CMD never run: OpenShell replaces the container
 #   command with its own sandbox runtime, which it stages into /.openshell.
 #   Nothing here lives under /.openshell or /run, which OpenShell mounts over.
@@ -53,8 +53,9 @@
 #   and /etc but not /opt, so every tool is installed under /usr; /sandbox and
 #   /tmp are writable.
 
-# Pinned by tag and by digest: NVIDIA rebuilds this tag with security updates.
-ARG BASE_IMAGE=nvcr.io/nvidia/base/ubuntu:noble-20261024.1@sha256:fef8f2708dbb85fbfcba6503d805397d89d9210f375362ff3b9f7888eb297ca5
+# Pinned by tag and by digest (a multi-arch index: amd64, arm64, ppc64le,
+# s390x): Fedora rebuilds this tag with updates. Fedora 45.
+ARG BASE_IMAGE=quay.io/fedora/fedora:45@sha256:e15959f36d52307f176f8c068009f6f1451c3b238b37a1f03e56dbfa4526e8b1
 
 # Jujutsu release and the SHA-256 of its static musl tarball per architecture,
 # from https://github.com/jj-vcs/jj/releases/tag/v0.47.1. Change all three
@@ -88,9 +89,8 @@ ARG JJ_VERSION
 ARG JJ_SHA256_AMD64
 ARG JJ_SHA256_ARM64
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl \
- && rm -rf /var/lib/apt/lists/*
+RUN dnf -y install --setopt=install_weak_deps=False ca-certificates curl gzip tar \
+ && dnf clean all
 
 RUN set -eu; \
     case "${TARGETARCH}" in \
@@ -134,23 +134,34 @@ RUN set -eu; \
 # --- sandbox -------------------------------------------------------------------
 FROM ${BASE_IMAGE}
 
-# git, bash:       Sundae clones with git (or jj, which runs git) and
+# git-core, bash:  Sundae clones with git (or jj, which runs git) and
 #                  runs `bash -l` unless a profile names another program.
+#                  git-core is git without the Perl/Tcl extras (send-email,
+#                  svn, gitk); install `git` in a derived image for those.
 # ca-certificates: TLS for git, jj and curl.
-# curl, openssh-client, less, nano, vim-tiny: everyday tools. less is the
+# gzip, tar, util-linux-core (flock), grep, findutils: the bootstrap and S3
+#                  snapshot scripts; base64, sha256sum and md5sum come with
+#                  the base image's coreutils.
+# shadow-utils:    useradd/groupadd below.
+# curl, openssh-clients, less, nano, vim-minimal: everyday tools. less is the
 #                  pager jj and git use; nano is jj's default editor and the
-#                  EDITOR set below; vim-tiny provides vi.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
+#                  EDITOR set below; vim-minimal provides vi.
+RUN dnf -y install --setopt=install_weak_deps=False \
       bash \
       ca-certificates \
       curl \
-      git \
+      findutils \
+      git-core \
+      grep \
+      gzip \
       less \
       nano \
-      openssh-client \
-      vim-tiny \
- && rm -rf /var/lib/apt/lists/*
+      openssh-clients \
+      shadow-utils \
+      tar \
+      util-linux-core \
+      vim-minimal \
+ && dnf clean all
 
 # /usr/bin/jj matches the binary path in the README's example sandbox network
 # policy.

@@ -46,11 +46,11 @@ whose image has no osewa (`sessions.osewa.binary_dir`).
 ### Sandbox
 
 The image the OpenShell sandboxes run, built from
-[`deploy/sandbox/Containerfile`](../../deploy/sandbox/Containerfile): Ubuntu 24.04 (the base
-OpenShell uses for its own default sandbox image) with `git`, `jj` 0.47.1,
+[`deploy/sandbox/Containerfile`](../../deploy/sandbox/Containerfile): Fedora 45
+with `git` (git-core), `jj` 0.47.1,
 [osewa](https://github.com/rjyo/osewa) 0.1.4 (which keeps each session's
 program running after the SSH client disconnects), `bash`,
-`ca-certificates`, `curl`, `openssh-client`, `less`, `nano` and `vi`. Its
+`ca-certificates`, `curl`, `openssh-clients`, `less`, `nano` and `vi`. Its
 comments list what OpenShell expects of a sandbox image and what Sundae
 keeps in it.
 
