@@ -9,3 +9,20 @@ x 2026-11-13 2026-11-08 perhaps use a global service in cilium to bridge to dev 
 x 2026-11-13 2026-11-11 maybe add an agents menu with program status protocol, so you can monitor and ssh into agent sessions, pass via command to ssh command maybe?
 2026-11-13 add webserver which just serves the ssh which can be accessed via browser
 2026-11-13 per-profile network policies: sessions.profiles[].additional_network_policies (same schema as openshell.network_policies), merged with built-ins + global; open: key name, name clashes (error vs override), re-apply on start/resume, per-profile sandbox_policy, YAML-only
+2026-11-13 make sessions automatically scale down when all agents are at rest (0 replicas)
+2026-11-13 add richer session lifecycle controls
+2026-11-13 migrate to self hosted runners
+2026-11-13 if repo is of type JJ you should be able to explore changes/log in the repositores tab
+2026-11-13 you should be able to launch sessions fro mthe repositories tab
+2026-11-13 first repository shouldn't be preselected when you create new session
+2026-11-13 when creating sessions should have option to restore from snapshot
+2026-11-13 need more snapshot lifecycle tools for pruning/deleting snapshots
+2026-11-13 some of the prompts/models which prompt the user to select options should always use bright text, at times they are too dark and its hard to identify options
+2026-11-13 need to enable navigation via h and l for left and right
+2026-11-13 each repository should have a sessions tab which shows which sessions its cloned into which you can also enter the session from
+2026-11-13 uder each session in the session tab it should show the resource footprint of each session, ram/cpu and maybe memory used
+2026-11-13 add caching for forge repos
+2026-11-13 need support for panes/multiplexing
+2026-11-13 it would be call if sessions ran within frames in the sundae server, that would enable quick traversal of sessions
+2026-11-13 validate openshell.network_policies allowed_ips: reject ranges containing what OpenShell always blocks (0.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16, e.g. 0.0.0.0/0 or ::/0) at startup; today they pass validation and every connection is silently denied (transparent_tcp_destination_denied); also warn that a rule with allowed_ips and no host opens IP literals only (DNS names get policy_dns_ineligible)
+2026-11-14 need cleaner way to exit and enter sessions
