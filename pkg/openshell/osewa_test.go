@@ -15,18 +15,20 @@ import (
 
 // allScripts are the shell scripts Sundae runs in sandboxes.
 var allScripts = map[string]string{
-	uploadBeginName:    uploadBeginScript,
-	uploadChunkName:    uploadChunkScript,
-	uploadEndName:      uploadEndScript,
-	osewaProbeName:     osewaProbeScript,
-	osewaInstallName:   osewaInstallScript,
-	osewaServerName:    osewaServerScript,
-	osewaEnrollName:    osewaEnrollScript,
-	osewaHostsName:     osewaHostsScript,
-	osewaListName:      osewaListScript,
-	osewaStatusName:    osewaStatusScript,
-	osewaNewName:       osewaNewScript,
-	gitCredentialsName: gitCredentialsScript,
+	uploadBeginName:      uploadBeginScript,
+	uploadChunkName:      uploadChunkScript,
+	uploadEndName:        uploadEndScript,
+	osewaProbeName:       osewaProbeScript,
+	osewaInstallName:     osewaInstallScript,
+	osewaServerName:      osewaServerScript,
+	osewaEnrollName:      osewaEnrollScript,
+	osewaHostsName:       osewaHostsScript,
+	osewaListName:        osewaListScript,
+	osewaStatusName:      osewaStatusScript,
+	osewaNewName:         osewaNewScript,
+	gitCredentialsName:   gitCredentialsScript,
+	gitIdentityName:      gitIdentityScript,
+	gitIdentityCloneName: gitIdentityCloneScript,
 }
 
 func TestScriptsParse(t *testing.T) {
@@ -42,7 +44,8 @@ func TestScriptsParse(t *testing.T) {
 		if regexp.MustCompile(`\$\{?SUNDAE_[A-Z_]+`).MatchString(script) {
 			for _, v := range regexp.MustCompile(`\$\{?(SUNDAE_[A-Z_]+)`).FindAllStringSubmatch(script, -1) {
 				switch v[1] {
-				case "SUNDAE_OSEWA_KEY", "SUNDAE_OSEWA_HOSTS", "SUNDAE_GITCONFIG":
+				case "SUNDAE_OSEWA_KEY", "SUNDAE_OSEWA_HOSTS", "SUNDAE_GITCONFIG",
+					"SUNDAE_GIT_USER_NAME", "SUNDAE_GIT_USER_EMAIL", "SUNDAE_JJ_USER_NAME", "SUNDAE_JJ_USER_EMAIL":
 				default:
 					t.Errorf("%s reads unexpected variable %s", name, v[1])
 				}

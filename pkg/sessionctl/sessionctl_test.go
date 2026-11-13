@@ -1,11 +1,16 @@
 package sessionctl
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/danielboothcloud/sundae/git"
+	"github.com/danielboothcloud/sundae/pkg/config"
 	"github.com/danielboothcloud/sundae/pkg/events"
 	"github.com/danielboothcloud/sundae/pkg/openshell"
+	"github.com/danielboothcloud/sundae/pkg/proto"
 )
 
 func TestAttachCommand(t *testing.T) {
@@ -81,5 +86,76 @@ func TestRowParkedToSnapshot(t *testing.T) {
 	running := Row{Info: openshell.Info{Phase: "Ready"}}
 	if running.Parked() || running.Note() != "" {
 		t.Fatal("running row parked")
+	}
+}
+
+// linkedRepo is a repository whose bare git directory is dir.
+type linkedRepo struct {
+	proto.Repository
+	dir string
+}
+
+func (r linkedRepo) Name() string                   { return "r" }
+func (r linkedRepo) Open() (*git.Repository, error) { return git.Open(r.dir) }
+
+func TestGitIdentity(t *testing.T) {
+	gh := config.GitIdentity{Name: "Jane GH", Email: "1+jane@users.noreply.github.com"}
+	def := config.GitIdentity{Name: "Jane", Email: "jane@example.com"}
+	cfg := config.DefaultConfig()
+	cfg.Forges = []config.ForgeConfig{
+		{Name: "github", Kind: "github", GitIdentity: config.ForgeGitIdentity(gh)},
+		{Name: "gitlab", Kind: "gitlab"},
+	}
+	cfg.Sessions.GitIdentity = def
+
+	// repo returns a bare repository linked to forge; "" for none.
+	repo := func(t *testing.T, forge string) proto.Repository {
+		t.Helper()
+		dir := filepath.Join(t.TempDir(), "r.git")
+		if _, err := git.Init(dir, true); err != nil {
+			t.Fatal(err)
+		}
+		if forge != "" {
+			cfgFile := filepath.Join(dir, "config")
+			bts, err := os.ReadFile(cfgFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			link := "[forge]\n\tname = " + forge + "\n\tpath = me/r\n"
+			if err := os.WriteFile(cfgFile, append(bts, link...), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return linkedRepo{dir: dir}
+	}
+
+	for _, tc := range []struct {
+		name  string
+		forge string
+		cfg   func(*config.Config)
+		want  config.GitIdentity
+	}{
+		{"forge identity", "github", nil, gh},
+		{"forge without identity", "gitlab", nil, def},
+		{"forge no longer configured", "gone", nil, def},
+		{"not imported", "", nil, def},
+		{"no default", "", func(c *config.Config) { c.Sessions.GitIdentity = config.GitIdentity{} }, config.GitIdentity{}},
+		{"forge identity, no default", "github", func(c *config.Config) { c.Sessions.GitIdentity = config.GitIdentity{} }, gh},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := *cfg
+			if tc.cfg != nil {
+				tc.cfg(&c)
+			}
+			got, err := GitIdentity(&c, repo(t, tc.forge))
+			if err != nil || got != tc.want {
+				t.Fatalf("GitIdentity = %v, %v; want %v", got, err, tc.want)
+			}
+		})
+	}
+
+	// An unreadable repository is an error, not the default identity.
+	if _, err := GitIdentity(cfg, linkedRepo{dir: filepath.Join(t.TempDir(), "missing.git")}); err == nil {
+		t.Fatal("no error for a repository that cannot be opened")
 	}
 }

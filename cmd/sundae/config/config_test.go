@@ -86,6 +86,47 @@ func TestCheck(t *testing.T) {
 		}
 	})
 
+	t.Run("git identities", func(t *testing.T) {
+		is := is.New(t)
+		p := filepath.Join(td, "identities.yaml")
+		writeFile(t, p, `sessions:
+  git_identity:
+    name: Jane Doe
+    email: jane@example.com
+forges:
+  - name: github
+    kind: github
+    git_identity:
+      name: Jane Doe
+      email: 12345+jane@users.noreply.github.com
+`)
+		is.NoErr(check(p))
+
+		writeFile(t, p, `sessions:
+  git_identity:
+    name: Jane Doe
+    mail: jane@example.com
+forges:
+  - name: github
+    kind: github
+    git_identity:
+      name: Jane Doe
+      email: jane
+`)
+		err := check(p)
+		is.True(err != nil)
+		msg := err.Error()
+		for _, want := range []string{
+			"line 4: unknown key sessions.git_identity.mail",
+			"sessions.git_identity.email is required when sessions.git_identity is set",
+			`forges[0] (github): git_identity.email "jane" does not look like an email address`,
+		} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("%q missing from:\n%s", want, msg)
+			}
+		}
+	})
+
 	t.Run("notifications", func(t *testing.T) {
 		is := is.New(t)
 		writeFile(t, filepath.Join(td, "ntfy-token"), "tk_x\n")

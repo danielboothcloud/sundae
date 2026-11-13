@@ -224,6 +224,15 @@ config:
     repos: {}
     #  "infra/*":
     #    profile: claude
+    # The git and jj identity (user.name, user.email) commits are made as in
+    # session checkouts of repositories not imported from a forge, and of
+    # those whose forge has no git_identity. Written into each checkout's
+    # repository config on every start and attach; ~/.gitconfig is left
+    # alone. Server-wide: every user's sessions use it. Unset, sandboxes get
+    # no identity. Semantics in the top-level README, "Git identity".
+    #git_identity:
+    #  name: Jane Doe
+    #  email: jane@example.com
 
   # How new repositories are initialised: templates for `repo create
   # --template <name>` and the TUI's new-repository form. A template is an
@@ -257,6 +266,12 @@ config:
   #    exclude: []
   #    sync: 10m
   #    # prefix defaults to the name: me/tool is imported as github/me/tool.
+  #    # Optional: the identity commits are made as in agent sessions of
+  #    # this forge's repositories (else sessions.git_identity). Server-wide,
+  #    # like the token.
+  #    git_identity:
+  #      name: Jane Doe
+  #      email: 12345+jane@users.noreply.github.com
 
   # Notifications about agent sessions, pushed to a phone through ntfy
   # (https://ntfy.sh or a self-hosted server). Off by default; while

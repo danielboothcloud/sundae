@@ -235,8 +235,12 @@ jobs:
 #    token_file: /etc/sundae/secrets/github-token
 #    include: ["me/*"]
 #    sync: 10m
+#    git_identity:              # commits in sessions of this forge's repos
+#      name: Jane Doe
+#      email: 12345+jane@users.noreply.github.com
 
-# Agent session status, parking and profiles. See "OpenShell Agent Sessions".
+# Agent session status, parking, profiles and git identity. See "OpenShell
+# Agent Sessions".
 #sessions:
 #  status:
 #    poll_interval: 10s
@@ -252,6 +256,9 @@ jobs:
 #  repos:
 #    "infra/*":
 #      profile: claude
+#  git_identity:                # commits in sessions of other repositories
+#    name: Jane Doe
+#    email: jane@example.com
 
 # Templates for new repositories. See "Project templates and profiles".
 #projects:
@@ -317,7 +324,8 @@ name all in uppercase. Here are some examples:
 - `SUNDAE_ANON_ACCESS`: Overrides the `anon-access` setting (see [Authentication](#authentication))
 - `SUNDAE_ALLOW_KEYLESS`: Overrides the `allow-keyless` setting (see [Authentication](#authentication))
 - `SUNDAE_DEFAULT_REPO`: Repository name to create on boot if missing
-- `SUNDAE_FORGES_0_NAME`, `SUNDAE_FORGES_0_KIND`, ...: The first entry of `forges` (see [Forges](#forges)); list values are comma-separated
+- `SUNDAE_FORGES_0_NAME`, `SUNDAE_FORGES_0_KIND`, ...: The first entry of `forges` (see [Forges](#forges)); list values are comma-separated; `SUNDAE_FORGES_0_GIT_IDENTITY_NAME` and `..._EMAIL` set its `git_identity`
+- `SUNDAE_SESSIONS_GIT_IDENTITY_NAME`, `SUNDAE_SESSIONS_GIT_IDENTITY_EMAIL`: `sessions.git_identity` (see [OpenShell Agent Sessions](#openshell-agent-sessions), "Git identity")
 - `SUNDAE_NOTIFICATIONS_ON`, `SUNDAE_NOTIFICATIONS_NTFY_ENABLED`, ...: The `notifications` section (see [Notifications](#notifications)); `on` is comma-separated
 
 #### Database Configuration
@@ -460,13 +468,19 @@ sessions:
   repos:
     "infra/*":
       profile: claude
+  # Who commits in sessions of repositories not imported from a forge (and
+  # of forges without their own git_identity). See "Git identity" below.
+  git_identity:
+    name: Jane Doe
+    email: jane@example.com
 ```
 
 The `openshell` settings and `sessions.osewa`, `sessions.status`,
-`sessions.suspend` and `sessions.signals` can also be set with
-`SUNDAE_OPENSHELL_*` and `SUNDAE_SESSIONS_OSEWA_*`,
-`SUNDAE_SESSIONS_STATUS_*`, `SUNDAE_SESSIONS_SUSPEND_*` and
-`SUNDAE_SESSIONS_SIGNALS_*` environment variables, for example
+`sessions.suspend`, `sessions.signals` and `sessions.git_identity` can also
+be set with `SUNDAE_OPENSHELL_*` and `SUNDAE_SESSIONS_OSEWA_*`,
+`SUNDAE_SESSIONS_STATUS_*`, `SUNDAE_SESSIONS_SUSPEND_*`,
+`SUNDAE_SESSIONS_SIGNALS_*` and `SUNDAE_SESSIONS_GIT_IDENTITY_*`
+environment variables, for example
 `SUNDAE_OPENSHELL_ENABLED=true` or
 `SUNDAE_SESSIONS_SUSPEND_AFTER=1h`; `sessions.profiles` and
 `sessions.repos` only in the file. `status.poll_interval` must be at least
@@ -487,6 +501,40 @@ skipped with a warning. `--image` overrides the image. A session keeps the
 profile it was created from: `--profile` and `--image` are ignored, with a
 warning, when it already exists. Profile names are DNS labels; every
 `repos` entry must name a defined profile.
+
+**Git identity.** A sandbox has no git or jj identity of its own, so
+without one the first `git commit` fails and jj commits have no author.
+Sundae can set one per repository:
+
+1. a repository imported from a forge (see [Forges](#forges)) uses that
+   forge's `forges[].git_identity`, e.g. the account's noreply address;
+2. any other repository, and one whose forge has no `git_identity`, uses
+   `sessions.git_identity`;
+3. with neither, Sundae sets nothing, as before.
+
+The forge link comes from the repository's git config (`[forge] name`), so
+it follows the repository, not the user. On every `session start` and
+`session attach` the identity is written into the checkout's own repository
+config: `git -C /sandbox/<repo> config user.name/user.email` (`.git/config`),
+and for jj and colocated repositories `jj config set --repo` (jj's
+per-repository config). The sandbox user's `~/.gitconfig` and jj user config
+are never touched, so an identity set there by hand still applies to other
+checkouts. The first clone already uses it (`jj git clone --config
+user.name=... --config user.email=...`, `git clone -c ...`), so jj's initial
+working-copy commit has the right author. A checkout that is missing or not
+a repository is left alone; a failure to set the identity is a warning, not
+a failed start. A changed identity reaches existing sessions on their next
+start or attach and applies to commits made from then on; jj leaves the
+author of the current working-copy commit as it is (`jj metaedit
+--update-author` changes it). Removing an identity from the config leaves the
+one already written in existing checkouts.
+
+Both settings are server-wide, like the forge tokens: every user's sessions
+of a repository commit as the same identity. `name` and `email` are both
+required when the block is set; the email must look like `user@host`;
+neither may contain control characters or `<`/`>`, and each is at most 256
+bytes. `sundae config check` reports a problem naming the key, e.g.
+`forges[0] (github): git_identity.email is required when git_identity is set`.
 
 **osewa in the sandbox.** Sundae pins one osewa release (its protocol is a
 draft). On every start and attach it:
@@ -1325,6 +1373,9 @@ forges:
     include: ["me/*", "my-org/**"]  # globs on owner/repo; empty = everything
     exclude: ["me/old-*"]
     sync: 10m                       # scheduled sync, at least 1m (default 10m)
+    git_identity:                   # who commits in agent sessions of these repos
+      name: Jane Doe
+      email: 12345+jane@users.noreply.github.com
   - name: gitlab
     kind: gitlab
     url: https://gitlab.example.com # default https://github.com / https://gitlab.com
@@ -1343,6 +1394,11 @@ forges:
   not cross `/`, `**` does. Write alternatives as separate entries.
 - `prefix` must be unique and must not nest inside another forge's prefix, so
   two forges can never produce the same repository name.
+- `git_identity` (optional, `name` and `email`) is the identity commits are
+  made as in agent sessions of the forge's repositories; without it they use
+  `sessions.git_identity`. It is server-wide like the token: every user's
+  sessions of those repositories use it. See "Git identity" under
+  [OpenShell Agent Sessions](#openshell-agent-sessions).
 - Changing forges means editing the file and restarting (the Helm chart rolls
   the pod when its ConfigMap changes). `sundae config check` validates them,
   including that every token file is readable.

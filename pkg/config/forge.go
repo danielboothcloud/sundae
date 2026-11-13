@@ -76,6 +76,12 @@ type ForgeConfig struct {
 	// under: forge path "owner/repo" becomes "<prefix>/owner/repo". Defaults
 	// to Name.
 	Prefix string `env:"PREFIX" yaml:"prefix"`
+
+	// GitIdentity is the name and email commits are made as in agent
+	// sessions of repositories imported from this forge, e.g. the account's
+	// noreply address. Optional: without it those sessions use
+	// sessions.git_identity.
+	GitIdentity ForgeGitIdentity `envPrefix:"GIT_IDENTITY_" yaml:"git_identity"`
 }
 
 // Token returns the forge access token: the contents of TokenFile with
@@ -277,6 +283,8 @@ func (c *Config) forgeEnviron() []string {
 			p+"EXCLUDE="+strings.Join(f.Exclude, ","),
 			p+"SYNC="+f.Sync.String(),
 			p+"PREFIX="+f.Prefix,
+			p+"GIT_IDENTITY_NAME="+f.GitIdentity.Name,
+			p+"GIT_IDENTITY_EMAIL="+f.GitIdentity.Email,
 		)
 	}
 	return envs

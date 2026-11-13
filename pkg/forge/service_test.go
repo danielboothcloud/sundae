@@ -240,6 +240,9 @@ func TestServiceImportSyncPush(t *testing.T) {
 	if cfgText := git(t, dir, "config", "--file", "config", "--list"); strings.Contains(cfgText, "ghp_test") {
 		t.Error("token written to the repository config")
 	}
+	if name, err := LinkedForge(repo); err != nil || name != "gh" {
+		t.Errorf("LinkedForge = %q, %v", name, err)
+	}
 
 	// Importing again is a no-op.
 	results, err = fx.svc.Import(ctx, fx.user, "gh", ImportOptions{Paths: []string{"me/proj"}})
@@ -261,6 +264,9 @@ func TestServiceImportSyncPush(t *testing.T) {
 	other, _ := fx.be.Repository(ctx, "gh/me/other")
 	if l, _ := readLink(other); l != nil {
 		t.Error("collision linked the existing repository")
+	}
+	if name, err := LinkedForge(other); err != nil || name != "" {
+		t.Errorf("LinkedForge of an unlinked repository = %q, %v", name, err)
 	}
 	if err := fx.be.DeleteRepository(proto.WithUserContext(ctx, fx.user), "gh/me/other"); err != nil {
 		t.Fatal(err)

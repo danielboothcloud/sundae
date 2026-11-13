@@ -767,7 +767,7 @@ func (c *Config) Validate() error {
 
 	c.HTTP.CORS.AllowedOrigins = append([]string{c.HTTP.PublicURL}, c.HTTP.CORS.AllowedOrigins...)
 
-	return errors.Join(c.validateOpenShell(), c.validateSessions(), c.validateProjects(), c.validateForges(), c.validateNotifications(), c.validateSnapshots())
+	return errors.Join(c.validateOpenShell(), c.validateSessions(), c.validateProjects(), c.validateForges(), c.validateGitIdentities(), c.validateNotifications(), c.validateSnapshots())
 }
 
 // validateOpenShell validates the OpenShell configuration and resolves its

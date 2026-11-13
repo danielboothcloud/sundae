@@ -21,6 +21,7 @@ import (
 	"github.com/danielboothcloud/sundae/pkg/backend"
 	"github.com/danielboothcloud/sundae/pkg/config"
 	"github.com/danielboothcloud/sundae/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/forge"
 	"github.com/danielboothcloud/sundae/pkg/openshell"
 	"github.com/danielboothcloud/sundae/pkg/proto"
 	"github.com/danielboothcloud/sundae/pkg/signals"
@@ -246,6 +247,13 @@ func Prepare(ctx context.Context, mgr *openshell.Manager, req Request) (_ *Prepa
 		}
 	}
 
+	// Commits in the session are made as the repository's forge identity,
+	// else the default one, else as whatever the sandbox says.
+	identity, err := GitIdentity(config.FromContext(ctx), rr)
+	if err != nil {
+		return nil, err
+	}
+
 	opts := openshell.StartOptions{
 		User:        user,
 		Repo:        rr.Name(),
@@ -256,6 +264,7 @@ func Prepare(ctx context.Context, mgr *openshell.Manager, req Request) (_ *Prepa
 		Image:       req.Image,
 		Term:        req.Term,
 		Restore:     req.Restore,
+		GitIdentity: identity,
 		Progress:    req.Progress,
 	}
 	var s *openshell.Session
@@ -268,6 +277,22 @@ func Prepare(ctx context.Context, mgr *openshell.Manager, req Request) (_ *Prepa
 		return nil, err //nolint:wrapcheck
 	}
 	return &Prepared{Session: s, mgr: mgr, closeBridge: closeBridge}, nil
+}
+
+// GitIdentity returns the git identity for sessions of the repository: the
+// git_identity of the forge it was imported from, else
+// sessions.git_identity, else none (the zero GitIdentity). A repository
+// whose git config cannot be read is an error rather than a session that
+// commits as the wrong identity.
+func GitIdentity(cfg *config.Config, rr proto.Repository) (config.GitIdentity, error) {
+	if cfg == nil {
+		return config.GitIdentity{}, nil
+	}
+	name, err := forge.LinkedForge(rr)
+	if err != nil {
+		return config.GitIdentity{}, fmt.Errorf("read the forge link of %s: %w", rr.Name(), err)
+	}
+	return cfg.SessionGitIdentity(name), nil
 }
 
 // Attach bridges term to the session until the user detaches (~.), the

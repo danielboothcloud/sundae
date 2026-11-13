@@ -161,6 +161,11 @@ type StartOptions struct {
 	// newly created sandbox (snapshots.s3). The zero value restores it
 	// unless the new sandbox already holds earlier work.
 	Restore RestoreMode
+	// GitIdentity is the name and email commits in the checkout are made
+	// as: set in the checkout's git and jj repository config on every
+	// start and attach, and given to the first clone. The zero value
+	// leaves the sandbox's identity alone.
+	GitIdentity config.GitIdentity
 	// Progress receives human-readable progress messages. May be nil.
 	Progress io.Writer
 }
@@ -239,7 +244,8 @@ func sessionName(name string) (string, error) {
 
 // Start ensures the user's named session for the repository is running:
 // it creates the sandbox (from the session's profile) or resumes it, clones
-// the repository on first use, renews the sandbox's git credentials, makes
+// the repository on first use, renews the sandbox's git credentials, sets
+// the session's git identity in the checkout (opts.GitIdentity), makes
 // sure osewa is installed, serving and enrolled, and starts the session's
 // program in an osewa session unless it is running already. The returned
 // Session is ready to Attach to.
@@ -431,10 +437,20 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 	}
 	if !exists {
 		fmt.Fprintf(progress, "Cloning %s into %s...\n", opts.Repo, s.WorkDir) //nolint:errcheck
-		if err := m.clone(ctx, sandbox, opts.VCS, opts.Repo, s.WorkDir); err != nil {
+		if err := m.clone(ctx, sandbox, opts.VCS, opts.Repo, s.WorkDir, opts.GitIdentity); err != nil {
 			return nil, err
 		}
 		s.Cloned = true
+	}
+
+	// Set the session's git identity in the checkout on every start and
+	// attach, so a changed identity reaches existing checkouts. A failure
+	// leaves the session usable: it is reported, not fatal.
+	if opts.GitIdentity.IsSet() {
+		if err := m.writeGitIdentity(ctx, sandbox, s.WorkDir, opts.GitIdentity); err != nil {
+			m.logger.Warn("cannot set the git identity", "sandbox", sandbox, "err", err)
+			fmt.Fprintf(progress, "Warning: could not set the git identity %s in %s; commits may use another identity: %v\n", opts.GitIdentity, s.WorkDir, err) //nolint:errcheck
+		}
 	}
 
 	bin, enrolled, err := m.osewaBinary(ctx, sandbox, progress)
@@ -964,16 +980,20 @@ func (m *Manager) dirExists(ctx context.Context, sandbox, dir string) (bool, err
 	}
 }
 
-// clone clones the repository into workDir. The credentials come from the
-// credential file writeGitCredentials wrote; neither the URL nor the
-// environment carries any.
-func (m *Manager) clone(ctx context.Context, sandbox string, vcs proto.VCS, repo, workDir string) error {
+// clone clones the repository into workDir, with id as the clone's git
+// identity when it is set. The credentials come from the credential file
+// writeGitCredentials wrote; neither the URL nor the environment carries
+// any.
+func (m *Manager) clone(ctx context.Context, sandbox string, vcs proto.VCS, repo, workDir string, id config.GitIdentity) error {
 	if parent := path.Dir(workDir); parent != SandboxRoot {
 		if err := m.run(ctx, sandbox, []string{"mkdir", "-p", parent}); err != nil {
 			return err
 		}
 	}
 
+	if id.IsSet() {
+		return m.cloneWithIdentity(ctx, sandbox, vcs, m.repoURL(repo), workDir, id)
+	}
 	return m.run(ctx, sandbox, CloneCommand(vcs, m.repoURL(repo), workDir))
 }
 

@@ -245,6 +245,22 @@ sessions:
   #  "infra/*":
   #    profile: claude
 {{- end }}
+  # The git and jj identity (user.name and user.email) commits are made as in
+  # session checkouts: of repositories not imported from a forge, and of
+  # those whose forge sets no forges[].git_identity. Set in the checkout's
+  # own git and jj repository config on every session start and attach, so
+  # the sandbox user's ~/.gitconfig and jj user config stay theirs. This is
+  # server-wide, like the forge tokens: every user's sessions use it. Unset,
+  # Sundae configures no identity. Name and email are both required.
+{{- if or .Sessions.GitIdentity.Name .Sessions.GitIdentity.Email }}
+  git_identity:
+    name: {{ printf "%q" .Sessions.GitIdentity.Name }}
+    email: {{ printf "%q" .Sessions.GitIdentity.Email }}
+{{- else }}
+  #git_identity:
+  #  name: Jane Doe
+  #  email: jane@example.com
+{{- end }}
 
 # Projects: how new repositories are initialised (repo create --template NAME,
 # and the TUI's new-repository form, n on Repositories). A template is an
@@ -300,6 +316,11 @@ projects:
 #   sync        scheduled sync interval, at least 1m (default 10m)
 #   prefix      repository namespace: "owner/repo" is imported as
 #               "<prefix>/owner/repo" (default: name)
+#   git_identity
+#               name and email that commits are made as in agent sessions of
+#               this forge's repositories, e.g. the account's noreply address
+#               (default: sessions.git_identity). Server-wide, like the
+#               token: every user's sessions use it.
 {{- if .Forges }}
 forges:
 {{- range .Forges }}
@@ -315,6 +336,11 @@ forges:
     {{- end }}
     sync: "{{ .Sync }}"
     prefix: {{ printf "%q" .Prefix }}
+    {{- if or .GitIdentity.Name .GitIdentity.Email }}
+    git_identity:
+      name: {{ printf "%q" .GitIdentity.Name }}
+      email: {{ printf "%q" .GitIdentity.Email }}
+    {{- end }}
 {{- end }}
 {{- else }}
 #forges:
@@ -324,6 +350,9 @@ forges:
 #    include: ["me/*"]
 #    exclude: []
 #    sync: 10m
+#    git_identity:
+#      name: Jane Doe
+#      email: 12345+jane@users.noreply.github.com
 #  - name: gitlab
 #    kind: gitlab
 #    url: https://gitlab.com

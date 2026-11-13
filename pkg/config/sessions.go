@@ -73,6 +73,12 @@ type SessionsConfig struct {
 	// case-insensitive. When several patterns match, the most specific one
 	// wins: the one with the most characters that are not wildcards.
 	Repos map[string]SessionRepoDefaults `yaml:"repos"`
+
+	// GitIdentity is the name and email commits are made as in agent
+	// sessions of repositories not imported from a forge, and of those
+	// whose forge has no git_identity. Optional: without one, Sundae
+	// configures no identity in the sandbox.
+	GitIdentity GitIdentity `envPrefix:"GIT_IDENTITY_" yaml:"git_identity"`
 }
 
 // OsewaConfig configures osewa in the sandboxes.
@@ -318,8 +324,8 @@ func sortedKeys[V any](m map[string]V) []string {
 }
 
 // sessionsEnviron returns the sessions section as SUNDAE_SESSIONS_*
-// environment variables. Profiles and repos have no environment form; hook
-// subprocesses read them from the config file.
+// environment variables, git_identity included. Profiles and repos have no
+// environment form; hook subprocesses read them from the config file.
 func (c *Config) sessionsEnviron() []string {
 	return []string{
 		"SUNDAE_SESSIONS_OSEWA_BINARY_DIR=" + c.Sessions.Osewa.BinaryDir,
@@ -329,5 +335,7 @@ func (c *Config) sessionsEnviron() []string {
 		"SUNDAE_SESSIONS_SUSPEND_AFTER=" + c.Sessions.Suspend.After.String(),
 		"SUNDAE_SESSIONS_SUSPEND_FALLBACK=" + c.Sessions.Suspend.Fallback,
 		fmt.Sprintf("SUNDAE_SESSIONS_SIGNALS_KEEP=%d", c.Sessions.Signals.Keep),
+		"SUNDAE_SESSIONS_GIT_IDENTITY_NAME=" + c.Sessions.GitIdentity.Name,
+		"SUNDAE_SESSIONS_GIT_IDENTITY_EMAIL=" + c.Sessions.GitIdentity.Email,
 	}
 }

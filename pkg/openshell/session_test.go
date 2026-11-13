@@ -146,6 +146,10 @@ type fakeSandbox struct {
 	// newArgv is the argv, after the working directory, of the last osewa
 	// session created.
 	newArgv []string
+	// identity maps a checkout to the git identity set in it, as
+	// "name <email>", and jjIdentity to the TOML values given to jj.
+	identity   map[string]string
+	jjIdentity map[string]string
 }
 
 // fakeExec simulates the sandboxes the commands Start runs act on. The
@@ -163,6 +167,8 @@ type fakeExec struct {
 	arch string
 	// probeExit makes the probe fail.
 	probeExit int
+	// identityExit makes the git identity script fail.
+	identityExit int
 	// snap configures the snapshot scripts (see snapshot_test.go).
 	snap fakeSnapshotKnobs
 }
@@ -175,7 +181,10 @@ func newFakeExec() *fakeExec {
 func (f *fakeExec) box(sandbox string) *fakeSandbox {
 	b, ok := f.boxes[sandbox]
 	if !ok {
-		b = &fakeSandbox{files: map[string]string{}, dirs: map[string]bool{}, sessions: map[string]bool{}}
+		b = &fakeSandbox{
+			files: map[string]string{}, dirs: map[string]bool{}, sessions: map[string]bool{},
+			identity: map[string]string{}, jjIdentity: map[string]string{},
+		}
 		f.boxes[sandbox] = b
 	}
 	return b
@@ -357,6 +366,23 @@ func (f *fakeExec) Run(_ context.Context, _, sandbox string, command []string, o
 		if !found {
 			b.includes = append(b.includes, a[1])
 		}
+	case gitIdentityCloneName:
+		if f.cloneExit != 0 {
+			return fail(f.cloneExit, "fatal: boom")
+		}
+		b.dirs[a[2]] = true
+		b.identity[a[2]] = env(o, "SUNDAE_GIT_USER_NAME") + " <" + env(o, "SUNDAE_GIT_USER_EMAIL") + ">"
+		if a[0] == "jj" {
+			b.jjIdentity[a[2]] = env(o, "SUNDAE_JJ_USER_NAME") + " " + env(o, "SUNDAE_JJ_USER_EMAIL")
+		}
+	case gitIdentityName:
+		if f.identityExit != 0 {
+			return fail(f.identityExit, "error: could not lock config file")
+		}
+		if b.dirs[a[0]] {
+			b.identity[a[0]] = env(o, "SUNDAE_GIT_USER_NAME") + " <" + env(o, "SUNDAE_GIT_USER_EMAIL") + ">"
+			b.jjIdentity[a[0]] = env(o, "SUNDAE_JJ_USER_NAME") + " " + env(o, "SUNDAE_JJ_USER_EMAIL")
+		}
 	case snapshotPackName, snapshotUploadName, snapshotRestoreName, snapshotProbeName:
 		return f.snapshotScript(b, call)
 	default:
@@ -384,7 +410,7 @@ func (f *fakeExec) clones() []execCall {
 	defer f.mu.Unlock()
 	var out []execCall
 	for _, r := range f.runs {
-		if r.command[0] == "git" || r.command[0] == "jj" {
+		if r.command[0] == "git" || r.command[0] == "jj" || r.script() == gitIdentityCloneName {
 			out = append(out, r)
 		}
 	}

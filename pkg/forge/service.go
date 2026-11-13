@@ -203,6 +203,17 @@ func readLink(r proto.Repository) (*Link, error) {
 	return l, nil
 }
 
+// LinkedForge returns the name of the forge the repository was imported
+// from, as its git config records it ([forge] name), or "" when it is not
+// linked to a forge. The forge may no longer be configured.
+func LinkedForge(r proto.Repository) (string, error) {
+	l, err := readLink(r)
+	if err != nil || l == nil {
+		return "", err
+	}
+	return l.Forge, nil
+}
+
 // links returns the links of every repository imported from forge, or from
 // any forge when forge is "".
 func (s *Service) links(ctx context.Context, forge string) ([]*Link, error) {

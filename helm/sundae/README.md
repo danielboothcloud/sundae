@@ -241,6 +241,10 @@ is set).
   `secretMounts` and named by `token_file`; Sundae
   rejects an inline `token`. Sundae needs egress to each forge's HTTPS
   host. Adding or changing a forge rolls the pod like any config change.
+  An optional `git_identity` (`name`, `email`) per forge, and
+  `config.sessions.git_identity` for other repositories, set who commits in
+  agent sessions (top-level README, "Git identity"). They are plain config,
+  not secrets, and server-wide: every user's sessions use them.
 - **Notifications (ntfy).** Off by default. Turn them on under
   `config.notifications` (example in `values.yaml`; semantics in the top-level README, "Notifications").
   Quote the `"on":` key: Helm reads a bare `on:` as `true`, and the chart
