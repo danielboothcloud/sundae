@@ -13,11 +13,11 @@ import (
 	"time"
 
 	"charm.land/log/v2"
-	"github.com/charmbracelet/soft-serve/pkg/access"
-	"github.com/charmbracelet/soft-serve/pkg/backend"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/git"
-	"github.com/charmbracelet/soft-serve/pkg/utils"
+	"github.com/danielboothcloud/sundae/pkg/access"
+	"github.com/danielboothcloud/sundae/pkg/backend"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/git"
+	"github.com/danielboothcloud/sundae/pkg/utils"
 	"github.com/go-git/go-git/v5/plumbing/format/pktline"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -25,14 +25,14 @@ import (
 
 var (
 	uploadPackGitCounter = promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "soft_serve",
+		Namespace: "sundae",
 		Subsystem: "git",
 		Name:      "git_upload_pack_total",
 		Help:      "The total number of git-upload-pack requests",
 	}, []string{"repo"})
 
 	uploadArchiveGitCounter = promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "soft_serve",
+		Namespace: "sundae",
 		Subsystem: "git",
 		Name:      "git_upload_archive_total",
 		Help:      "The total number of git-upload-archive requests",
@@ -277,10 +277,10 @@ func (d *GitDaemon) handleClient(conn net.Conn) {
 
 		// Environment variables to pass down to git hooks.
 		envs := []string{
-			"SOFT_SERVE_REPO_NAME=" + name,
-			"SOFT_SERVE_REPO_PATH=" + filepath.Join(reposDir, repo),
-			"SOFT_SERVE_HOST=" + host,
-			"SOFT_SERVE_LOG_PATH=" + filepath.Join(d.cfg.DataPath, "log", "hooks.log"),
+			"SUNDAE_REPO_NAME=" + name,
+			"SUNDAE_REPO_PATH=" + filepath.Join(reposDir, repo),
+			"SUNDAE_HOST=" + host,
+			"SUNDAE_LOG_PATH=" + filepath.Join(d.cfg.DataPath, "log", "hooks.log"),
 		}
 
 		// Add git protocol environment variable.

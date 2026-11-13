@@ -3,9 +3,9 @@ package database
 import (
 	"context"
 
-	"github.com/charmbracelet/soft-serve/pkg/db"
-	"github.com/charmbracelet/soft-serve/pkg/db/models"
-	"github.com/charmbracelet/soft-serve/pkg/store"
+	"github.com/danielboothcloud/sundae/pkg/db"
+	"github.com/danielboothcloud/sundae/pkg/db/models"
+	"github.com/danielboothcloud/sundae/pkg/store"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 )

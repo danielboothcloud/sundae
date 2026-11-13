@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/soft-serve/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/config"
 )
 
 // fakeGitHub serves GET /api/v3/user/repos (the GitHub Enterprise Server

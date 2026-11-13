@@ -11,8 +11,8 @@ import (
 	"charm.land/log/v2"
 	"charm.land/ssh"
 	bm "charm.land/wish/v2/bubbletea"
-	"github.com/charmbracelet/soft-serve/pkg/openshell"
-	"github.com/charmbracelet/soft-serve/pkg/ui/pages/sessions"
+	"github.com/danielboothcloud/sundae/pkg/openshell"
+	"github.com/danielboothcloud/sundae/pkg/ui/pages/sessions"
 )
 
 // pausedPoll is how often a read by the TUI returns while an attach holds

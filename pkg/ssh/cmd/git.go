@@ -7,14 +7,14 @@ import (
 	"time"
 
 	"charm.land/log/v2"
-	"github.com/charmbracelet/soft-serve/pkg/access"
-	"github.com/charmbracelet/soft-serve/pkg/backend"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/git"
-	"github.com/charmbracelet/soft-serve/pkg/lfs"
-	"github.com/charmbracelet/soft-serve/pkg/proto"
-	"github.com/charmbracelet/soft-serve/pkg/sshutils"
-	"github.com/charmbracelet/soft-serve/pkg/utils"
+	"github.com/danielboothcloud/sundae/pkg/access"
+	"github.com/danielboothcloud/sundae/pkg/backend"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/git"
+	"github.com/danielboothcloud/sundae/pkg/lfs"
+	"github.com/danielboothcloud/sundae/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/sshutils"
+	"github.com/danielboothcloud/sundae/pkg/utils"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/spf13/cobra"
@@ -22,77 +22,77 @@ import (
 
 var (
 	uploadPackCounter = promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "soft_serve",
+		Namespace: "sundae",
 		Subsystem: "git",
 		Name:      "upload_pack_total",
 		Help:      "The total number of git-upload-pack requests",
 	}, []string{"repo"})
 
 	receivePackCounter = promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "soft_serve",
+		Namespace: "sundae",
 		Subsystem: "git",
 		Name:      "receive_pack_total",
 		Help:      "The total number of git-receive-pack requests",
 	}, []string{"repo"})
 
 	uploadArchiveCounter = promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "soft_serve",
+		Namespace: "sundae",
 		Subsystem: "git",
 		Name:      "upload_archive_total",
 		Help:      "The total number of git-upload-archive requests",
 	}, []string{"repo"})
 
 	lfsAuthenticateCounter = promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "soft_serve",
+		Namespace: "sundae",
 		Subsystem: "git",
 		Name:      "lfs_authenticate_total",
 		Help:      "The total number of git-lfs-authenticate requests",
 	}, []string{"repo", "operation"})
 
 	lfsTransferCounter = promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "soft_serve",
+		Namespace: "sundae",
 		Subsystem: "git",
 		Name:      "lfs_transfer_total",
 		Help:      "The total number of git-lfs-transfer requests",
 	}, []string{"repo", "operation"})
 
 	uploadPackSeconds = promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "soft_serve",
+		Namespace: "sundae",
 		Subsystem: "git",
 		Name:      "upload_pack_seconds_total",
 		Help:      "The total time spent on git-upload-pack requests",
 	}, []string{"repo"})
 
 	receivePackSeconds = promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "soft_serve",
+		Namespace: "sundae",
 		Subsystem: "git",
 		Name:      "receive_pack_seconds_total",
 		Help:      "The total time spent on git-receive-pack requests",
 	}, []string{"repo"})
 
 	uploadArchiveSeconds = promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "soft_serve",
+		Namespace: "sundae",
 		Subsystem: "git",
 		Name:      "upload_archive_seconds_total",
 		Help:      "The total time spent on git-upload-archive requests",
 	}, []string{"repo"})
 
 	lfsAuthenticateSeconds = promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "soft_serve",
+		Namespace: "sundae",
 		Subsystem: "git",
 		Name:      "lfs_authenticate_seconds_total",
 		Help:      "The total time spent on git-lfs-authenticate requests",
 	}, []string{"repo", "operation"})
 
 	lfsTransferSeconds = promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "soft_serve",
+		Namespace: "sundae",
 		Subsystem: "git",
 		Name:      "lfs_transfer_seconds_total",
 		Help:      "The total time spent on git-lfs-transfer requests",
 	}, []string{"repo", "operation"})
 
 	createRepoCounter = promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "soft_serve",
+		Namespace: "sundae",
 		Subsystem: "ssh",
 		Name:      "create_repo_total",
 		Help:      "The total number of create repo requests",
@@ -191,15 +191,15 @@ func gitRunE(cmd *cobra.Command, args []string) error {
 
 	// Environment variables to pass down to git hooks.
 	envs := []string{
-		"SOFT_SERVE_REPO_NAME=" + name,
-		"SOFT_SERVE_REPO_PATH=" + filepath.Join(reposDir, repoDir),
-		"SOFT_SERVE_PUBLIC_KEY=" + ak,
-		"SOFT_SERVE_LOG_PATH=" + filepath.Join(cfg.DataPath, "log", "hooks.log"),
+		"SUNDAE_REPO_NAME=" + name,
+		"SUNDAE_REPO_PATH=" + filepath.Join(reposDir, repoDir),
+		"SUNDAE_PUBLIC_KEY=" + ak,
+		"SUNDAE_LOG_PATH=" + filepath.Join(cfg.DataPath, "log", "hooks.log"),
 	}
 
 	if user != nil {
 		envs = append(envs,
-			"SOFT_SERVE_USERNAME="+user.Username(),
+			"SUNDAE_USERNAME="+user.Username(),
 		)
 	}
 

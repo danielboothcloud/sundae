@@ -1,21 +1,21 @@
 # vi: set ft=conf
 
-# start soft serve
-exec soft serve &
+# start sundae serve
+exec sundae serve &
 # wait for SSH server to start
 ensureserverrunning SSH_PORT
 
 # create user
-soft user create user1 --key "$USER1_AUTHORIZED_KEY"
+sundae user create user1 --key "$USER1_AUTHORIZED_KEY"
 
 # generate jwt token
-soft jwt
+sundae jwt
 stdout '.*\..*\..*'
-soft jwt repo
+sundae jwt repo
 stdout '.*\..*\..*'
-usoft jwt
+usundae jwt
 stdout '.*\..*\..*'
-usoft jwt repo
+usundae jwt repo
 stdout '.*\..*\..*'
 
 # stop the server

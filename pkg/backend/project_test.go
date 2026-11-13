@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/soft-serve/pkg/access"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/db"
-	"github.com/charmbracelet/soft-serve/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/access"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/db"
+	"github.com/danielboothcloud/sundae/pkg/proto"
 	"github.com/matryer/is"
 )
 
@@ -288,7 +288,7 @@ func TestCommitIdentity(t *testing.T) {
 	is.Equal(name+" <"+email+">", "alice <alice@git.example.com>")
 	f.cfg.Name = "My <Server>"
 	name, email = f.be.CommitIdentity(nil)
-	is.Equal(name+" <"+email+">", "My Server <soft-serve@git.example.com>")
+	is.Equal(name+" <"+email+">", "My Server <sundae@git.example.com>")
 }
 
 // A failure after the repository was created removes it again.

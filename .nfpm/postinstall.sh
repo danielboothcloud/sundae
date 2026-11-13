@@ -10,5 +10,5 @@ systemd-sysusers
 systemd-tmpfiles --create
 
 systemctl daemon-reload
-systemctl unmask soft-serve.service
-systemctl preset soft-serve.service
+systemctl unmask sundae.service
+systemctl preset sundae.service

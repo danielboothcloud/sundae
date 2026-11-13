@@ -9,7 +9,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-const saltySalt = "salty-soft-serve"
+const saltySalt = "salty-sundae"
 
 // HashPassword hashes the password using bcrypt.
 func HashPassword(password string) (string, error) {

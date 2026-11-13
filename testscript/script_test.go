@@ -21,9 +21,9 @@ import (
 	"time"
 
 	"github.com/charmbracelet/keygen"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/db"
-	"github.com/charmbracelet/soft-serve/pkg/test"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/db"
+	"github.com/danielboothcloud/sundae/pkg/test"
 	"github.com/rogpeppe/go-internal/testscript"
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh"
@@ -35,31 +35,31 @@ var (
 )
 
 func PrepareBuildCommand(binPath string) *exec.Cmd {
-	_, disableRaceSet := os.LookupEnv("SOFT_SERVE_DISABLE_RACE_CHECKS")
+	_, disableRaceSet := os.LookupEnv("SUNDAE_DISABLE_RACE_CHECKS")
 	if disableRaceSet {
 		// don't add the -race flag
-		return exec.Command("go", "build", "-cover", "-o", binPath, filepath.Join("..", "cmd", "soft")) //nolint:noctx
+		return exec.Command("go", "build", "-cover", "-o", binPath, filepath.Join("..", "cmd", "sundae")) //nolint:noctx
 	}
-	return exec.Command("go", "build", "-race", "-cover", "-o", binPath, filepath.Join("..", "cmd", "soft")) //nolint:noctx
+	return exec.Command("go", "build", "-race", "-cover", "-o", binPath, filepath.Join("..", "cmd", "sundae")) //nolint:noctx
 }
 
 func TestMain(m *testing.M) {
-	tmp, err := os.MkdirTemp("", "soft-serve*")
+	tmp, err := os.MkdirTemp("", "sundae*")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create temporary directory: %s", err)
 		os.Exit(1)
 	}
 	defer os.RemoveAll(tmp)
 
-	binPath = filepath.Join(tmp, "soft")
+	binPath = filepath.Join(tmp, "sundae")
 	if runtime.GOOS == "windows" {
 		binPath += ".exe"
 	}
 
-	// Build the soft binary with -cover flag.
+	// Build the sundae binary with -cover flag.
 	cmd := PrepareBuildCommand(binPath)
 	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to build soft-serve binary: %s", err)
+		fmt.Fprintf(os.Stderr, "failed to build sundae binary: %s", err)
 		os.Exit(1)
 	}
 
@@ -92,10 +92,10 @@ func TestScript(t *testing.T) {
 		UpdateScripts:       *update,
 		RequireExplicitExec: true,
 		Cmds: map[string]func(ts *testscript.TestScript, neg bool, args []string){
-			"soft":                   cmdSoft("admin", admin1.Signer()),
-			"usoft":                  cmdSoft("user1", user1.Signer()),
-			"attacksoft":             cmdSoft("attacker", attackerSigner, attacker.Signer()),
-			"ksoft":                  cmdKeylessSoft,
+			"sundae":                 cmdSundae("admin", admin1.Signer()),
+			"usundae":                cmdSundae("user1", user1.Signer()),
+			"attacksundae":           cmdSundae("attacker", attackerSigner, attacker.Signer()),
+			"ksundae":                cmdKeylessSundae,
 			"git":                    cmdGit(admin1Key),
 			"ugit":                   cmdGit(user1Key),
 			"agit":                   cmdGit(attackerKey),
@@ -109,7 +109,7 @@ func TestScript(t *testing.T) {
 			"ensureservernotrunning": cmdEnsureServerNotRunning,
 			"stopserver":             cmdStopserver,
 			"ui":                     cmdUI(admin1.Signer()),
-			"ptysoft":                cmdPtySoft(admin1.Signer()),
+			"ptysundae":              cmdPtySundae(admin1.Signer()),
 			"uui":                    cmdUI(user1.Signer()),
 		},
 		Setup: func(e *testscript.Env) error {
@@ -125,7 +125,7 @@ func TestScript(t *testing.T) {
 			httpListen := fmt.Sprintf("localhost:%d", httpPort)
 			statsPort := test.RandomPort()
 			statsListen := fmt.Sprintf("localhost:%d", statsPort)
-			serverName := "Test Soft Serve"
+			serverName := "Test Sundae"
 
 			e.Setenv("DATA_PATH", data)
 			e.Setenv("SSH_PORT", fmt.Sprintf("%d", sshPort))
@@ -140,15 +140,15 @@ func TestScript(t *testing.T) {
 			e.Setenv("SSH_KNOWN_CONFIG_FILE", filepath.Join(t.TempDir(), "config"))
 
 			// This is used to set up test specific configuration and http endpoints
-			e.Setenv("SOFT_SERVE_TESTRUN", "1")
+			e.Setenv("SUNDAE_TESTRUN", "1")
 
 			// This will disable the default lipgloss renderer colors
-			e.Setenv("SOFT_SERVE_NO_COLOR", "1")
+			e.Setenv("SUNDAE_NO_COLOR", "1")
 
-			// Soft Serve debug environment variables
+			// Sundae debug environment variables
 			for _, env := range []string{
-				"SOFT_SERVE_DEBUG",
-				"SOFT_SERVE_VERBOSE",
+				"SUNDAE_DEBUG",
+				"SUNDAE_VERBOSE",
 			} {
 				if v, ok := os.LookupEnv(env); ok {
 					e.Setenv(env, v)
@@ -168,7 +168,7 @@ func TestScript(t *testing.T) {
 			cfg.Stats.ListenAddr = statsListen
 			cfg.LFS.Enabled = true
 
-			// Parse os SOFT_SERVE environment variables
+			// Parse os SUNDAE environment variables
 			if err := cfg.ParseEnv(); err != nil {
 				return err
 			}
@@ -198,7 +198,7 @@ func TestScript(t *testing.T) {
 	})
 }
 
-func cmdSoft(user string, keys ...ssh.Signer) func(ts *testscript.TestScript, neg bool, args []string) {
+func cmdSundae(user string, keys ...ssh.Signer) func(ts *testscript.TestScript, neg bool, args []string) {
 	return func(ts *testscript.TestScript, neg bool, args []string) {
 		cli, err := ssh.Dial(
 			"tcp",
@@ -223,9 +223,9 @@ func cmdSoft(user string, keys ...ssh.Signer) func(ts *testscript.TestScript, ne
 	}
 }
 
-// cmdKeylessSoft is like cmdSoft, but authenticates with zero public keys,
+// cmdKeylessSundae is like cmdSundae, but authenticates with zero public keys,
 // forcing keyboard-interactive auth -- the actual "no key offered at all"
-// path that allow-keyless gates. This is distinct from cmdSoft/cmdUsoft
+// path that allow-keyless gates. This is distinct from cmdSundae/cmdUsundae
 // style helpers, which always offer a real key (registered or not) and so
 // only ever exercise the anon-access path, not allow-keyless.
 //
@@ -234,7 +234,7 @@ func cmdSoft(user string, keys ...ssh.Signer) func(ts *testscript.TestScript, ne
 // request at all when stdin isn't a tty ("we did not send a packet, disable
 // method"), regardless of BatchMode. golang.org/x/crypto/ssh has no such
 // restriction, so it's used directly here instead of shelling out.
-func cmdKeylessSoft(ts *testscript.TestScript, neg bool, args []string) {
+func cmdKeylessSundae(ts *testscript.TestScript, neg bool, args []string) {
 	cli, err := ssh.Dial(
 		"tcp",
 		net.JoinHostPort("localhost", ts.Getenv("SSH_PORT")),
@@ -261,8 +261,8 @@ func cmdKeylessSoft(ts *testscript.TestScript, neg bool, args []string) {
 	check(ts, sess.Run(strings.Join(args, " ")), neg)
 }
 
-// cmdPtySoft is like cmdSoft, but requests a PTY first (like ssh -t).
-func cmdPtySoft(key ssh.Signer) func(ts *testscript.TestScript, neg bool, args []string) {
+// cmdPtySundae is like cmdSundae, but requests a PTY first (like ssh -t).
+func cmdPtySundae(key ssh.Signer) func(ts *testscript.TestScript, neg bool, args []string) {
 	return func(ts *testscript.TestScript, neg bool, args []string) {
 		cli, err := ssh.Dial(
 			"tcp",
@@ -611,7 +611,7 @@ func cmdEnsureServerNotRunning(ts *testscript.TestScript, neg bool, args []strin
 
 func cmdStopserver(ts *testscript.TestScript, neg bool, args []string) {
 	// stop the server
-	resp, err := http.DefaultClient.Head(fmt.Sprintf("%s/__stop", ts.Getenv("SOFT_SERVE_HTTP_PUBLIC_URL"))) //nolint:noctx
+	resp, err := http.DefaultClient.Head(fmt.Sprintf("%s/__stop", ts.Getenv("SUNDAE_HTTP_PUBLIC_URL"))) //nolint:noctx
 	check(ts, err, neg)
 	resp.Body.Close()
 	time.Sleep(time.Second * 2) // Allow some time for the server to stop
@@ -621,7 +621,7 @@ func setupPostgres(t testscript.T, cfg *config.Config) (func(), error) {
 	// Indicates postgres
 	// Create a disposable database
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
-	dbName := fmt.Sprintf("softserve_test_%d", rnd.Int63())
+	dbName := fmt.Sprintf("sundae_test_%d", rnd.Int63())
 	dbDsn := cfg.DB.DataSource
 	if dbDsn == "" {
 		cfg.DB.DataSource = "postgres://postgres@localhost:5432/postgres?sslmode=disable"

@@ -1,12 +1,12 @@
 # vi: set ft=conf
 [windows] dos2unix help.txt
 
-# start soft serve
-exec soft serve --sync-hooks &
+# start sundae serve
+exec sundae serve --sync-hooks &
 # wait for SSH server to start
 ensureserverrunning SSH_PORT
 
-soft --help
+sundae --help
 cmpenv stdout help.txt
 
 # stop the server
@@ -14,7 +14,7 @@ cmpenv stdout help.txt
 [windows] ! stderr .
 
 -- help.txt --
-Soft Serve is a self-hostable Git server for the command line.
+Sundae is a self-hostable Git server for the command line.
 
 Usage:
   ssh -p $SSH_PORT localhost [command]

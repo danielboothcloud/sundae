@@ -18,8 +18,8 @@ import (
 	"charm.land/log/v2"
 	"github.com/NVIDIA/OpenShell/sdk/go/openshell/v1/fake"
 	"github.com/NVIDIA/OpenShell/sdk/go/openshell/v1/types"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/events"
 )
 
 // monitorClient is a Client for Monitor tests: sandboxes live in the SDK's
@@ -143,7 +143,7 @@ func (c *monitorClient) suspendCount(sandbox string) int {
 	return c.suspends[sandbox]
 }
 
-// addSession adds a sandbox Soft Serve created for the user's session.
+// addSession adds a sandbox Sundae created for the user's session.
 func (c *monitorClient) addSession(user testUser, repo, name string, phase types.SandboxPhase) string {
 	sandbox := SessionSandboxName(user.name, repo, name)
 	labels := ownerLabels(user)
@@ -332,7 +332,7 @@ func TestParseOsewaListFixtures(t *testing.T) {
 		t.Fatalf("working: %+v", s)
 	}
 	rec := recordOf(s.Status)
-	if rec.State != events.StateWorking || rec.App != "soft-test" || rec.Msg != "Building" || rec.Progress == nil || *rec.Progress != 40 || rec.Kind != "" {
+	if rec.State != events.StateWorking || rec.App != "sundae-test" || rec.Msg != "Building" || rec.Progress == nil || *rec.Progress != 40 || rec.Kind != "" {
 		t.Fatalf("working record: %+v", rec)
 	}
 
@@ -797,7 +797,7 @@ func TestMonitorAutoPark(t *testing.T) {
 	h.poll(t)
 	h.events()
 
-	// Not yet: the idle window starts when Soft Serve first sees it.
+	// Not yet: the idle window starts when Sundae first sees it.
 	h.clk.advance(30*time.Minute - time.Second)
 	h.poll(t)
 	if h.mc.suspendCount(sb) != 0 {
@@ -851,7 +851,7 @@ func TestMonitorAutoParkActivity(t *testing.T) {
 	h.mc.set(sb, "o1", osewaSessionInfo{ID: "o1", Status: st("idle", "", "")})
 	h.poll(t)
 
-	// Attached (e.g. a bridge before Soft Serve restarted, or another
+	// Attached (e.g. a bridge before Sundae restarted, or another
 	// client) at 20m: the window restarts.
 	h.clk.advance(20 * time.Minute)
 	h.mc.set(sb, "o1", osewaSessionInfo{ID: "o1", Attached: 1, Status: st("idle", "", "")})

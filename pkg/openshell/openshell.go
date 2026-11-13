@@ -1,7 +1,7 @@
-// Package openshell launches and resumes OpenShell agent sessions for Soft
-// Serve repositories.
+// Package openshell launches and resumes OpenShell agent sessions for Sundae
+// repositories.
 //
-// Soft Serve stores no session state: sandbox names are derived from the
+// Sundae stores no session state: sandbox names are derived from the
 // user, repository and session name (see SessionSandboxName), the OpenShell
 // gateway is the source of truth for which sessions exist, and each sandbox
 // carries its user, repository, session name and profile as annotations.
@@ -26,7 +26,7 @@ import (
 	"time"
 
 	v1 "github.com/NVIDIA/OpenShell/sdk/go/openshell/v1"
-	"github.com/charmbracelet/soft-serve/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/config"
 )
 
 // Re-exported SDK types so callers don't need to import the SDK directly.
@@ -42,20 +42,20 @@ type (
 )
 
 const (
-	// LabelUserID is the sandbox label holding the owning Soft Serve user ID.
-	LabelUserID = "soft-serve.user-id"
-	// LabelManaged marks sandboxes created by Soft Serve.
-	LabelManaged = "soft-serve.managed"
-	// AnnotationUser holds the owning Soft Serve username.
-	AnnotationUser = "soft-serve.user"
+	// LabelUserID is the sandbox label holding the owning Sundae user ID.
+	LabelUserID = "sundae.user-id"
+	// LabelManaged marks sandboxes created by Sundae.
+	LabelManaged = "sundae.managed"
+	// AnnotationUser holds the owning Sundae username.
+	AnnotationUser = "sundae.user"
 	// AnnotationRepo holds the repository name the sandbox was created for.
-	AnnotationRepo = "soft-serve.repo"
+	AnnotationRepo = "sundae.repo"
 	// AnnotationSession holds the session name. Sandboxes created before
 	// named sessions have none; they are the DefaultSessionName session.
-	AnnotationSession = "soft-serve.session"
+	AnnotationSession = "sundae.session"
 	// AnnotationProfile holds the profile the session was created from;
 	// empty when none applied.
-	AnnotationProfile = "soft-serve.profile"
+	AnnotationProfile = "sundae.profile"
 
 	// DefaultSessionName is the session name used when none is given. Its
 	// sandbox keeps the name SandboxName gives, so sandboxes created before
@@ -114,7 +114,7 @@ type SandboxRequest struct {
 	Annotations map[string]string
 }
 
-// Client is the narrow OpenShell surface Soft Serve needs. It is satisfied by
+// Client is the narrow OpenShell surface Sundae needs. It is satisfied by
 // the SDK-backed client returned from New, and in tests by one built on the
 // SDK's fake sandbox client.
 type Client interface {
@@ -436,7 +436,7 @@ const maxNameLen = 63
 const hashSep = "--"
 
 // SandboxName returns the deterministic sandbox name for a user's session on
-// a repository: "soft-<user>-<repo>" sanitized to a DNS label of at most 63
+// a repository: "sundae-<user>-<repo>" sanitized to a DNS label of at most 63
 // characters.
 //
 // A short hash of the raw (user, repo) pair is appended whenever the plain
@@ -450,7 +450,7 @@ const hashSep = "--"
 // name can never equal another pair's hashed name.
 func SandboxName(user, repo string) string {
 	u, r := dnsClean(user), dnsClean(repo)
-	parts := []string{"soft"}
+	parts := []string{"sundae"}
 	for _, p := range []string{u, r} {
 		if p != "" {
 			parts = append(parts, p)
@@ -477,7 +477,7 @@ func SandboxName(user, repo string) string {
 // The DefaultSessionName session (or an empty name) keeps SandboxName(user,
 // repo), so sandboxes created before named sessions stay that session.
 //
-// Any other session is always hashed: "soft-<user>-<repo>-<session>" with the
+// Any other session is always hashed: "sundae-<user>-<repo>-<session>" with the
 // user and repository parts truncated so the session name stays readable,
 // then "--" and the first 8 hex digits of SHA-256 of user, repo and session
 // joined by NUL bytes. It can never equal a plain SandboxName, which never
@@ -493,11 +493,11 @@ func SessionSandboxName(user, repo, session string) string {
 	suffix := hashSep + hex.EncodeToString(sum[:])[:8]
 
 	s := dnsClean(session)
-	if max := maxNameLen - len(suffix) - len("soft--x"); len(s) > max {
+	if max := maxNameLen - len(suffix) - len("sundae--x"); len(s) > max {
 		s = strings.TrimRight(s[:max], "-")
 	}
 
-	parts := []string{"soft"}
+	parts := []string{"sundae"}
 	for _, p := range []string{dnsClean(user), dnsClean(repo)} {
 		if p != "" {
 			parts = append(parts, p)

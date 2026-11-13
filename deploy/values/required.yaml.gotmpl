@@ -5,7 +5,7 @@
   the ones that do not use these values, so helmfile stops before it installs
   anything rather than after the gateway is already up. It renders no values.
 */ -}}
-{{- $_ := .Values | get "openshell.sandboxImage" "" | required "openshell.sandboxImage is required: it is the image for the sandboxes Soft Serve starts and has no default. Set it in deploy/environment.yaml or with --state-values-set openshell.sandboxImage=<image>" -}}
-{{- $_ := .Values | get "softServe.image.repository" "" | required "softServe.image.repository is required: set it in deploy/environment.yaml" -}}
-{{- $_ := .Values | get "softServe.image.tag" "" | required "softServe.image.tag is required: no Soft Serve image is published, so build and push one (see deploy/README.md), then set its tag in deploy/environment.yaml or with --state-values-set softServe.image.tag=<tag>" -}}
+{{- $_ := .Values | get "openshell.sandboxImage" "" | required "openshell.sandboxImage is required: it is the image for the sandboxes Sundae starts and has no default. Set it in deploy/environment.yaml or with --state-values-set openshell.sandboxImage=<image>" -}}
+{{- $_ := .Values | get "sundae.image.repository" "" | required "sundae.image.repository is required: set it in deploy/environment.yaml" -}}
+{{- $_ := .Values | get "sundae.image.tag" "" | required "sundae.image.tag is required: no Sundae image is published, so build and push one (see deploy/README.md), then set its tag in deploy/environment.yaml or with --state-values-set sundae.image.tag=<tag>" -}}
 {}

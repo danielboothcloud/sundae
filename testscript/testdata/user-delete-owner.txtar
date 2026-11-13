@@ -1,25 +1,25 @@
 # vi: set ft=conf
 
-# start soft serve
-exec soft serve &
+# start sundae serve
+exec sundae serve &
 # wait for SSH server to start
 ensureserverrunning SSH_PORT
 
-soft user create foo --key "$USER1_AUTHORIZED_KEY"
-usoft repo create foo-repo
+sundae user create foo --key "$USER1_AUTHORIZED_KEY"
+usundae repo create foo-repo
 
 # a user who owns repositories cannot be removed until they are gone
-! soft user delete foo
+! sundae user delete foo
 stderr '.*still owns repositories.*foo-repo.*'
-soft repo list
+sundae repo list
 stdout 'foo-repo'
 
-soft repo delete foo-repo
-soft user delete foo
-! soft user info foo
+sundae repo delete foo-repo
+sundae user delete foo
+! sundae user info foo
 stderr '.*not found.*'
 # a placeholder to reset stderr
-soft help
+sundae help
 
 # stop the server
 [windows] stopserver

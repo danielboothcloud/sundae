@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "sundae.fullname" . }}-config
+  labels:
+    {{- include "sundae.labels" . | nindent 4 }}
+data:
+  # Mounted read-only at {{ .Values.configMountPath }}/config.yaml. Sundae only reads it.
+  config.yaml: |
+    {{- include "sundae.config" . | nindent 4 }}

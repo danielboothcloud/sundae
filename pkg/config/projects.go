@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/charmbracelet/soft-serve/pkg/utils"
+	"github.com/danielboothcloud/sundae/pkg/utils"
 )
 
 // ProjectsConfig configures how new repositories are initialised: the
@@ -18,7 +18,7 @@ import (
 // environment form for it.
 type ProjectsConfig struct {
 	// Templates are named repository templates. A template is an existing
-	// Soft Serve repository whose tree, at a ref and optionally under a
+	// Sundae repository whose tree, at a ref and optionally under a
 	// subdirectory, becomes the single initial commit of a new repository.
 	// The template's history is not copied.
 	Templates map[string]ProjectTemplate `yaml:"templates"`
@@ -26,7 +26,7 @@ type ProjectsConfig struct {
 
 // ProjectTemplate is a named repository template.
 type ProjectTemplate struct {
-	// Repo is the Soft Serve repository the template is read from.
+	// Repo is the Sundae repository the template is read from.
 	// Required. Whoever creates a repository from the template needs read
 	// access to it.
 	Repo string `yaml:"repo"`

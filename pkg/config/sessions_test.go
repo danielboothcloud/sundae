@@ -219,13 +219,13 @@ func TestSessionsUnknownKeys(t *testing.T) {
 func TestSessionsEnv(t *testing.T) {
 	is := is.New(t)
 	td := t.TempDir()
-	t.Setenv("SOFT_SERVE_DATA_PATH", td)
-	t.Setenv("SOFT_SERVE_SESSIONS_OSEWA_BINARY_DIR", "/opt/osewa")
-	t.Setenv("SOFT_SERVE_SESSIONS_OSEWA_PORT", "7401")
-	t.Setenv("SOFT_SERVE_SESSIONS_STATUS_POLL_INTERVAL", "20s")
-	t.Setenv("SOFT_SERVE_SESSIONS_SUSPEND_ENABLED", "false")
-	t.Setenv("SOFT_SERVE_SESSIONS_SUSPEND_AFTER", "45m")
-	t.Setenv("SOFT_SERVE_SESSIONS_SIGNALS_KEEP", "500")
+	t.Setenv("SUNDAE_DATA_PATH", td)
+	t.Setenv("SUNDAE_SESSIONS_OSEWA_BINARY_DIR", "/opt/osewa")
+	t.Setenv("SUNDAE_SESSIONS_OSEWA_PORT", "7401")
+	t.Setenv("SUNDAE_SESSIONS_STATUS_POLL_INTERVAL", "20s")
+	t.Setenv("SUNDAE_SESSIONS_SUSPEND_ENABLED", "false")
+	t.Setenv("SUNDAE_SESSIONS_SUSPEND_AFTER", "45m")
+	t.Setenv("SUNDAE_SESSIONS_SIGNALS_KEEP", "500")
 	cfg := DefaultConfig()
 	is.NoErr(cfg.ParseEnv())
 	is.Equal(cfg.Sessions.Osewa.BinaryDir, "/opt/osewa")
@@ -235,16 +235,16 @@ func TestSessionsEnv(t *testing.T) {
 	is.Equal(cfg.Sessions.Signals.Keep, 500)
 
 	envs := strings.Join(cfg.Environ(), "\n")
-	is.True(strings.Contains(envs, "SOFT_SERVE_SESSIONS_OSEWA_BINARY_DIR=/opt/osewa\n"))
-	is.True(strings.Contains(envs, "SOFT_SERVE_SESSIONS_OSEWA_PORT=7401"))
-	is.True(strings.Contains(envs, "SOFT_SERVE_SESSIONS_STATUS_POLL_INTERVAL=20s"))
-	is.True(strings.Contains(envs, "SOFT_SERVE_SESSIONS_SUSPEND_ENABLED=false"))
-	is.True(strings.Contains(envs, "SOFT_SERVE_SESSIONS_SUSPEND_AFTER=45m0s"))
-	is.True(strings.Contains(envs, "SOFT_SERVE_SESSIONS_SIGNALS_KEEP=500"))
+	is.True(strings.Contains(envs, "SUNDAE_SESSIONS_OSEWA_BINARY_DIR=/opt/osewa\n"))
+	is.True(strings.Contains(envs, "SUNDAE_SESSIONS_OSEWA_PORT=7401"))
+	is.True(strings.Contains(envs, "SUNDAE_SESSIONS_STATUS_POLL_INTERVAL=20s"))
+	is.True(strings.Contains(envs, "SUNDAE_SESSIONS_SUSPEND_ENABLED=false"))
+	is.True(strings.Contains(envs, "SUNDAE_SESSIONS_SUSPEND_AFTER=45m0s"))
+	is.True(strings.Contains(envs, "SUNDAE_SESSIONS_SIGNALS_KEEP=500"))
 
 	// Hook subprocesses rebuild the config from Environ.
 	for _, kv := range cfg.Environ() {
-		if k, v, ok := strings.Cut(kv, "="); ok && strings.HasPrefix(k, "SOFT_SERVE_SESSIONS_") {
+		if k, v, ok := strings.Cut(kv, "="); ok && strings.HasPrefix(k, "SUNDAE_SESSIONS_") {
 			t.Setenv(k, v)
 		}
 	}

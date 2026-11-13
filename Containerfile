@@ -1,13 +1,13 @@
-# Builds Soft Serve from source into a small non-root runtime image.
+# Builds Sundae from source into a small non-root runtime image.
 #
-# The Dockerfile next to this file is the goreleaser one: it copies a prebuilt
-# binary and is not meant to be built by hand. Use this file instead:
+# The Dockerfile next to this file only packages a prebuilt binary. Use this
+# file instead:
 #
 #   podman build -f Containerfile \
 #     --build-arg VERSION="$(git describe --tags --always --dirty)" \
 #     --build-arg COMMIT_SHA="$(git rev-parse HEAD)" \
 #     --build-arg COMMIT_DATE="$(git log -1 --format=%cI)" \
-#     -t ghcr.io/danielboothcloud/soft-serve:<tag> .
+#     -t ghcr.io/danielboothcloud/sundae:<tag> .
 #
 # See deploy/README.md for the full build and push commands.
 
@@ -32,7 +32,7 @@ ARG TARGETOS
 ARG TARGETARCH
 
 # Stamped into the binary; see the Version/CommitSHA/CommitDate vars in
-# cmd/soft/main.go. All three may be left empty.
+# cmd/sundae/main.go. All three may be left empty.
 ARG VERSION=""
 ARG COMMIT_SHA=""
 ARG COMMIT_DATE=""
@@ -46,13 +46,13 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" \
     go build -trimpath -buildvcs=false \
       -ldflags "-s -w -X main.Version=${VERSION} -X main.CommitSHA=${COMMIT_SHA} -X main.CommitDate=${COMMIT_DATE}" \
-      -o /out/soft ./cmd/soft
+      -o /out/sundae ./cmd/sundae
 
 # --- osewa -------------------------------------------------------------------
-# Both Linux builds of the pinned osewa, whatever the target: Soft Serve
+# Both Linux builds of the pinned osewa, whatever the target: Sundae
 # uploads the one matching a sandbox's architecture when the sandbox image
-# lacks osewa (sessions.osewa.binary_dir). Kept gzipped as released, so Soft
-# Serve and the sandbox can check them against the published checksums.
+# lacks osewa (sessions.osewa.binary_dir). Kept gzipped as released, so Sundae
+# and the sandbox can check them against the published checksums.
 FROM --platform=$BUILDPLATFORM ${RUNTIME_IMAGE} AS osewa
 
 ARG OSEWA_VERSION
@@ -77,37 +77,37 @@ RUN set -eu; \
 # --- runtime -----------------------------------------------------------------
 FROM ${RUNTIME_IMAGE}
 
-# git:     Soft Serve shells out to git for every repository operation.
-# bash:    the git hooks Soft Serve writes into each repository are bash scripts.
+# git:     Sundae shells out to git for every repository operation.
+# bash:    the git hooks Sundae writes into each repository are bash scripts.
 # openssh: the ssh client, used by git for mirrors pulled over SSH.
 RUN apk add --no-cache git bash openssh-client-default
 
 # A fixed, numeric, non-root identity (10001:10001). The Helm chart's pod
 # security context uses the same IDs, and its fsGroup makes the data volume
 # writable.
-RUN addgroup -g 10001 -S soft \
- && adduser -u 10001 -S -G soft -h /home/soft -s /bin/bash soft \
- && mkdir -p /soft-serve \
- && chown 10001:10001 /soft-serve
+RUN addgroup -g 10001 -S sundae \
+ && adduser -u 10001 -S -G sundae -h /home/sundae -s /bin/bash sundae \
+ && mkdir -p /sundae \
+ && chown 10001:10001 /sundae
 
-# The hooks call the binary through SOFT_SERVE_BIN_PATH, which Soft Serve sets
+# The hooks call the binary through SUNDAE_BIN_PATH, which Sundae sets
 # to its own path. Keep it here so existing repositories keep working.
-COPY --from=build /out/soft /usr/local/bin/soft
+COPY --from=build /out/sundae /usr/local/bin/sundae
 
-# The osewa builds Soft Serve uploads to sandboxes (sessions.osewa.binary_dir).
-COPY --from=osewa /out/osewa/ /usr/local/share/soft-serve/osewa/
+# The osewa builds Sundae uploads to sandboxes (sessions.osewa.binary_dir).
+COPY --from=osewa /out/osewa/ /usr/local/share/sundae/osewa/
 
 # All state lives here: repositories, the SQLite database, SSH host keys.
-ENV SOFT_SERVE_DATA_PATH="/soft-serve"
+ENV SUNDAE_DATA_PATH="/sundae"
 # Workaround to prevent slowness when running with a tty (from the Dockerfile).
 ENV CI="1"
 
-WORKDIR /soft-serve
-VOLUME /soft-serve
+WORKDIR /sundae
+VOLUME /sundae
 
 # SSH, HTTP, stats, git daemon.
 EXPOSE 23231/tcp 23232/tcp 23233/tcp 9418/tcp
 
 USER 10001:10001
 
-ENTRYPOINT ["/usr/local/bin/soft", "serve"]
+ENTRYPOINT ["/usr/local/bin/sundae", "serve"]

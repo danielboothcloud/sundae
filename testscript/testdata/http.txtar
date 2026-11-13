@@ -6,24 +6,24 @@
 # convert crlf to lf on windows
 [windows] dos2unix http1.txt http2.txt http3.txt goget.txt gitclone.txt
 
-# start soft serve
-exec soft serve &
+# start sundae serve
+exec sundae serve &
 # wait for SSH server to start
 ensureserverrunning SSH_PORT
 
 # create user
-soft user create user1 --key "$USER1_AUTHORIZED_KEY"
+sundae user create user1 --key "$USER1_AUTHORIZED_KEY"
 
 # create access token
-soft token create --expires-in '1h' 'repo2'
+sundae token create --expires-in '1h' 'repo2'
 stdout 'ss_*'
 cp stdout tokenfile
 envfile TOKEN=tokenfile
-soft token create --expires-in '1ns' 'repo2'
+sundae token create --expires-in '1ns' 'repo2'
 stdout 'ss_*'
 cp stdout etokenfile
 envfile ETOKEN=etokenfile
-usoft token create 'repo2'
+usundae token create 'repo2'
 stdout 'ss_*'
 cp stdout utokenfile
 envfile UTOKEN=utokenfile
@@ -93,7 +93,7 @@ curl -XPOST http://localhost:$HTTP_PORT/repo299/subpackage?go-get=1
 stdout '404.*'
 
 # set private
-soft repo private repo2 true
+sundae repo private repo2 true
 
 # allow access private
 curl -XPOST -H 'Accept: application/vnd.git-lfs+json' -H 'Content-Type: application/vnd.git-lfs+json' http://$TOKEN@localhost:$HTTP_PORT/repo2.git/info/lfs/objects/batch
@@ -189,8 +189,8 @@ curl http://$TOKEN@localhost:$HTTP_PORT/repo2/subpackage?go-get=1
 cmpenv stdout goget.txt
 
 # go-get resolves a readable repo nested under an unreadable one
-soft repo create outer -p
-soft repo create outer/inner
+sundae repo create outer -p
+sundae repo create outer/inner
 curl http://localhost:$HTTP_PORT/outer/inner/pkg?go-get=1
 stdout 'go-import.*/outer/inner git'
 curl http://localhost:$HTTP_PORT/outer/pkg?go-get=1

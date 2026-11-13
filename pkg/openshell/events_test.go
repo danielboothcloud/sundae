@@ -9,7 +9,7 @@ import (
 
 	"charm.land/log/v2"
 	"github.com/NVIDIA/OpenShell/sdk/go/openshell/v1/types"
-	"github.com/charmbracelet/soft-serve/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/events"
 )
 
 // withBus attaches a bus to the harness's manager and returns a subscription
@@ -59,7 +59,7 @@ func TestStartPublishesLifecycle(t *testing.T) {
 	if steps(got) != "created,ready" {
 		t.Fatalf("first start = %s", steps(got))
 	}
-	want := events.Session{User: "alice", Repo: "infra", Name: "main", Sandbox: "soft-alice-infra"}
+	want := events.Session{User: "alice", Repo: "infra", Name: "main", Sandbox: "sundae-alice-infra"}
 	for _, l := range got {
 		if l.Session != want || l.Op != "" || l.Reason != "" {
 			t.Fatalf("lifecycle = %+v", l)
@@ -79,11 +79,11 @@ func TestStartPublishesResumeOfStoppedSandbox(t *testing.T) {
 	h := newHarness(t)
 	sub := withBus(t, h)
 	h.fc.AddSandbox("default", &types.Sandbox{
-		Name:   "soft-alice-r",
+		Name:   "sundae-alice-r",
 		Labels: ownerLabels(alice),
 		Status: types.SandboxStatus{Phase: types.SandboxStopped},
 	})
-	h.exec.box("soft-alice-r").dirs["/sandbox/r"] = true
+	h.exec.box("sundae-alice-r").dirs["/sandbox/r"] = true
 	if _, err := h.mgr.Start(context.Background(), StartOptions{User: alice, Repo: "r"}); err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestStartPublishesFailure(t *testing.T) {
 		if steps(got) != "created,failed" {
 			t.Fatalf("steps = %s", steps(got))
 		}
-		if f := got[1]; f.Op != "start" || !strings.Contains(f.Reason, "boom") || f.Session.Sandbox != "soft-alice-r" {
+		if f := got[1]; f.Op != "start" || !strings.Contains(f.Reason, "boom") || f.Session.Sandbox != "sundae-alice-r" {
 			t.Fatalf("failed = %+v", f)
 		}
 	})
@@ -127,7 +127,7 @@ func TestStartPublishesFailure(t *testing.T) {
 		h := newHarness(t)
 		sub := withBus(t, h)
 		h.fc.AddSandbox("default", &types.Sandbox{
-			Name:   "soft-alice-r",
+			Name:   "sundae-alice-r",
 			Labels: map[string]string{LabelUserID: "99"},
 			Status: types.SandboxStatus{Phase: types.SandboxReady},
 		})
@@ -162,7 +162,7 @@ func TestEndPublishesLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := drain(t, sub)
-	if steps(got) != "ended" || got[0].Session.Sandbox != "soft-alice-r" || got[0].Session.Repo != "r" {
+	if steps(got) != "ended" || got[0].Session.Sandbox != "sundae-alice-r" || got[0].Session.Repo != "r" {
 		t.Fatalf("lifecycle = %+v", got)
 	}
 
@@ -175,7 +175,7 @@ func TestEndPublishesLifecycle(t *testing.T) {
 	}
 
 	// A sandbox that is not alice's fails.
-	h.fc.AddSandbox("default", &types.Sandbox{Name: "soft-alice-x", Labels: map[string]string{LabelUserID: "99"}})
+	h.fc.AddSandbox("default", &types.Sandbox{Name: "sundae-alice-x", Labels: map[string]string{LabelUserID: "99"}})
 	if _, err := h.mgr.End(ctx, alice, "x", ""); !errors.Is(err, ErrNotOwned) {
 		t.Fatalf("err = %v", err)
 	}

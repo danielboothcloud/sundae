@@ -13,11 +13,11 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/OpenShell/sdk/go/openshell/v1/types"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/openshell"
-	"github.com/charmbracelet/soft-serve/pkg/proto"
-	"github.com/charmbracelet/soft-serve/pkg/s3store/s3test"
-	"github.com/charmbracelet/soft-serve/pkg/sshutils"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/openshell"
+	"github.com/danielboothcloud/sundae/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/s3store/s3test"
+	"github.com/danielboothcloud/sundae/pkg/sshutils"
 	"github.com/matryer/is"
 )
 
@@ -39,15 +39,15 @@ func (s *snapshotScripts) run(name string, command []string) (*openshell.ExecRes
 		return &openshell.ExecResult{ExitCode: 1, Stderr: []byte(msg)}, true
 	}
 	switch command[3] {
-	case "soft-serve-snapshot-probe":
+	case "sundae-snapshot-probe":
 		if s.conflict {
 			return &openshell.ExecResult{Stdout: []byte(a[0] + "\n")}, true
 		}
 		return &openshell.ExecResult{}, true
-	case "soft-serve-snapshot-pack":
+	case "sundae-snapshot-pack":
 		sum := md5.Sum([]byte("archive of " + name)) //nolint:gosec
-		return &openshell.ExecResult{Stdout: fmt.Appendf(nil, "spool=/tmp/soft-serve/snapshot.x\nsize=%d\nmd5=%s\nwarning=\n", len("archive of "+name), hex.EncodeToString(sum[:]))}, true
-	case "soft-serve-snapshot-upload":
+		return &openshell.ExecResult{Stdout: fmt.Appendf(nil, "spool=/tmp/sundae/snapshot.x\nsize=%d\nmd5=%s\nwarning=\n", len("archive of "+name), hex.EncodeToString(sum[:]))}, true
+	case "sundae-snapshot-upload":
 		req, _ := http.NewRequestWithContext(context.Background(), http.MethodPut, a[1], strings.NewReader("archive of "+name))
 		for _, h := range a[2:] {
 			k, v, _ := strings.Cut(h, ": ")
@@ -63,7 +63,7 @@ func (s *snapshotScripts) run(name string, command []string) (*openshell.ExecRes
 			return fail(fmt.Sprintf("S3 refused the upload: HTTP %d: %s", resp.StatusCode, body))
 		}
 		return &openshell.ExecResult{Stdout: []byte("status=200\n")}, true
-	case "soft-serve-snapshot-restore":
+	case "sundae-snapshot-restore":
 		resp, err := http.Get(a[0]) //nolint:noctx
 		if err != nil {
 			return fail(err.Error())
@@ -101,8 +101,8 @@ func newSnapshotTestContext(t *testing.T, configure func(*config.Config)) (conte
 
 // alice is user 2: the admin is 1.
 const (
-	cmdSnapKey   = "soft-serve/sessions/2/soft-alice-r.tar.gz"
-	cmdMarkerKey = "soft-serve/sessions/2/soft-alice-r.parked.json"
+	cmdSnapKey   = "sundae/sessions/2/sundae-alice-r.tar.gz"
+	cmdMarkerKey = "sundae/sessions/2/sundae-alice-r.parked.json"
 )
 
 func TestSessionEndSnapshotAndForce(t *testing.T) {
@@ -123,14 +123,14 @@ func TestSessionEndSnapshotAndForce(t *testing.T) {
 	is.True(err != nil)
 	is.True(strings.Contains(err.Error(), "the snapshot of /sandbox failed")) // got: err
 	is.True(strings.Contains(err.Error(), "session end r --force"))
-	is.Equal(fc.phase("soft-alice-r"), types.SandboxReady)
+	is.Equal(fc.phase("sundae-alice-r"), types.SandboxReady)
 
 	// --force ends it without one.
 	_, stderr, err := runSessionCmd(t, ctx, "end", "r", "--force")
 	is.NoErr(err)
 	is.True(strings.Contains(stderr, "ending the session without it (--force)"))
 	is.True(strings.Contains(stderr, "Session ended"))
-	is.Equal(fc.phase("soft-alice-r"), types.SandboxPhase(""))
+	is.Equal(fc.phase("sundae-alice-r"), types.SandboxPhase(""))
 
 	// With S3 back, end saves /sandbox and start restores it.
 	srv.SetFail(nil)
@@ -141,7 +141,7 @@ func TestSessionEndSnapshotAndForce(t *testing.T) {
 	is.True(strings.Contains(stderr, "Session ended; /sandbox is saved in s3://snapshots/"+cmdSnapKey)) // got: stderr
 	o, ok := srv.Object(cmdSnapKey)
 	is.True(ok)
-	is.Equal(string(o.Body), "archive of soft-alice-r")
+	is.Equal(string(o.Body), "archive of sundae-alice-r")
 
 	_, stderr, err = runSessionCmd(t, noPty, "start", "r", "-d")
 	is.NoErr(err)
@@ -155,7 +155,7 @@ func TestSessionEndSnapshotAndForce(t *testing.T) {
 func TestSessionStartRestorePrompt(t *testing.T) {
 	is := is.New(t)
 	ctx, fc, srv, scripts := newSnapshotTestContext(t, nil)
-	srv.PutObject(cmdSnapKey, []byte("archive of soft-alice-r"), nil)
+	srv.PutObject(cmdSnapKey, []byte("archive of sundae-alice-r"), nil)
 	scripts.conflict = true
 	tty := context.WithValue(ctx, sshutils.ContextKeySession, &fakeSSHSession{})
 	noPty := context.WithValue(ctx, sshutils.ContextKeySession, &fakeSSHSession{noPty: true})
@@ -174,14 +174,14 @@ func TestSessionStartRestorePrompt(t *testing.T) {
 	// Without a terminal, the error says what to do.
 	_, err := run(noPty, "", "start", "r", "-d")
 	is.True(err != nil && strings.Contains(err.Error(), "--restore") && strings.Contains(err.Error(), "--fresh")) // got: err
-	is.Equal(fc.phase("soft-alice-r"), types.SandboxPhase(""))
+	is.Equal(fc.phase("sundae-alice-r"), types.SandboxPhase(""))
 
 	// No: nothing is started.
 	stderr, err := run(tty, "n\r", "start", "r", "-d")
 	is.True(err != nil)
 	is.True(strings.Contains(stderr, "Restore the snapshot over them? [y/N] n\r\n")) // got: stderr
 	is.Equal(len(scripts.restored), 0)
-	is.Equal(fc.phase("soft-alice-r"), types.SandboxPhase(""))
+	is.Equal(fc.phase("sundae-alice-r"), types.SandboxPhase(""))
 
 	// Ctrl-C cancels.
 	_, err = run(tty, "\x03", "start", "r", "-d")
@@ -191,8 +191,8 @@ func TestSessionStartRestorePrompt(t *testing.T) {
 	stderr, err = run(tty, "yx\x7fes\r", "start", "r", "-d")
 	is.NoErr(err)
 	is.True(strings.Contains(stderr, "Restored /sandbox from s3://snapshots/"+cmdSnapKey)) // got: stderr
-	is.Equal(scripts.restored, []string{"archive of soft-alice-r"})
-	is.Equal(fc.phase("soft-alice-r"), types.SandboxReady)
+	is.Equal(scripts.restored, []string{"archive of sundae-alice-r"})
+	is.Equal(fc.phase("sundae-alice-r"), types.SandboxReady)
 }
 
 func TestSessionParkToSnapshotAndList(t *testing.T) {
@@ -208,7 +208,7 @@ func TestSessionParkToSnapshotAndList(t *testing.T) {
 	_, stderr, err := runSessionCmd(t, ctx, "park", "r")
 	is.NoErr(err)
 	is.True(strings.Contains(stderr, "parked to an S3 snapshot: its sandbox was deleted and its program stopped")) // got: stderr
-	is.Equal(fc.phase("soft-alice-r"), types.SandboxPhase(""))
+	is.Equal(fc.phase("sundae-alice-r"), types.SandboxPhase(""))
 	_, ok := srv.Object(cmdMarkerKey)
 	is.True(ok)
 	_, stderr, err = runSessionCmd(t, ctx, "park", "r")
@@ -236,8 +236,8 @@ func TestSessionParkToSnapshotAndList(t *testing.T) {
 	is.NoErr(err)
 	is.True(strings.Contains(stderr, "was parked to a snapshot of /sandbox"))
 	is.True(strings.Contains(stderr, "Started bash -l again: it was not running when the session resumed (the session was parked to a snapshot")) // got: stderr
-	is.Equal(scripts.restored, []string{"archive of soft-alice-r"})
-	is.Equal(fc.phase("soft-alice-r"), types.SandboxReady)
+	is.Equal(scripts.restored, []string{"archive of sundae-alice-r"})
+	is.Equal(fc.phase("sundae-alice-r"), types.SandboxReady)
 	_, ok = srv.Object(cmdMarkerKey)
 	is.True(!ok)
 

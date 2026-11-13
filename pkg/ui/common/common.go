@@ -7,12 +7,12 @@ import (
 	"charm.land/log/v2"
 	"charm.land/ssh"
 	"github.com/alecthomas/chroma/v2/lexers"
-	"github.com/charmbracelet/soft-serve/git"
-	"github.com/charmbracelet/soft-serve/pkg/backend"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/proto"
-	"github.com/charmbracelet/soft-serve/pkg/ui/keymap"
-	"github.com/charmbracelet/soft-serve/pkg/ui/styles"
+	"github.com/danielboothcloud/sundae/git"
+	"github.com/danielboothcloud/sundae/pkg/backend"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/ui/keymap"
+	"github.com/danielboothcloud/sundae/pkg/ui/styles"
 	zone "github.com/lrstanley/bubblezone/v2"
 )
 
@@ -74,7 +74,7 @@ func (c *Common) Config() *config.Config {
 	return config.FromContext(c.ctx)
 }
 
-// Backend returns the Soft Serve backend.
+// Backend returns the Sundae backend.
 func (c *Common) Backend() *backend.Backend {
 	return backend.FromContext(c.ctx)
 }

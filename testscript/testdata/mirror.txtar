@@ -3,99 +3,99 @@
 # convert crlf to lf on windows
 [windows] dos2unix info1.txt info2.txt tree.txt
 
-# start soft serve
-exec soft serve &
+# start sundae serve
+exec sundae serve &
 # wait for SSH server to start
 ensureserverrunning SSH_PORT
 
 # import a repo
-soft repo import --mirror charmbracelet/wizard-tutorial https://github.com/charmbracelet/wizard-tutorial.git
+sundae repo import --mirror charmbracelet/wizard-tutorial https://github.com/charmbracelet/wizard-tutorial.git
 
 # check empty description file
 readfile $DATA_PATH/repos/charmbracelet/wizard-tutorial.git/description ''
 
 # check repo info
-soft repo info charmbracelet/wizard-tutorial
+sundae repo info charmbracelet/wizard-tutorial
 cmp stdout info1.txt
 
 # check repo list
-soft repo list
+sundae repo list
 stdout charmbracelet/wizard-tutorial
 
 # create a non-mirror repo
-soft repo create test-normal
-soft repo mirror test-normal
+sundae repo create test-normal
+sundae repo mirror test-normal
 stdout false
 # try to enable mirror on repo without remote - should fail
-! soft repo mirror test-normal true
+! sundae repo mirror test-normal true
 
 # disable mirror
-soft repo mirror charmbracelet/wizard-tutorial false
-soft repo mirror charmbracelet/wizard-tutorial
+sundae repo mirror charmbracelet/wizard-tutorial false
+sundae repo mirror charmbracelet/wizard-tutorial
 stdout false
 # verify git config no longer has mirror
 readfile $DATA_PATH/repos/charmbracelet/wizard-tutorial.git/config
 ! stdout 'mirror = true'
 
 # re-enable mirror
-soft repo mirror charmbracelet/wizard-tutorial true
-soft repo mirror charmbracelet/wizard-tutorial
+sundae repo mirror charmbracelet/wizard-tutorial true
+sundae repo mirror charmbracelet/wizard-tutorial
 stdout true
 # verify git config has mirror again
 readfile $DATA_PATH/repos/charmbracelet/wizard-tutorial.git/config
 stdout 'mirror = true'
 
 # set project name
-soft repo project-name charmbracelet/wizard-tutorial wizard-tutorial
-soft repo list
+sundae repo project-name charmbracelet/wizard-tutorial wizard-tutorial
+sundae repo list
 stdout wizard-tutorial
 
 
 # check description
-soft repo description charmbracelet/wizard-tutorial
+sundae repo description charmbracelet/wizard-tutorial
 ! stdout .
 
 # set description
-soft repo description charmbracelet/wizard-tutorial "testing repo"
-soft repo description charmbracelet/wizard-tutorial
+sundae repo description charmbracelet/wizard-tutorial "testing repo"
+sundae repo description charmbracelet/wizard-tutorial
 stdout 'testing repo'
 readfile $DATA_PATH/repos/charmbracelet/wizard-tutorial.git/description 'testing repo'
 
 # rename
-soft repo rename charmbracelet/wizard-tutorial charmbracelet/test
-soft repo list
+sundae repo rename charmbracelet/wizard-tutorial charmbracelet/test
+sundae repo list
 stdout charmbracelet/test # TODO: shouldn't this still show the project-name?
 
 # check its not private
-soft repo private charmbracelet/test
+sundae repo private charmbracelet/test
 stdout false
 exists $DATA_PATH/repos/charmbracelet/test.git/git-daemon-export-ok
 
 # make it private
-soft repo private charmbracelet/test  true
-soft repo private charmbracelet/test
+sundae repo private charmbracelet/test  true
+sundae repo private charmbracelet/test
 stdout true
 ! exists $DATA_PATH/repos/charmbracelet/test.git/git-daemon-export-ok
 
 # check its not hidden
-soft repo hidden charmbracelet/test
+sundae repo hidden charmbracelet/test
 stdout false
 
 # make it hidden
-soft repo hidden charmbracelet/test  true
-soft repo hidden charmbracelet/test
+sundae repo hidden charmbracelet/test  true
+sundae repo hidden charmbracelet/test
 stdout true
 
 # print tree
-soft repo tree charmbracelet/test
+sundae repo tree charmbracelet/test
 cmp stdout tree.txt
 
 # check repo info again
-soft repo info charmbracelet/test
+sundae repo info charmbracelet/test
 cmp stdout info2.txt
 
 # get a file
-soft repo blob charmbracelet/test README.md
+sundae repo blob charmbracelet/test README.md
 stdout '.*Wizard.*'
 
 # stop the server

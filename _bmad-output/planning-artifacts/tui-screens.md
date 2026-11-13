@@ -1,4 +1,4 @@
-# Soft Serve TUI: screens
+# Sundae TUI: screens
 
 Status: draft, for shaping. Companion to `roadmap.md` (section 10). Mockups are 80 columns.
 
@@ -21,7 +21,7 @@ Read from `pkg/ssh/ui.go`, `pkg/ui/pages/selection/`, `pkg/ui/pages/repo/`, `pkg
 
 ## 2. Status vocabulary
 
-One set, used in the TUI, `soft session ls`, and ntfy titles. A glyph never appears without its word.
+One set, used in the TUI, `sundae session ls`, and ntfy titles. A glyph never appears without its word.
 
 | Glyph | Word | Colour | Meaning |
 |-------|------|--------|---------|
@@ -39,7 +39,7 @@ Sort order everywhere: blocked, error, done, working, idle, none. What needs me 
 ## 3. Frame
 
 ```
- Soft Serve                                  ▲ 1 blocked  ✓ 1 done  ● 2 working
+ Sundae                                      ▲ 1 blocked  ✓ 1 done  ● 2 working
 
  Repositories   • Sessions   Forges   About
 
@@ -57,9 +57,9 @@ Sort order everywhere: blocked, error, done, working, idle, none. What needs me 
 Today's row, plus two badges on the title line.
 
 ```
- soft-serve                         ● 2 sessions   github ↑3    Updated 2h ago
+ sundae                             ● 2 sessions   github ↑3    Updated 2h ago
  Git hub + dev server
- jj git clone ssh://git.example.com/soft-serve
+ jj git clone ssh://git.example.com/sundae
 
  infra 🔒                           ▲ 1 session    gitlab       Updated 5h ago
  Cluster config
@@ -80,10 +80,10 @@ Today's row, plus two badges on the title line.
  ▲ infra / claude-1                                 blocked · permission    4m
    Apply 3 to add, 1 to change, 0 to destroy?
 
- ✓ soft-serve / forge-sync                                          done   12m
+ ✓ sundae / forge-sync                                              done   12m
    Implemented GitHub discovery; 14 tests pass
 
- ● soft-serve / tui                                          working 40%   now
+ ● sundae / tui                                              working 40%   now
    Running go test ./pkg/ui/...
 
  ● gateway / main                                                working    2m
@@ -105,7 +105,7 @@ Today's row, plus two badges on the title line.
 ```
  New session
 
-   Repository   soft-serve
+   Repository   sundae
    Name         tui-2
    Profile      ‹ claude ›      ghcr.io/me/agent-claude:latest · claude
    Attach       yes
@@ -140,7 +140,7 @@ One flat list grouped by forge. Forges are declared in the config file, so there
 
 ```
  github · danielboothcloud               42 repos · 12 imported · synced 3m ago
-   ✓ soft-serve                          ↑3 ↓0          synced 3m
+   ✓ sundae                              ↑3 ↓0          synced 3m
    ✓ pi-aio                              ↑0 ↓2          synced 3m
      dotfiles                            not imported
      quartermaster                       not imported
@@ -149,7 +149,7 @@ One flat list grouped by forge. Forges are declared in the config file, so there
    ✓ infra                               ↑0 ↓0          synced 2h
 ```
 
-- `✓` imported. `↑n` commits on Soft Serve not on the forge, `↓n` the reverse.
+- `✓` imported. `↑n` commits on Sundae not on the forge, `↓n` the reverse.
 - Keys: `i` import, `I` import all shown (respects the filter), `r` sync now, `p` push to the forge (asks `y / N`, names the branch), `enter` open the imported repo.
 
 ## 7. Signals pane (inside Sessions)
@@ -163,11 +163,11 @@ The second pane of the Sessions tab, toggled with `e`. Sessions shows where each
 
  14:02:11  ▲ infra / claude-1         blocked · permission  Apply 3 to add, 1…
  14:02:03  ● infra / claude-1         working               Planning
- 13:58:40  ✓ soft-serve / forge-sync  done                  Implemented GitHu…
- 13:41:07  ● soft-serve / tui         working 40%           Running go test .…
- 13:40:55  ● soft-serve / tui/lint    working               golangci-lint
+ 13:58:40  ✓ sundae / forge-sync      done                  Implemented GitHu…
+ 13:41:07  ● sundae / tui             working 40%           Running go test .…
+ 13:40:55  ● sundae / tui/lint        working               golangci-lint
  13:12:00  ○ dotfiles / main          idle · parked         after 30m idle
- 12:50:19  + soft-serve / tui         created               profile claude
+ 12:50:19  + sundae / tui             created               profile claude
 
  ↑↓ navigate • enter attach • e sessions • a attention only • / filter • ? help
 ```
@@ -187,7 +187,7 @@ What limits "every signal": with status collected by polling (roadmap D5a) the f
 Added after Tags. The same rows as section 5 without the repo prefix, and the same keys, including `e` for that repo's signals.
 
 ```
- soft-serve
+ sundae
  Git hub + dev server
 
  Readme   Files   Commits   Bookmarks   Tags   • Sessions
@@ -206,7 +206,7 @@ The status bar's right end carries the attention summary while in a repo (R7).
 ## 9. Narrow terminals (phone, under 60 columns)
 
 ```
- Soft Serve       ▲1 ✓1 ●2
+ Sundae           ▲1 ✓1 ●2
 
  ‹ Sessions ›
 
@@ -214,7 +214,7 @@ The status bar's right end carries the attention summary while in a repo (R7).
    blocked · permission  4m
    Apply 3 to add, 1 to cha…
 
- ✓ soft-serve / forge-sync
+ ✓ sundae / forge-sync
    done  12m
    Implemented GitHub disco…
 ```

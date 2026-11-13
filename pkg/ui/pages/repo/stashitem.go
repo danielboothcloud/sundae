@@ -8,7 +8,7 @@ import (
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	gitm "github.com/aymanbagabas/git-module"
-	"github.com/charmbracelet/soft-serve/pkg/ui/common"
+	"github.com/danielboothcloud/sundae/pkg/ui/common"
 )
 
 // StashItem represents a stash item.

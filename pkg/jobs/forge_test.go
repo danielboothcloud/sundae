@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/soft-serve/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/config"
 )
 
 func TestRegisterForgeSync(t *testing.T) {

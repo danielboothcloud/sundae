@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"charm.land/log/v2"
-	"github.com/charmbracelet/soft-serve/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/events"
 )
 
 // KindGap is the Kind of a gap marker: a Signal that stands for signals

@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/soft-serve/pkg/backend"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/openshell"
-	"github.com/charmbracelet/soft-serve/pkg/proto"
-	"github.com/charmbracelet/soft-serve/pkg/sshutils"
+	"github.com/danielboothcloud/sundae/pkg/backend"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/openshell"
+	"github.com/danielboothcloud/sundae/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/sshutils"
 	"github.com/matryer/is"
 )
 
@@ -78,7 +78,7 @@ func TestRepoCreateTemplateProfileStart(t *testing.T) {
 	is.True(strings.Contains(stdout, "jj git clone"))
 	for _, want := range []string{
 		"Created repository app", "Initialised from template base", "Session profile: claude",
-		"Starting sandbox soft-alice-app", "Session main of app is running", "Attach with: session attach app",
+		"Starting sandbox sundae-alice-app", "Session main of app is running", "Attach with: session attach app",
 	} {
 		is.True(strings.Contains(stderr, want)) // missing: want
 	}
@@ -92,7 +92,7 @@ func TestRepoCreateTemplateProfileStart(t *testing.T) {
 	is.Equal(p, "claude")
 
 	// The session was started detached, from the profile.
-	sb := fc.sandboxes["soft-alice-app"]
+	sb := fc.sandboxes["sundae-alice-app"]
 	is.True(sb != nil)
 	is.Equal(sb.Annotations[openshell.AnnotationProfile], "claude")
 	is.Equal(len(fc.interactive), 0)
@@ -173,7 +173,7 @@ func TestRepoProfileCommand(t *testing.T) {
 	noPty := context.WithValue(ctx, sshutils.ContextKeySession, &fakeSSHSession{noPty: true})
 	_, _, err = runSessionCmd(t, noPty, "start", "r", "-d")
 	is.NoErr(err)
-	is.Equal(fc.sandboxes["soft-alice-r"].Annotations[openshell.AnnotationProfile], "shell")
+	is.Equal(fc.sandboxes["sundae-alice-r"].Annotations[openshell.AnnotationProfile], "shell")
 	_, _, err = runSessionCmd(t, noPty, "start", "r", "-d", "--name", "two", "--profile", "claude")
 	is.NoErr(err)
 	is.Equal(fc.sandboxes[openshell.SessionSandboxName("alice", "r", "two")].Annotations[openshell.AnnotationProfile], "claude")

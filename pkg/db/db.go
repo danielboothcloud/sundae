@@ -7,13 +7,13 @@ import (
 	"fmt"
 
 	"charm.land/log/v2"
-	"github.com/charmbracelet/soft-serve/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/config"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"  // postgres driver
 	_ "modernc.org/sqlite" // sqlite driver
 )
 
-// DB is the interface for a Soft Serve database.
+// DB is the interface for a Sundae database.
 type DB struct {
 	*sqlx.DB
 	logger *log.Logger

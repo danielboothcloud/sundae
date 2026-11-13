@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/soft-serve/pkg/db"
-	"github.com/charmbracelet/soft-serve/pkg/proto"
-	"github.com/charmbracelet/soft-serve/pkg/store"
-	"github.com/charmbracelet/soft-serve/pkg/webhook"
+	"github.com/danielboothcloud/sundae/pkg/db"
+	"github.com/danielboothcloud/sundae/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/store"
+	"github.com/danielboothcloud/sundae/pkg/webhook"
 	"github.com/google/uuid"
 	"github.com/matryer/is"
 	_ "modernc.org/sqlite"
@@ -45,7 +45,7 @@ func TestWebhookDeliveriesAreScopedToRepository(t *testing.T) {
 
 	const (
 		secretBody      = "private-repo-payload"
-		secretSignature = "X-SoftServe-Signature: sha256=leaked-signature\n"
+		secretSignature = "X-Sundae-Signature: sha256=leaked-signature\n"
 	)
 	deliveryID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	is.NoErr(store.FromContext(ctx).CreateWebhookDelivery(

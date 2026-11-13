@@ -3,18 +3,18 @@
 # convert crlf to lf on windows
 [windows] dos2unix info1.txt info2.txt
 
-# start soft serve
-exec soft serve &
+# start sundae serve
+exec sundae serve &
 # wait for SSH server to start
 ensureserverrunning SSH_PORT
 
 # get original username
-soft info
+sundae info
 cmpenv stdout info1.txt
 
 # set another username
-soft set-username test
-soft info
+sundae set-username test
+sundae info
 cmpenv stdout info2.txt
 
 # stop the server

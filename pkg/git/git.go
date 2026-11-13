@@ -10,7 +10,7 @@ import (
 
 	"charm.land/log/v2"
 	gitm "github.com/aymanbagabas/git-module"
-	"github.com/charmbracelet/soft-serve/git"
+	"github.com/danielboothcloud/sundae/git"
 	"github.com/go-git/go-git/v5/plumbing/format/pktline"
 )
 

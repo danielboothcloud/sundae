@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2/table"
-	"github.com/charmbracelet/soft-serve/pkg/forge"
-	"github.com/charmbracelet/soft-serve/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/forge"
+	"github.com/danielboothcloud/sundae/pkg/proto"
 	"github.com/spf13/cobra"
 )
 
@@ -29,7 +29,7 @@ func ForgeCommand() *cobra.Command {
 		Short: "Discover, import, sync and push GitHub and GitLab repositories",
 		Long: `Work with the forges (GitHub, GitLab) declared in the server config.
 
-Sync never rewrites or deletes a Soft Serve branch. Upstream branches and tags
+Sync never rewrites or deletes a Sundae branch. Upstream branches and tags
 are fetched into refs/remotes/<forge>/heads/* and refs/remotes/<forge>/tags/*;
 a local branch strictly behind its upstream is fast-forwarded, a missing one
 is created, and one that is ahead or has diverged is left alone. Pushing to a
@@ -175,7 +175,7 @@ func forgeImportCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "import FORGE [OWNER/REPO...]",
 		Short: "Import forge repositories",
-		Long: `Import forge repositories as new Soft Serve repositories named
+		Long: `Import forge repositories as new Sundae repositories named
 <prefix>/<owner>/<repo> (prefix defaults to the forge name), or with --all
 every listed repository the forge's include/exclude patterns let through that
 is not imported yet.
@@ -236,8 +236,8 @@ func forgeSyncCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sync [FORGE [REPOSITORY]]",
 		Short: "Sync imported repositories now",
-		Long: `Sync now: every forge, one forge, or one repository of a forge (by its Soft
-Serve name or its forge path). Local branches are only created or
+		Long: `Sync now: every forge, one forge, or one repository of a forge (by its Sundae
+name or its forge path). Local branches are only created or
 fast-forwarded; see "forge --help".`,
 		Args:              cobra.RangeArgs(0, 2),
 		PersistentPreRunE: checkIfServerAdmin,

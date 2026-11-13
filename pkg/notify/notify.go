@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"charm.land/log/v2"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/events"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -27,7 +27,7 @@ import (
 const queueSize = 64
 
 var notificationsCounter = promauto.NewCounterVec(prometheus.CounterOpts{
-	Namespace: "soft_serve",
+	Namespace: "sundae",
 	Subsystem: "notifications",
 	Name:      "total",
 	Help:      "Notifications by sink and result: sent, failed (rejected, or retries exhausted) or dropped (queue full).",

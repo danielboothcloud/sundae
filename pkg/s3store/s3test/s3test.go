@@ -1,6 +1,6 @@
 // Package s3test is an in-memory S3 server for tests. It serves one bucket,
 // path-style, and checks every request's AWS Signature Version 4 itself,
-// header-signed or presigned, independently of the signer Soft Serve uses:
+// header-signed or presigned, independently of the signer Sundae uses:
 // a request whose signature, payload hash, Content-MD5 or expiry does not
 // hold is refused as S3 would refuse it.
 package s3test
@@ -28,7 +28,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/soft-serve/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/config"
 )
 
 // Credentials the server accepts.

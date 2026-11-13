@@ -1,34 +1,34 @@
 # vi: set ft=conf
 
-# start soft serve
-exec soft serve &
+# start sundae serve
+exec sundae serve &
 # wait for SSH server to start
 ensureserverrunning SSH_PORT
 
 # test repositories tab
 ui '"    q"'
 cp stdout home.txt
-grep 'Test Soft Serve' home.txt
+grep 'Test Sundae' home.txt
 grep '• Repositories' home.txt
 grep 'No items' home.txt
 
 # test about tab
 ui '"\t    q"'
 cp stdout about.txt
-grep 'Create a `.soft-serve` repository and add a `README.md` file' about.txt
+grep 'Create a `.sundae` repository and add a `README.md` file' about.txt
 
 # add a new repo
-soft repo create .soft-serve -n 'Config' -d '"Test Soft Serve"'
-soft repo description .soft-serve
-stdout 'Test Soft Serve'
-soft repo project-name .soft-serve
+sundae repo create .sundae -n 'Config' -d '"Test Sundae"'
+sundae repo description .sundae
+stdout 'Test Sundae'
+sundae repo project-name .sundae
 stdout 'Config'
 
 # clone repo
-git clone ssh://localhost:$SSH_PORT/.soft-serve config
+git clone ssh://localhost:$SSH_PORT/.sundae config
 
 # create readme file
-mkfile ./config/README.md '# Hello World\nTest Soft Serve'
+mkfile ./config/README.md '# Hello World\nTest Sundae'
 git -C config add -A
 git -C config commit -m 'Initial commit'
 git -C config push origin HEAD
@@ -37,15 +37,15 @@ git -C config push origin HEAD
 ui '"    q"'
 cp stdout home2.txt
 grep 'Config' home2.txt
-grep 'Test Soft Serve' home2.txt
-grep 'git clone ssh://localhost:.*/.soft-serve' home2.txt
+grep 'Test Sundae' home2.txt
+grep 'git clone ssh://localhost:.*/.sundae' home2.txt
 
 # test about tab
 ui '"\t      q"'
 cp stdout about2.txt
 grep '• About' about2.txt
 grep 'Hello World' about2.txt
-grep 'Test Soft Serve' about2.txt
+grep 'Test Sundae' about2.txt
 
 # stop the server
 [windows] stopserver

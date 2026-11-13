@@ -28,87 +28,87 @@
 #   collaborator
 # - Webhook deliveries cannot be read across repositories
 
-# start soft serve
-exec soft serve &
+# start sundae serve
+exec sundae serve &
 # wait for SSH server to start
 ensureserverrunning SSH_PORT
 
 # create regular, non-admin users
-soft user create user1 --key "$USER1_AUTHORIZED_KEY"
-soft user create boss --key "$ATTACKER_AUTHORIZED_KEY"
-soft user info user1
+sundae user create user1 --key "$USER1_AUTHORIZED_KEY"
+sundae user create boss --key "$ATTACKER_AUTHORIZED_KEY"
+sundae user info user1
 stdout 'Admin: false'
 
 # The attacker creates repositories named after the arguments they intend to
 # pass to the global commands. They own these, so they are repo-admin of them.
-usoft repo create user1
-usoft repo create victim
-usoft repo create true
-usoft repo create admin-access
-usoft repo create admin
+usundae repo create user1
+usundae repo create victim
+usundae repo create true
+usundae repo create admin-access
+usundae repo create admin
 
 # Repo-admin access must not authorize global user commands.
-! usoft user set-admin user1 true
-! usoft user set-admin victim true
-! usoft user create victim
-! usoft user delete admin
-! usoft user list
-! usoft user info admin
-! usoft user set-username admin victim
-! usoft user add-pubkey admin "$ADMIN2_AUTHORIZED_KEY"
-! usoft user remove-pubkey admin "$ADMIN1_AUTHORIZED_KEY"
+! usundae user set-admin user1 true
+! usundae user set-admin victim true
+! usundae user create victim
+! usundae user delete admin
+! usundae user list
+! usundae user info admin
+! usundae user set-username admin victim
+! usundae user add-pubkey admin "$ADMIN2_AUTHORIZED_KEY"
+! usundae user remove-pubkey admin "$ADMIN1_AUTHORIZED_KEY"
 
 # Repo-admin access must not authorize global settings commands.
-! usoft settings anon-access admin-access
-! usoft settings anon-access read-write
-! usoft settings allow-keyless true
+! usundae settings anon-access admin-access
+! usundae settings anon-access read-write
+! usundae settings allow-keyless true
 
 # a placeholder to reset stderr
-soft help
+sundae help
 
 # The attacker is still not an admin, and settings are unchanged.
-soft user info user1
+sundae user info user1
 stdout 'Admin: false'
-soft settings anon-access
+sundae settings anon-access
 stdout 'read-only.*'
 
 # Collaborator grants are bounded by the caller's own access level.
-soft repo create shared
-soft repo collab add shared user1 read-write
-soft repo collab add shared boss admin-access
+sundae repo create shared
+sundae repo collab add shared user1 read-write
+sundae repo collab add shared boss admin-access
 
 # user1 is read-write on "shared" and must not be able to grant admin-access.
-! usoft repo collab add shared user1 admin-access
+! usundae repo collab add shared user1 admin-access
 # ...nor remove a collaborator ranked above them.
-! usoft repo collab remove shared boss
+! usundae repo collab remove shared boss
 # ...nor demote one by overwriting the grant.
-! usoft repo collab add shared boss read-only
+! usundae repo collab add shared boss read-only
 
 # a placeholder to reset stderr
-soft help
+sundae help
 
 # boss is still an admin-access collaborator, and user1 did not escalate.
-soft repo collab list shared
+sundae repo collab list shared
 stdout 'boss'
 
 # Granting at or below the caller's own level still works.
-soft user create peer
-usoft repo collab add shared peer read-only
-soft repo collab list shared
+sundae user create peer
+usundae repo collab add shared peer read-only
+sundae repo collab list shared
 stdout 'peer'
 
 # Webhook deliveries must be scoped to the named repository. The attacker has
 # admin access to their own repo "user1", which must not expose the webhook
 # deliveries of "shared" (these include full request URLs, headers, bodies).
 new-webhook WH_SHARED
-soft repo webhook create shared $WH_SHARED -e push
-soft repo webhook list shared
+sundae repo webhook create shared $WH_SHARED -e push
+sundae repo webhook list shared
 stdout '1.*'
-! usoft repo webhook deliveries list user1 1
-! usoft repo webhook deliveries get user1 1 00000000-0000-0000-0000-000000000000
+! usundae repo webhook deliveries list user1 1
+! usundae repo webhook deliveries get user1 1 00000000-0000-0000-0000-000000000000
 
 # a placeholder to reset stderr
-soft help
+sundae help
 
 # stop the server
 [windows] stopserver

@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"charm.land/log/v2"
-	"github.com/charmbracelet/soft-serve/pkg/events"
-	"github.com/charmbracelet/soft-serve/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/proto"
 	gossh "golang.org/x/crypto/ssh"
 )
 

@@ -10,18 +10,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/soft-serve/pkg/access"
+	"github.com/danielboothcloud/sundae/pkg/access"
 	"github.com/matryer/is"
 )
 
 func TestParseMultipleKeys(t *testing.T) {
 	is := is.New(t)
 	td := t.TempDir()
-	is.NoErr(os.Setenv("SOFT_SERVE_INITIAL_ADMIN_KEYS", "testdata/k1.pub\nssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFxIobhwtfdwN7m1TFt9wx3PsfvcAkISGPxmbmbauST8 a@b"))
-	is.NoErr(os.Setenv("SOFT_SERVE_DATA_PATH", td))
+	is.NoErr(os.Setenv("SUNDAE_INITIAL_ADMIN_KEYS", "testdata/k1.pub\nssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFxIobhwtfdwN7m1TFt9wx3PsfvcAkISGPxmbmbauST8 a@b"))
+	is.NoErr(os.Setenv("SUNDAE_DATA_PATH", td))
 	t.Cleanup(func() {
-		is.NoErr(os.Unsetenv("SOFT_SERVE_INITIAL_ADMIN_KEYS"))
-		is.NoErr(os.Unsetenv("SOFT_SERVE_DATA_PATH"))
+		is.NoErr(os.Unsetenv("SUNDAE_INITIAL_ADMIN_KEYS"))
+		is.NoErr(os.Unsetenv("SUNDAE_DATA_PATH"))
 	})
 	cfg := DefaultConfig()
 	is.NoErr(cfg.ParseEnv())
@@ -33,8 +33,8 @@ func TestParseMultipleKeys(t *testing.T) {
 
 func TestMergeInitAdminKeys(t *testing.T) {
 	is := is.New(t)
-	is.NoErr(os.Setenv("SOFT_SERVE_INITIAL_ADMIN_KEYS", "testdata/k1.pub"))
-	t.Cleanup(func() { is.NoErr(os.Unsetenv("SOFT_SERVE_INITIAL_ADMIN_KEYS")) })
+	is.NoErr(os.Setenv("SUNDAE_INITIAL_ADMIN_KEYS", "testdata/k1.pub"))
+	t.Cleanup(func() { is.NoErr(os.Unsetenv("SUNDAE_INITIAL_ADMIN_KEYS")) })
 	cfg := &Config{
 		DataPath:         t.TempDir(),
 		InitialAdminKeys: []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFxIobhwtfdwN7m1TFt9wx3PsfvcAkISGPxmbmbauST8 a@b"},
@@ -68,23 +68,23 @@ func TestCustomConfigLocation(t *testing.T) {
 	is := is.New(t)
 	td := t.TempDir()
 	t.Cleanup(func() {
-		is.NoErr(os.Unsetenv("SOFT_SERVE_CONFIG_LOCATION"))
+		is.NoErr(os.Unsetenv("SUNDAE_CONFIG_LOCATION"))
 	})
 
 	// Test that we get data from the custom file location, and not from the data dir.
-	is.NoErr(os.Setenv("SOFT_SERVE_CONFIG_LOCATION", "testdata/config.yaml"))
-	is.NoErr(os.Setenv("SOFT_SERVE_DATA_PATH", td))
+	is.NoErr(os.Setenv("SUNDAE_CONFIG_LOCATION", "testdata/config.yaml"))
+	is.NoErr(os.Setenv("SUNDAE_DATA_PATH", td))
 	cfg := DefaultConfig()
 	is.NoErr(cfg.Parse())
 	is.Equal(cfg.Name, "Test server name")
 	// If we unset the custom location, then use the default location.
-	is.NoErr(os.Unsetenv("SOFT_SERVE_CONFIG_LOCATION"))
+	is.NoErr(os.Unsetenv("SUNDAE_CONFIG_LOCATION"))
 	cfg = DefaultConfig()
-	is.Equal(cfg.Name, "Soft Serve")
+	is.Equal(cfg.Name, "Sundae")
 	// Test that if the custom config location doesn't exist, default to datapath config.
-	is.NoErr(os.Setenv("SOFT_SERVE_CONFIG_LOCATION", "testdata/config_nonexistent.yaml"))
+	is.NoErr(os.Setenv("SUNDAE_CONFIG_LOCATION", "testdata/config_nonexistent.yaml"))
 	cfg = DefaultConfig()
-	is.Equal(cfg.Name, "Soft Serve")
+	is.Equal(cfg.Name, "Sundae")
 }
 
 func TestDefaultRepoDisabledByDefault(t *testing.T) {
@@ -94,9 +94,9 @@ func TestDefaultRepoDisabledByDefault(t *testing.T) {
 
 func TestParseDefaultRepo(t *testing.T) {
 	is := is.New(t)
-	is.NoErr(os.Setenv("SOFT_SERVE_DEFAULT_REPO", "gitops"))
+	is.NoErr(os.Setenv("SUNDAE_DEFAULT_REPO", "gitops"))
 	t.Cleanup(func() {
-		is.NoErr(os.Unsetenv("SOFT_SERVE_DEFAULT_REPO"))
+		is.NoErr(os.Unsetenv("SUNDAE_DEFAULT_REPO"))
 	})
 	cfg := DefaultConfig()
 	is.NoErr(cfg.ParseEnv())
@@ -112,9 +112,9 @@ func TestParseDefaultRepoFromFile(t *testing.T) {
 
 func TestParseMultipleHeaders(t *testing.T) {
 	is := is.New(t)
-	is.NoErr(os.Setenv("SOFT_SERVE_HTTP_CORS_ALLOWED_HEADERS", "Accept,Accept-Language,User-Agent"))
+	is.NoErr(os.Setenv("SUNDAE_HTTP_CORS_ALLOWED_HEADERS", "Accept,Accept-Language,User-Agent"))
 	t.Cleanup(func() {
-		is.NoErr(os.Unsetenv("SOFT_SERVE_HTTP_CORS_ALLOWED_HEADERS"))
+		is.NoErr(os.Unsetenv("SUNDAE_HTTP_CORS_ALLOWED_HEADERS"))
 	})
 	cfg := DefaultConfig()
 	is.NoErr(cfg.ParseEnv())
@@ -127,9 +127,9 @@ func TestParseMultipleHeaders(t *testing.T) {
 
 func TestParseMultipleOrigins(t *testing.T) {
 	is := is.New(t)
-	is.NoErr(os.Setenv("SOFT_SERVE_HTTP_CORS_ALLOWED_ORIGINS", "http://example.com,https://example.com"))
+	is.NoErr(os.Setenv("SUNDAE_HTTP_CORS_ALLOWED_ORIGINS", "http://example.com,https://example.com"))
 	t.Cleanup(func() {
-		is.NoErr(os.Unsetenv("SOFT_SERVE_HTTP_CORS_ALLOWED_ORIGINS"))
+		is.NoErr(os.Unsetenv("SUNDAE_HTTP_CORS_ALLOWED_ORIGINS"))
 	})
 	cfg := DefaultConfig()
 	is.NoErr(cfg.ParseEnv())
@@ -142,9 +142,9 @@ func TestParseMultipleOrigins(t *testing.T) {
 
 func TestParseMultipleMethods(t *testing.T) {
 	is := is.New(t)
-	is.NoErr(os.Setenv("SOFT_SERVE_HTTP_CORS_ALLOWED_METHODS", "GET,POST,PUT"))
+	is.NoErr(os.Setenv("SUNDAE_HTTP_CORS_ALLOWED_METHODS", "GET,POST,PUT"))
 	t.Cleanup(func() {
-		is.NoErr(os.Unsetenv("SOFT_SERVE_HTTP_CORS_ALLOWED_METHODS"))
+		is.NoErr(os.Unsetenv("SUNDAE_HTTP_CORS_ALLOWED_METHODS"))
 	})
 	cfg := DefaultConfig()
 	is.NoErr(cfg.ParseEnv())
@@ -165,9 +165,9 @@ func TestAnonAccessEnvUnsetByDefault(t *testing.T) {
 
 func TestParseAnonAccessEnv(t *testing.T) {
 	is := is.New(t)
-	is.NoErr(os.Setenv("SOFT_SERVE_ANON_ACCESS", access.AdminAccess.String()))
+	is.NoErr(os.Setenv("SUNDAE_ANON_ACCESS", access.AdminAccess.String()))
 	t.Cleanup(func() {
-		is.NoErr(os.Unsetenv("SOFT_SERVE_ANON_ACCESS"))
+		is.NoErr(os.Unsetenv("SUNDAE_ANON_ACCESS"))
 	})
 	cfg := DefaultConfig()
 	is.NoErr(cfg.ParseEnv())
@@ -179,9 +179,9 @@ func TestParseAnonAccessEnv(t *testing.T) {
 // TextUnmarshaler, so it never reaches Validate as a bad value.
 func TestParseRejectsInvalidAnonAccess(t *testing.T) {
 	is := is.New(t)
-	is.NoErr(os.Setenv("SOFT_SERVE_ANON_ACCESS", "not-a-real-access-level"))
+	is.NoErr(os.Setenv("SUNDAE_ANON_ACCESS", "not-a-real-access-level"))
 	t.Cleanup(func() {
-		is.NoErr(os.Unsetenv("SOFT_SERVE_ANON_ACCESS"))
+		is.NoErr(os.Unsetenv("SUNDAE_ANON_ACCESS"))
 	})
 	cfg := DefaultConfig()
 	err := cfg.ParseEnv()
@@ -198,9 +198,9 @@ func TestAllowKeylessEnvUnsetByDefault(t *testing.T) {
 
 func TestParseAllowKeylessEnvTrue(t *testing.T) {
 	is := is.New(t)
-	is.NoErr(os.Setenv("SOFT_SERVE_ALLOW_KEYLESS", "true"))
+	is.NoErr(os.Setenv("SUNDAE_ALLOW_KEYLESS", "true"))
 	t.Cleanup(func() {
-		is.NoErr(os.Unsetenv("SOFT_SERVE_ALLOW_KEYLESS"))
+		is.NoErr(os.Unsetenv("SUNDAE_ALLOW_KEYLESS"))
 	})
 	cfg := DefaultConfig()
 	is.NoErr(cfg.ParseEnv())
@@ -210,9 +210,9 @@ func TestParseAllowKeylessEnvTrue(t *testing.T) {
 
 func TestParseAllowKeylessEnvFalse(t *testing.T) {
 	is := is.New(t)
-	is.NoErr(os.Setenv("SOFT_SERVE_ALLOW_KEYLESS", "false"))
+	is.NoErr(os.Setenv("SUNDAE_ALLOW_KEYLESS", "false"))
 	t.Cleanup(func() {
-		is.NoErr(os.Unsetenv("SOFT_SERVE_ALLOW_KEYLESS"))
+		is.NoErr(os.Unsetenv("SUNDAE_ALLOW_KEYLESS"))
 	})
 	cfg := DefaultConfig()
 	is.NoErr(cfg.ParseEnv())
@@ -238,19 +238,19 @@ func TestParseOpenShellEnv(t *testing.T) {
 	is := is.New(t)
 	td := t.TempDir()
 	envs := map[string]string{
-		"SOFT_SERVE_DATA_PATH":                 td,
-		"SOFT_SERVE_OPENSHELL_ENABLED":         "true",
-		"SOFT_SERVE_OPENSHELL_GATEWAY_ADDRESS": "https://openshell.example:8443",
-		"SOFT_SERVE_OPENSHELL_WORKSPACE":       "agents",
-		"SOFT_SERVE_OPENSHELL_IMAGE":           "ghcr.io/example/sandbox:1",
-		"SOFT_SERVE_OPENSHELL_TOKEN":           "gw-secret",
-		"SOFT_SERVE_OPENSHELL_TLS_CA":          "/tls/ca.crt",
-		"SOFT_SERVE_OPENSHELL_TLS_CERT":        "tls/tls.crt",
-		"SOFT_SERVE_OPENSHELL_TLS_KEY":         "tls/tls.key",
-		"SOFT_SERVE_OPENSHELL_INSECURE":        "true",
-		"SOFT_SERVE_OPENSHELL_CLONE_URL":       "http://soft-serve.soft-serve.svc:23232/",
-		"SOFT_SERVE_OPENSHELL_TOKEN_TTL":       "2h",
-		"SOFT_SERVE_OPENSHELL_COMMAND":         "claude",
+		"SUNDAE_DATA_PATH":                 td,
+		"SUNDAE_OPENSHELL_ENABLED":         "true",
+		"SUNDAE_OPENSHELL_GATEWAY_ADDRESS": "https://openshell.example:8443",
+		"SUNDAE_OPENSHELL_WORKSPACE":       "agents",
+		"SUNDAE_OPENSHELL_IMAGE":           "ghcr.io/example/sandbox:1",
+		"SUNDAE_OPENSHELL_TOKEN":           "gw-secret",
+		"SUNDAE_OPENSHELL_TLS_CA":          "/tls/ca.crt",
+		"SUNDAE_OPENSHELL_TLS_CERT":        "tls/tls.crt",
+		"SUNDAE_OPENSHELL_TLS_KEY":         "tls/tls.key",
+		"SUNDAE_OPENSHELL_INSECURE":        "true",
+		"SUNDAE_OPENSHELL_CLONE_URL":       "http://sundae.sundae.svc:23232/",
+		"SUNDAE_OPENSHELL_TOKEN_TTL":       "2h",
+		"SUNDAE_OPENSHELL_COMMAND":         "claude",
 	}
 	for k, v := range envs {
 		t.Setenv(k, v)
@@ -267,14 +267,14 @@ func TestParseOpenShellEnv(t *testing.T) {
 	is.Equal(oc.TLSCert, filepath.Join(td, "tls/tls.crt"))
 	is.Equal(oc.TLSKey, filepath.Join(td, "tls/tls.key"))
 	is.True(oc.Insecure)
-	is.Equal(oc.CloneURL, "http://soft-serve.soft-serve.svc:23232")
-	is.Equal(cfg.OpenShellCloneURL(), "http://soft-serve.soft-serve.svc:23232")
+	is.Equal(oc.CloneURL, "http://sundae.sundae.svc:23232")
+	is.Equal(cfg.OpenShellCloneURL(), "http://sundae.sundae.svc:23232")
 	is.Equal(oc.TokenTTL, 2*time.Hour)
 	is.Equal(oc.Command, "claude")
 
 	// The gateway token never leaks into subprocess environments.
 	for _, e := range cfg.Environ() {
-		is.True(!strings.HasPrefix(e, "SOFT_SERVE_OPENSHELL_TOKEN="))
+		is.True(!strings.HasPrefix(e, "SUNDAE_OPENSHELL_TOKEN="))
 	}
 }
 
@@ -375,11 +375,11 @@ func TestParseOpenShellTokenFileEnv(t *testing.T) {
 	td := t.TempDir()
 	writeTokenFile(t, td, "gw-token", "gw-secret\r\n")
 	envs := map[string]string{
-		"SOFT_SERVE_DATA_PATH":                 td,
-		"SOFT_SERVE_OPENSHELL_ENABLED":         "true",
-		"SOFT_SERVE_OPENSHELL_GATEWAY_ADDRESS": "https://openshell.example:8080",
-		"SOFT_SERVE_OPENSHELL_IMAGE":           "ghcr.io/example/sandbox:1",
-		"SOFT_SERVE_OPENSHELL_TOKEN_FILE":      "gw-token",
+		"SUNDAE_DATA_PATH":                 td,
+		"SUNDAE_OPENSHELL_ENABLED":         "true",
+		"SUNDAE_OPENSHELL_GATEWAY_ADDRESS": "https://openshell.example:8080",
+		"SUNDAE_OPENSHELL_IMAGE":           "ghcr.io/example/sandbox:1",
+		"SUNDAE_OPENSHELL_TOKEN_FILE":      "gw-token",
 	}
 	for k, v := range envs {
 		t.Setenv(k, v)
@@ -396,9 +396,9 @@ func TestParseOpenShellTokenFileEnv(t *testing.T) {
 
 	// The path is passed on; the token never is.
 	environ := cfg.Environ()
-	is.True(slices.Contains(environ, "SOFT_SERVE_OPENSHELL_TOKEN_FILE="+filepath.Join(td, "gw-token")))
+	is.True(slices.Contains(environ, "SUNDAE_OPENSHELL_TOKEN_FILE="+filepath.Join(td, "gw-token")))
 	for _, e := range environ {
-		is.True(!strings.HasPrefix(e, "SOFT_SERVE_OPENSHELL_TOKEN="))
+		is.True(!strings.HasPrefix(e, "SUNDAE_OPENSHELL_TOKEN="))
 	}
 }
 
@@ -493,14 +493,14 @@ func TestDefaultConfigFileParsesStrictly(t *testing.T) {
 
 	got := &Config{DataPath: cfg.DataPath}
 	is.NoErr(parseFile(got, cfg.ConfigPath()))
-	is.Equal(got.Name, "Soft Serve")
+	is.Equal(got.Name, "Sundae")
 }
 
 func TestLoadReportsEveryProblem(t *testing.T) {
 	is := is.New(t)
 	td := t.TempDir()
-	t.Setenv("SOFT_SERVE_DATA_PATH", td)
-	t.Setenv("SOFT_SERVE_OPENSHELL_TOKEN_TTL", "0s")
+	t.Setenv("SUNDAE_DATA_PATH", td)
+	t.Setenv("SUNDAE_OPENSHELL_TOKEN_TTL", "0s")
 	p := filepath.Join(td, "config.yaml")
 	is.NoErr(os.WriteFile(p, []byte(`title: "typo"
 openshell:
@@ -522,8 +522,8 @@ openshell:
 func TestLoadAppliesEnvBeforeValidating(t *testing.T) {
 	is := is.New(t)
 	td := t.TempDir()
-	t.Setenv("SOFT_SERVE_DATA_PATH", td)
-	t.Setenv("SOFT_SERVE_OPENSHELL_GATEWAY_ADDRESS", "openshell:8443")
+	t.Setenv("SUNDAE_DATA_PATH", td)
+	t.Setenv("SUNDAE_OPENSHELL_GATEWAY_ADDRESS", "openshell:8443")
 	p := filepath.Join(td, "config.yaml")
 	is.NoErr(os.WriteFile(p, []byte(`openshell:
   enabled: true

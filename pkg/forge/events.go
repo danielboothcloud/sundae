@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/charmbracelet/soft-serve/pkg/events"
-	"github.com/charmbracelet/soft-serve/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/proto"
 )
 
 // EventKind is the kind of a forge event.
@@ -27,7 +27,7 @@ const (
 type Event struct {
 	Kind  EventKind `json:"kind"`
 	Forge string    `json:"forge"`
-	// Repo is the Soft Serve repository name; Path the forge path.
+	// Repo is the Sundae repository name; Path the forge path.
 	Repo string    `json:"repo,omitempty"`
 	Path string    `json:"path,omitempty"`
 	Time time.Time `json:"time"`

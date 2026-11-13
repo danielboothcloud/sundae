@@ -66,20 +66,20 @@ func TestSuspendAndResumeSandbox(t *testing.T) {
 	}
 
 	// Suspend waits until the sandbox is Suspended.
-	add("soft-a-r", types.SandboxReady)
-	sb, err := c.SuspendSandbox(ctx, "soft-a-r")
+	add("sundae-a-r", types.SandboxReady)
+	sb, err := c.SuspendSandbox(ctx, "sundae-a-r")
 	if err != nil || sb.Status.Phase != types.SandboxSuspended || rec.waits != 1 {
 		t.Fatalf("suspend: sb=%v err=%v waits=%d", sb, err, rec.waits)
 	}
 
 	// EnsureSandbox and ResumeSandbox resume a Suspended sandbox, always
 	// with RestartIfRestoreFails.
-	sb, created, err := c.EnsureSandbox(ctx, "soft-a-r", req)
+	sb, created, err := c.EnsureSandbox(ctx, "sundae-a-r", req)
 	if err != nil || created || sb.Status.Phase != types.SandboxReady {
 		t.Fatalf("ensure suspended: sb=%v created=%v err=%v", sb, created, err)
 	}
-	add("soft-a-s", types.SandboxSuspended)
-	if sb, err := c.ResumeSandbox(ctx, "soft-a-s", labels); err != nil || sb.Status.Phase != types.SandboxReady {
+	add("sundae-a-s", types.SandboxSuspended)
+	if sb, err := c.ResumeSandbox(ctx, "sundae-a-s", labels); err != nil || sb.Status.Phase != types.SandboxReady {
 		t.Fatalf("resume suspended: sb=%v err=%v", sb, err)
 	}
 	if len(rec.resumes) != 2 || !rec.resumes[0].RestartIfRestoreFails || !rec.resumes[1].RestartIfRestoreFails {
@@ -87,9 +87,9 @@ func TestSuspendAndResumeSandbox(t *testing.T) {
 	}
 
 	// Suspending: wait for the suspend to finish, then resume.
-	add("soft-a-t", types.SandboxSuspending)
+	add("sundae-a-t", types.SandboxSuspending)
 	waits := rec.waits
-	if sb, err := c.ResumeSandbox(ctx, "soft-a-t", labels); err != nil || sb.Status.Phase != types.SandboxReady {
+	if sb, err := c.ResumeSandbox(ctx, "sundae-a-t", labels); err != nil || sb.Status.Phase != types.SandboxReady {
 		t.Fatalf("resume suspending: sb=%v err=%v", sb, err)
 	}
 	if rec.waits != waits+1 || len(rec.resumes) != 3 {
@@ -98,18 +98,18 @@ func TestSuspendAndResumeSandbox(t *testing.T) {
 
 	// Suspending a stopped sandbox is the gateway's error, not
 	// "unsupported".
-	add("soft-a-u", types.SandboxStopped)
-	if _, err := c.SuspendSandbox(ctx, "soft-a-u"); err == nil || IsSuspendUnsupported(err) {
+	add("sundae-a-u", types.SandboxStopped)
+	if _, err := c.SuspendSandbox(ctx, "sundae-a-u"); err == nil || IsSuspendUnsupported(err) {
 		t.Fatalf("suspend stopped: %v", err)
 	}
 
 	// A client without suspend support says so.
 	plain := newSDKClient("default", noSuspend{fc.Sandboxes()}, nil, nil, nil)
-	if _, err := plain.SuspendSandbox(ctx, "soft-a-r"); !errors.Is(err, ErrSuspendUnsupported) {
+	if _, err := plain.SuspendSandbox(ctx, "sundae-a-r"); !errors.Is(err, ErrSuspendUnsupported) {
 		t.Fatalf("plain suspend: %v", err)
 	}
-	add("soft-a-v", types.SandboxSuspended)
-	if _, err := plain.ResumeSandbox(ctx, "soft-a-v", labels); !errors.Is(err, ErrSuspendUnsupported) {
+	add("sundae-a-v", types.SandboxSuspended)
+	if _, err := plain.ResumeSandbox(ctx, "sundae-a-v", labels); !errors.Is(err, ErrSuspendUnsupported) {
 		t.Fatalf("plain resume: %v", err)
 	}
 }
@@ -242,7 +242,7 @@ func TestManagerPark(t *testing.T) {
 		t.Fatalf("lifecycle %+v", got)
 	}
 
-	// Absent, someone else's, not running, not Soft Serve's, bad name.
+	// Absent, someone else's, not running, not Sundae's, bad name.
 	if _, err := h.mgr.Park(ctx, alice, "r", "nope"); !errors.Is(err, ErrNoSession) {
 		t.Fatalf("absent: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestManagerPark(t *testing.T) {
 		Annotations: map[string]string{AnnotationRepo: "r"},
 		Status:      types.SandboxStatus{Phase: types.SandboxReady},
 	})
-	if _, err := h.mgr.Park(ctx, alice, "r", "foreign"); err == nil || !strings.Contains(err.Error(), "not created by Soft Serve") {
+	if _, err := h.mgr.Park(ctx, alice, "r", "foreign"); err == nil || !strings.Contains(err.Error(), "not created by Sundae") {
 		t.Fatalf("unmanaged: %v", err)
 	}
 	if _, err := h.mgr.Park(ctx, alice, "r", "Bad"); !errors.Is(err, ErrInvalidSessionName) {

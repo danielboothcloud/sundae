@@ -1,18 +1,12 @@
-# Soft Serve
+# Sundae
 
-<p>
-    <img style="width: 451px" src="https://stuff.charm.sh/soft-serve/soft-serve-header.png?0" alt="A nice rendering of some melting ice cream with the words ‘Charm Soft Serve’ next to it"><br>
-    <a href="https://github.com/charmbracelet/soft-serve/releases"><img src="https://img.shields.io/github/release/charmbracelet/soft-serve.svg" alt="Latest Release"></a>
-    <a href="https://pkg.go.dev/github.com/charmbracelet/soft-serve?tab=doc"><img src="https://godoc.org/github.com/golang/gddo?status.svg" alt="GoDoc"></a>
-    <a href="https://github.com/charmbracelet/soft-serve/actions"><img src="https://github.com/charmbracelet/soft-serve/workflows/build/badge.svg" alt="Build Status"></a>
-    <a href="https://nightly.link/charmbracelet/soft-serve/workflows/nightly/main"><img src="https://shields.io/badge/-Nightly%20Builds-orange?logo=hackthebox&logoColor=fff&style=appveyor"/></a>
-</p>
+Sundae is a self-hostable Git server for the command line, with OpenShell agent
+sessions, forges, notifications and S3 snapshots.
 
-<picture>
-  <source media="(max-width: 750px)" srcset="https://github.com/charmbracelet/soft-serve/assets/42545625/c754c746-dc4c-44a6-9c39-28649264cbf2">
-  <source media="(min-width: 750px)" width="750" srcset="https://github.com/charmbracelet/soft-serve/assets/42545625/c754c746-dc4c-44a6-9c39-28649264cbf2">
-  <img src="https://github.com/charmbracelet/soft-serve/assets/42545625/c754c746-dc4c-44a6-9c39-28649264cbf2" alt="Soft Serve screencast">
-</picture>
+Sundae is a fork of [Soft Serve](https://github.com/charmbracelet/soft-serve)
+by [Charm](https://charm.sh), released under the same MIT license. The Git
+server, the SSH TUI and most of the repository management come from Soft Serve;
+see [License](#license).
 
 - Easy to navigate TUI available over SSH
 - Clone repos over SSH, HTTP, or Git protocol
@@ -28,113 +22,81 @@
   - Repos can be public or private
   - User access tokens
 
-## Where can I see it?
+## Trying it out
 
-Just run `ssh git.charm.sh` for an example. You can also try some of the following commands:
+Once a server is running (see [Setting up a server](#setting-up-a-server))
+and has a repository named `sundae` (push this one to it, for example), try
+some of the following commands against it:
 
 ```bash
 # Jump directly to a repo in the TUI
-ssh git.charm.sh -t soft-serve
+ssh localhost -p 23231 -t sundae
 
 # Print out a directory tree for a repo
-ssh git.charm.sh repo tree soft-serve
+ssh localhost -p 23231 repo tree sundae
 
 # Print a specific file
-ssh git.charm.sh repo blob soft-serve cmd/soft/main.go
+ssh localhost -p 23231 repo blob sundae cmd/sundae/main.go
 
 # Print a file with syntax highlighting and line numbers
-ssh git.charm.sh repo blob soft-serve cmd/soft/main.go -c -l
+ssh localhost -p 23231 repo blob sundae cmd/sundae/main.go -c -l
 ```
 
-Or you can use Soft Serve to browse local repositories using `soft browse
-[directory]` or running `soft` within a Git repository.
+Or you can use Sundae to browse local repositories using `sundae browse
+[directory]` or running `sundae` within a Git repository.
 
 ## Installation
 
-Soft Serve is a single binary called `soft`. You can get it from a package
-manager:
+Sundae is a single binary called `sundae`. No prebuilt binaries, packages or
+images are published; build it from source (Go 1.26.6 or later):
 
 ```bash
-# macOS or Linux
-brew install charmbracelet/tap/soft-serve
-
-# Windows (with Winget)
-winget install charmbracelet.soft-serve
-
-# Arch Linux
-pacman -S soft-serve
-
-# Nix
-nix-env -iA nixpkgs.soft-serve
-
-# Debian/Ubuntu
-sudo mkdir -p /etc/apt/keyrings
-curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg
-echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | sudo tee /etc/apt/sources.list.d/charm.list
-sudo apt update && sudo apt install soft-serve
-
-# Fedora/RHEL
-echo '[charm]
-name=Charm
-baseurl=https://repo.charm.sh/yum/
-enabled=1
-gpgcheck=1
-gpgkey=https://repo.charm.sh/yum/gpg.key' | sudo tee /etc/yum.repos.d/charm.repo
-sudo yum install soft-serve
+git clone <this repository> sundae
+cd sundae
+go build -o sundae ./cmd/sundae
 ```
 
-You can also download a binary from the [releases][releases] page. Packages are
-available in Alpine, Debian, and RPM formats. Binaries are available for Linux,
-macOS, and Windows.
-
-[releases]: https://github.com/charmbracelet/soft-serve/releases
-
-Or just install it with `go`:
-
-```bash
-go install github.com/charmbracelet/soft-serve/cmd/soft@latest
-```
-
-A [Docker image][docker] is also available.
-
-[docker]: https://github.com/charmbracelet/soft-serve/blob/main/docker.md
+To run it in a container or on Kubernetes, build the image from the
+[`Containerfile`](Containerfile) and deploy it with the helmfile in
+[`deploy/`](deploy/README.md). [docker.md](docker.md) shows how to run the
+image with Docker or Podman.
 
 ## Setting up a server
 
-Make sure `git` is installed, then run `soft serve`. That’s it.
+Make sure `git` is installed, then run `sundae serve`. That’s it.
 
 This will create a `data` directory that will store all the repos, ssh keys,
 and database.
 
 By default, program configuration is stored within the `data` directory. But,
-this can be overridden by setting a custom path to a config file with `SOFT_SERVE_CONFIG_LOCATION`
-that is pre-created. If a config file pointed to by `SOFT_SERVE_CONFIG_LOCATION`,
+this can be overridden by setting a custom path to a config file with `SUNDAE_CONFIG_LOCATION`
+that is pre-created. If a config file pointed to by `SUNDAE_CONFIG_LOCATION`,
 the default location within the `data` dir is used for generating a default config.
 
-To change the default data path use `SOFT_SERVE_DATA_PATH` environment variable.
+To change the default data path use `SUNDAE_DATA_PATH` environment variable.
 
 ```sh
-SOFT_SERVE_DATA_PATH=/var/lib/soft-serve soft serve
+SUNDAE_DATA_PATH=/var/lib/sundae sundae serve
 ```
 
-When you run Soft Serve for the first time, make sure you have the
-`SOFT_SERVE_INITIAL_ADMIN_KEYS` environment variable is set to your ssh
+When you run Sundae for the first time, make sure you have the
+`SUNDAE_INITIAL_ADMIN_KEYS` environment variable is set to your ssh
 authorized key. Any added key to this variable will be treated as admin with
 full privileges.
 
-Using this environment variable, Soft Serve will create a new `admin` user that
+Using this environment variable, Sundae will create a new `admin` user that
 has full privileges. You can rename and change the user settings later.
 
 If you'd like a repository to exist the moment the server finishes booting,
-with no human logging in to run `repo create`, set `SOFT_SERVE_DEFAULT_REPO`
+with no human logging in to run `repo create`, set `SUNDAE_DEFAULT_REPO`
 to a repository name. This is useful for GitOps tools like ArgoCD that need a
 git remote to point at as part of their own bootstrap (e.g. from a Helm chart
 or Terraform apply):
 
 ```sh
-SOFT_SERVE_INITIAL_ADMIN_KEYS="$(cat ~/.ssh/id_ed25519.pub)" \
-SOFT_SERVE_DEFAULT_REPO=gitops \
-  soft serve
+SUNDAE_INITIAL_ADMIN_KEYS="$(cat ~/.ssh/id_ed25519.pub)" \
+SUNDAE_DEFAULT_REPO=gitops \
+  sundae serve
 ```
 
 The repository is created empty and public, exactly as if a human had run
@@ -143,11 +105,8 @@ boot, not its reachability, which is still governed entirely by the
 `anon-access`/`allow-keyless` settings described below. Booting again against
 the same data directory is a no-op if the repository already exists.
 
-Check out [Systemd][systemd] on how to run Soft Serve as a service using
-Systemd. Soft Serve packages in our Apt/Yum repositories come with Systemd
-service units.
-
-[systemd]: https://github.com/charmbracelet/soft-serve/blob/main/systemd.md
+Check out [Systemd](systemd.md) on how to run Sundae as a service using
+Systemd.
 
 ### Server Configuration
 
@@ -156,11 +115,11 @@ Once you start the server for the first time, the settings will be in
 self-explanatory and will look like this:
 
 ```yaml
-# Soft Serve Server configurations
+# Sundae Server configurations
 
 # The name of the server.
 # This is the name that will be displayed in the UI.
-name: "Soft Serve"
+name: "Sundae"
 
 # Log format to use. Valid values are "json", "logfmt", and "text".
 log_format: "text"
@@ -175,12 +134,12 @@ ssh:
   public_url: "ssh://localhost:23231"
 
   # The path to the SSH server's private key.
-  key_path: "ssh/soft_serve_host"
+  key_path: "ssh/sundae_host"
 
   # The path to the SSH server's client private key.
   # This key will be used to authenticate the server to make git requests to
   # ssh remotes.
-  client_key_path: "ssh/soft_serve_client"
+  client_key_path: "ssh/sundae_client"
 
   # The maximum number of seconds a connection can take.
   # A value of 0 means no timeout.
@@ -256,7 +215,7 @@ db:
   # The database data source name.
   # This is driver specific and can be a file path or connection string.
   # Make sure foreign key support is enabled when using SQLite.
-  data_source: "soft-serve.db?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
+  data_source: "sundae.db?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
 
 # Git LFS configuration.
 lfs:
@@ -273,7 +232,7 @@ jobs:
 #forges:
 #  - name: github
 #    kind: github
-#    token_file: /etc/soft-serve/secrets/github-token
+#    token_file: /etc/sundae/secrets/github-token
 #    include: ["me/*"]
 #    sync: 10m
 
@@ -310,7 +269,7 @@ jobs:
 #    endpoint: ""            # empty for AWS; e.g. http://rook-ceph-rgw-store.rook-ceph.svc:80
 #    region: eu-west-2
 #    bucket: agent-snapshots
-#    credentials_file: /etc/soft-serve/secrets/s3-credentials
+#    credentials_file: /etc/sundae/secrets/s3-credentials
 #    "on": [end]
 
 # Notifications about agent sessions, through ntfy. See "Notifications".
@@ -321,7 +280,7 @@ jobs:
 #    enabled: true
 #    url: https://ntfy.sh
 #    topic: my-unguessable-topic
-#    token_file: /etc/soft-serve/secrets/ntfy-token
+#    token_file: /etc/sundae/secrets/ntfy-token
 
 # The stats server configuration.
 stats:
@@ -346,52 +305,52 @@ stats:
 ```
 
 You can also use environment variables, to override these settings. All server
-settings environment variables start with `SOFT_SERVE_` followed by the setting
+settings environment variables start with `SUNDAE_` followed by the setting
 name all in uppercase. Here are some examples:
 
-- `SOFT_SERVE_NAME`: The name of the server that will appear in the TUI
-- `SOFT_SERVE_SSH_LISTEN_ADDR`: SSH listen address
-- `SOFT_SERVE_SSH_KEY_PATH`: SSH host key-pair path
-- `SOFT_SERVE_HTTP_LISTEN_ADDR`: HTTP listen address
-- `SOFT_SERVE_HTTP_PUBLIC_URL`: HTTP public URL used for cloning
-- `SOFT_SERVE_GIT_MAX_CONNECTIONS`: The number of simultaneous connections to git daemon
-- `SOFT_SERVE_ANON_ACCESS`: Overrides the `anon-access` setting (see [Authentication](#authentication))
-- `SOFT_SERVE_ALLOW_KEYLESS`: Overrides the `allow-keyless` setting (see [Authentication](#authentication))
-- `SOFT_SERVE_DEFAULT_REPO`: Repository name to create on boot if missing
-- `SOFT_SERVE_FORGES_0_NAME`, `SOFT_SERVE_FORGES_0_KIND`, ...: The first entry of `forges` (see [Forges](#forges)); list values are comma-separated
-- `SOFT_SERVE_NOTIFICATIONS_ON`, `SOFT_SERVE_NOTIFICATIONS_NTFY_ENABLED`, ...: The `notifications` section (see [Notifications](#notifications)); `on` is comma-separated
+- `SUNDAE_NAME`: The name of the server that will appear in the TUI
+- `SUNDAE_SSH_LISTEN_ADDR`: SSH listen address
+- `SUNDAE_SSH_KEY_PATH`: SSH host key-pair path
+- `SUNDAE_HTTP_LISTEN_ADDR`: HTTP listen address
+- `SUNDAE_HTTP_PUBLIC_URL`: HTTP public URL used for cloning
+- `SUNDAE_GIT_MAX_CONNECTIONS`: The number of simultaneous connections to git daemon
+- `SUNDAE_ANON_ACCESS`: Overrides the `anon-access` setting (see [Authentication](#authentication))
+- `SUNDAE_ALLOW_KEYLESS`: Overrides the `allow-keyless` setting (see [Authentication](#authentication))
+- `SUNDAE_DEFAULT_REPO`: Repository name to create on boot if missing
+- `SUNDAE_FORGES_0_NAME`, `SUNDAE_FORGES_0_KIND`, ...: The first entry of `forges` (see [Forges](#forges)); list values are comma-separated
+- `SUNDAE_NOTIFICATIONS_ON`, `SUNDAE_NOTIFICATIONS_NTFY_ENABLED`, ...: The `notifications` section (see [Notifications](#notifications)); `on` is comma-separated
 
 #### Database Configuration
 
-Soft Serve supports both SQLite and Postgres for its database. Like all other Soft Serve settings, you can change the database _driver_ and _data source_ using either `config.yaml` or environment variables. The default config uses SQLite as the default database driver.
+Sundae supports both SQLite and Postgres for its database. Like all other Sundae settings, you can change the database _driver_ and _data source_ using either `config.yaml` or environment variables. The default config uses SQLite as the default database driver.
 
-To use Postgres as your database, first create a Soft Serve database:
+To use Postgres as your database, first create a Sundae database:
 
 ```sh
-psql -h<hostname> -p<port> -U<user> -c 'CREATE DATABASE soft_serve'
+psql -h<hostname> -p<port> -U<user> -c 'CREATE DATABASE sundae'
 ```
 
-Then set the database _data source_ to point to your Postgres database. For instance, if you're running Postgres locally, using the default user `postgres` and using a database name `soft_serve`, you would have this config in your config file or environment variable:
+Then set the database _data source_ to point to your Postgres database. For instance, if you're running Postgres locally, using the default user `postgres` and using a database name `sundae`, you would have this config in your config file or environment variable:
 
 ```
 db:
   driver: "postgres"
-  data_source: "postgres://postgres@localhost:5432/soft_serve?sslmode=disable"
+  data_source: "postgres://postgres@localhost:5432/sundae?sslmode=disable"
 ```
 
 Environment variables equivalent:
 
 ```sh
-SOFT_SERVE_DB_DRIVER=postgres \
-SOFT_SERVE_DB_DATA_SOURCE="postgres://postgres@localhost:5432/soft_serve?sslmode=disable" \
-soft serve
+SUNDAE_DB_DRIVER=postgres \
+SUNDAE_DB_DATA_SOURCE="postgres://postgres@localhost:5432/sundae?sslmode=disable" \
+sundae serve
 ```
 
-You can specify a database connection password in the _data source_ url. For example, `postgres://myuser:dbpass@localhost:5432/my_soft_serve_db`.
+You can specify a database connection password in the _data source_ url. For example, `postgres://myuser:dbpass@localhost:5432/my_sundae_db`.
 
 #### LFS Configuration
 
-Soft Serve supports both Git LFS [HTTP](https://github.com/git-lfs/git-lfs/blob/main/docs/api/README.md) and [SSH](https://github.com/git-lfs/git-lfs/blob/main/docs/proposals/ssh_adapter.md) protocols out of the box, there is no need to do any extra set up.
+Sundae supports both Git LFS [HTTP](https://github.com/git-lfs/git-lfs/blob/main/docs/api/README.md) and [SSH](https://github.com/git-lfs/git-lfs/blob/main/docs/proposals/ssh_adapter.md) protocols out of the box, there is no need to do any extra set up.
 
 Use the `lfs` config section to customize your Git LFS server.
 
@@ -399,7 +358,7 @@ Use the `lfs` config section to customize your Git LFS server.
 
 #### OpenShell Agent Sessions
 
-Soft Serve can start and resume agent sessions in
+Sundae can start and resume agent sessions in
 [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) sandboxes. Each
 session has its own sandbox, with the repository cloned into
 `/sandbox/<repo>`. The session's program (a shell by default, or an agent)
@@ -425,11 +384,11 @@ ssh    -p 23231 localhost session end icecream --name review      # delete that 
 
 **Named sessions.** A user can have several sessions per repository, told
 apart by `--name` (1 to 32 lowercase letters, digits and hyphens; `main` when
-omitted). Each is its own sandbox: `main` keeps the name `soft-<user>-<repo>`
+omitted). Each is its own sandbox: `main` keeps the name `sundae-<user>-<repo>`
 sessions had before names existed, so existing sandboxes are its `main`
-session, and other names get `soft-<user>-<repo>-<name>--<hash>` (cut to 63
+session, and other names get `sundae-<user>-<repo>-<name>--<hash>` (cut to 63
 characters). The sandbox records the user, repository, session name and
-profile as annotations; Soft Serve stores no session state of its own.
+profile as annotations; Sundae stores no session state of its own.
 `session end` deletes one session and leaves the others.
 
 **Detach and re-attach.** `session start` and `session attach` need a
@@ -450,11 +409,11 @@ command. To enable it:
 openshell:
   enabled: true
   # The OpenShell gateway gRPC address (http:// = plaintext, https:// or no scheme = TLS).
-  gateway_address: "https://openshell.openshell.svc.cluster.local:8080"
+  gateway_address: "https://openshell.sundae.svc.cluster.local:8080"
   workspace: "default"
   # Sandbox image when no profile sets one. It must provide git and jj
   # (deploy/sandbox/Containerfile builds one, with osewa).
-  image: "ghcr.io/example/agent-sandbox:latest"
+  image: "ghcr.io/danielboothcloud/sundae-sandbox:<tag>"
   # Optional bearer token for the gateway. Prefer token_file, which keeps the
   # token out of this file. Set at most one of the two.
   #token: ""
@@ -469,7 +428,7 @@ openshell:
   insecure: false
   # Internal HTTP base URL that sandboxes use to clone and push.
   # Defaults to http.public_url.
-  clone_url: "http://soft-serve-http.openshell.svc.cluster.local:23232"
+  clone_url: "http://sundae-http.sundae.svc.cluster.local:23232"
   # Lifetime of the git token in a sandbox; renewed on every start and attach.
   token_ttl: "24h"
   # The program a session runs when no profile sets one, in /sandbox/<repo>.
@@ -478,7 +437,7 @@ openshell:
 sessions:
   osewa:
     # Pinned osewa builds uploaded to sandboxes whose image lacks osewa.
-    binary_dir: "/usr/local/share/soft-serve/osewa"
+    binary_dir: "/usr/local/share/sundae/osewa"
     # Loopback port of the osewa server inside each sandbox.
     port: 7322
   status:
@@ -505,17 +464,17 @@ sessions:
 
 The `openshell` settings and `sessions.osewa`, `sessions.status`,
 `sessions.suspend` and `sessions.signals` can also be set with
-`SOFT_SERVE_OPENSHELL_*` and `SOFT_SERVE_SESSIONS_OSEWA_*`,
-`SOFT_SERVE_SESSIONS_STATUS_*`, `SOFT_SERVE_SESSIONS_SUSPEND_*` and
-`SOFT_SERVE_SESSIONS_SIGNALS_*` environment variables, for example
-`SOFT_SERVE_OPENSHELL_ENABLED=true` or
-`SOFT_SERVE_SESSIONS_SUSPEND_AFTER=1h`; `sessions.profiles` and
+`SUNDAE_OPENSHELL_*` and `SUNDAE_SESSIONS_OSEWA_*`,
+`SUNDAE_SESSIONS_STATUS_*`, `SUNDAE_SESSIONS_SUSPEND_*` and
+`SUNDAE_SESSIONS_SIGNALS_*` environment variables, for example
+`SUNDAE_OPENSHELL_ENABLED=true` or
+`SUNDAE_SESSIONS_SUSPEND_AFTER=1h`; `sessions.profiles` and
 `sessions.repos` only in the file. `status.poll_interval` must be at least
 `1s`, and `suspend.after` must not be shorter than it. `signals.keep` is
 between 1 and 100000 (default 1000). When OpenShell is
 enabled, `gateway_address` and `image` are required, and a `token_file`, if
 set, must be readable and not empty. Setting both `token` and `token_file` is
-an error. `soft config check` reports every problem, naming the key.
+an error. `sundae config check` reports every problem, naming the key.
 
 **Profiles.** A new session is created from `--profile`, else from the
 repository's own profile (`repo profile`, see
@@ -529,13 +488,13 @@ profile it was created from: `--profile` and `--image` are ignored, with a
 warning, when it already exists. Profile names are DNS labels; every
 `repos` entry must name a defined profile.
 
-**osewa in the sandbox.** Soft Serve pins one osewa release (its protocol is a
+**osewa in the sandbox.** Sundae pins one osewa release (its protocol is a
 draft). On every start and attach it:
 
 1. uses `osewa` from the image's `PATH` if it is the pinned version, else
    uploads the pinned Linux build from `sessions.osewa.binary_dir` (checked
    against the release's SHA-256 here and again in the sandbox) to
-   `/sandbox/.local/lib/soft-serve/`. The Soft Serve image built from
+   `/sandbox/.local/lib/sundae/`. The Sundae image built from
    `Containerfile` carries both builds; the sandbox image from
    `deploy/sandbox/Containerfile` has osewa already. The OpenShell Go SDK has
    no file transport yet, so the upload goes through exec calls, about 55 of
@@ -544,10 +503,10 @@ draft). On every start and attach it:
    port forwarding off, unless it is running. It runs detached from the exec
    that started it, until the sandbox stops.
 3. once per sandbox, gives the bridge an osewa client identity
-   (`~/.config/soft-serve/osewa-client`) and enrols it with that server.
+   (`~/.config/sundae/osewa-client`) and enrols it with that server.
 4. starts the session's program in an osewa session in `/sandbox/<repo>`
    through `/bin/sh -l`, unless the one recorded in
-   `~/.config/soft-serve/osewa-session` is running.
+   `~/.config/sundae/osewa-session` is running.
 
 The bridge is `osewa attach` against that loopback server. Sandbox images
 other than the one in `deploy/sandbox` need `sh`, `git`, `gzip`, `base64`
@@ -556,8 +515,8 @@ has had nobody attached and no output for 24 hours.
 
 **Session status.** Agents report what they are doing with the
 [Program Status Protocol (OSC 7501)](https://www.superlogical.com/rex/docs/build/program-status);
-osewa keeps each session's latest report. While OpenShell is enabled, Soft
-Serve reads it from every running session: every `sessions.status.poll_interval`
+osewa keeps each session's latest report. While OpenShell is enabled, Sundae
+reads it from every running session: every `sessions.status.poll_interval`
 (default 10s) it lists the sandboxes it created and, in each Ready one, runs
 `osewa local ls` (one exec per sandbox, at most 8 at a time, each cut off
 after 15 seconds) and finds the session's program by the id recorded in the
@@ -566,7 +525,7 @@ and message, how many clients are attached, how long osewa has seen no
 output, whether the program exited and with what status, when the state last
 changed, and when and why the last poll failed. Each change goes on the event
 bus as a status event (so `notifications` see it), and a program exiting as
-an `exited` lifecycle event. The first poll after Soft Serve starts only
+an `exited` lifecycle event. The first poll after Sundae starts only
 records what it finds, so a restart does not notify again about every
 session; "last changed" then counts from the restart.
 
@@ -576,7 +535,7 @@ idle, then sessions that never reported:
 ```
 Repository  Name    Phase      State                           Message                   Attached  Changed
 infra       claude  Suspended  ▲ blocked · permission · parked  Apply 3 to add, 1 to cha…  0         4m
-soft-serve  main    Ready      ● working 40%                   Running go test ./pkg/…   1         now
+sundae  main    Ready      ● working 40%                   Running go test ./pkg/…   1         now
 dotfiles    main    Ready      · none                          -                         0         3h
 ```
 
@@ -602,15 +561,15 @@ newest first. Forge results are not signals.
 TIME      STATE                   SESSION                       MESSAGE
 14:02:11  ▲ blocked · permission  infra / claude-1              Apply 3 to add, 1 to change?
 14:02:03  ● working               infra / claude-1              Planning
-13:58:40  ✓ done                  soft-serve / forge-sync       Implemented GitHub discovery
+13:58:40  ✓ done                  sundae / forge-sync       Implemented GitHub discovery
 13:12:00  ○ idle · parked         dotfiles / main               parked while idle
-12:50:19  + created               soft-serve / tui              sandbox created
+12:50:19  + created               sundae / tui              sandbox created
 ```
 
 A status row has the state's glyph and word, its progress and blocked kind,
 and the message as in `session ls` (sanitised; with a PTY, `ssh -t`, each row
 is cut to the terminal's width, otherwise not cut). A child record would show
-its id after the session name (`soft-serve / tui/lint`). A lifecycle row
+its id after the session name (`sundae / tui/lint`). A lifecycle row
 shows the session's last known state with the step after it (`○ idle ·
 parked`), except `+ created`, `- ended` and `✗ failed · start`, whose message
 is the reason. Times are the server's; rows older than today show the date.
@@ -629,7 +588,7 @@ busy user can push out another's older signals. They come from polling, so a
 state that lasts less than `sessions.status.poll_interval` may never show,
 and child records never do; the first poll after a restart records what it
 finds without a signal. A complete feed needs an in-pod watcher that pushes
-every report (roadmap item C4), which is not built yet. If Soft Serve falls
+every report (roadmap item C4), which is not built yet. If Sundae falls
 behind the event bus, a `! missed` row (JSON `"type": "gap"`) marks where
 events were lost, rather than leaving a silent hole; so does a `--follow`
 reader that fell further behind than the feed keeps.
@@ -638,18 +597,18 @@ reader that fell further behind than the feed keeps.
 suspended through OpenShell, keeping its memory where the compute driver can,
 so it uses no CPU until someone comes back. A session is parked once, for the
 whole of `sessions.suspend.after` (default 30m), nobody has been attached
-(osewa counts no attached client, and Soft Serve has no bridge open on it)
+(osewa counts no attached client, and Sundae has no bridge open on it)
 and it has not reported `working`. Every other state counts as not working,
 so an agent waiting on you (`blocked`) is parked too and still reads
 `▲ blocked · parked`. A program that never reports a status must also have
 been quiet that long (osewa has seen no output from it), so a plain shell
 running a long build is not frozen. A program that has exited runs nothing,
 so its session is parked like an idle one; the next attach starts it again
-either way. Soft Serve also counts its own bridges: from the moment `session
+either way. Sundae also counts its own bridges: from the moment `session
 start` or `session attach` begins preparing a session until its bridge
 closes, however it closes, the session is not parked. The idle window starts
-again whenever Soft Serve sees a client attached, a bridge open or close, a
-`working` report, or the sandbox come back up, and when Soft Serve starts.
+again whenever Sundae sees a client attached, a bridge open or close, a
+`working` report, or the sandbox come back up, and when Sundae starts.
 Each park is a `parked` lifecycle event (`op` `auto`, or `park` for `session
 park`).
 
@@ -658,26 +617,26 @@ session (and say so), then carry on as usual; that is a `resumed` event. A
 resume asks OpenShell to boot the sandbox cleanly if its memory cannot be
 restored (`RestartIfRestoreFails`): the session stays usable with what the
 backend kept of `/sandbox`, rather than failing until it is ended. osewa's
-server and the program are gone after such a restart, so Soft Serve starts
+server and the program are gone after such a restart, so Sundae starts
 them again, as for an exited program, and tells you: `Started claude again:
 it was not running when the session resumed (it had exited, or the sandbox
 could not restore its memory and restarted cleanly)`. Whatever the program
 held in memory, such as an agent's conversation, is lost then.
 
 `session park` parks a session at once (not while a bridge is open on it);
-`session resume` resumes one without attaching. Soft Serve only parks
-sandboxes it created (labelled `soft-serve.managed=true`, with an owner and a
+`session resume` resumes one without attaching. Sundae only parks
+sandboxes it created (labelled `sundae.managed=true`, with an owner and a
 repository). Parking needs a compute driver with OpenShell's suspend-resume
 capability; the OpenShell 0.1.8 Kubernetes driver has none. When the gateway
-refuses, Soft Serve logs it once, stops trying for that sandbox until it
+refuses, Sundae logs it once, stops trying for that sandbox until it
 restarts, and `session ls --json` shows why under `unsuspendable`. Set
 `sessions.suspend.enabled: false` to not try at all, or
 `sessions.suspend.fallback: snapshot` to park such sessions to S3 instead (see
-"S3 snapshots"). After a Soft Serve restart a session that was parked before
+"S3 snapshots"). After a Sundae restart a session that was parked before
 shows no status until it is resumed: the status is kept in memory only.
 
 **Client TLS secret.** In Kubernetes, mount the gateway's client certificate
-secret, typically `openshell-client-tls`, into the Soft Serve pod and point the
+secret, typically `openshell-client-tls`, into the Sundae pod and point the
 `tls_*` settings at it:
 
 ```yaml
@@ -686,23 +645,23 @@ volumes:
     secret:
       secretName: openshell-client-tls
 containers:
-  - name: soft-serve
+  - name: sundae
     volumeMounts:
       - name: openshell-tls
         mountPath: /etc/openshell-tls
         readOnly: true
 ```
 
-**Git credentials.** On each `session start` and `session attach`, Soft Serve
+**Git credentials.** On each `session start` and `session attach`, Sundae
 issues a short-lived access token named `openshell:<sandbox>` (see
 `token_ttl`) and prunes expired ones of that name. It writes the token, as an
 `http.<clone_url>/.extraHeader` basic-auth header, to
-`/tmp/soft-serve/gitconfig` in the sandbox (mode 0600, in a 0700 directory),
+`/tmp/sundae/gitconfig` in the sandbox (mode 0600, in a 0700 directory),
 and adds that file to the sandbox user's `~/.gitconfig` as an
 `include.path`. So every git process in the sandbox, including agents in osewa
 sessions, which start with a clean environment, uses the newest token. The
 token is never in `.git/config`, `~/.gitconfig`, anything under `/sandbox`
-(so never in a snapshot of it), a command line Soft Serve builds, or the
+(so never in a snapshot of it), a command line Sundae builds, or the
 sandbox's spec; it reaches the sandbox in the environment of the exec that
 writes the file. It grants your read/write access, so agents can push.
 Processes inside the sandbox can read it. `session end` revokes it.
@@ -712,16 +671,16 @@ attach loses git access until the next one renews the file. Attach again, or
 raise `token_ttl` for long-running agents.
 
 **Sandbox egress.** The sandbox's network policy must allow git (and jj, which
-runs git) to reach Soft Serve's internal HTTP endpoint. Here is an example
+runs git) to reach Sundae's internal HTTP endpoint. Here is an example
 sandbox policy entry. Adjust the host, port and binary paths to your cluster
 and image, and the field names to your OpenShell version:
 
 ```yaml
 network_policies:
-  soft_serve_git:
-    name: soft-serve-git
+  sundae_git:
+    name: sundae-git
     endpoints:
-      - host: soft-serve-http.openshell.svc.cluster.local
+      - host: sundae-http.sundae.svc.cluster.local
         port: 23232
         protocol: rest
         access: read-write
@@ -731,16 +690,16 @@ network_policies:
       - path: /usr/bin/jj
 ```
 
-osewa needs no egress: the bridge reaches its server over loopback, and Soft
-Serve turns its update checks off.
+osewa needs no egress: the bridge reaches its server over loopback, and Sundae
+turns its update checks off.
 
 With S3 snapshots on, the sandbox also needs egress to the S3 endpoint
 (`curl` uploads and downloads the snapshot; see "S3 snapshots"):
 
 ```yaml
 network_policies:
-  soft_serve_snapshots:
-    name: soft-serve-snapshots
+  sundae_snapshots:
+    name: sundae-snapshots
     endpoints:
       - host: rook-ceph-rgw-store.rook-ceph.svc.cluster.local   # or s3.<region>.amazonaws.com, <bucket>.s3.<region>.amazonaws.com
         port: 80
@@ -759,7 +718,7 @@ or set `0`, or set `ServerAliveInterval` in your SSH client.
 
 #### S3 snapshots
 
-Soft Serve can save a session's `/sandbox` (the checkouts and the sandbox
+Sundae can save a session's `/sandbox` (the checkouts and the sandbox
 user's home) to an S3 bucket and restore it, so `session end` loses nothing
 and an idle session can be parked without a sandbox. It is off by default:
 while `snapshots.s3.enabled` is false nothing runs and nothing in the section
@@ -772,8 +731,8 @@ snapshots:
     endpoint: ""                 # empty for AWS S3; the base URL of MinIO, Ceph RGW, ...
     region: eu-west-2            # required for AWS; defaults to us-east-1 with an endpoint
     bucket: agent-snapshots      # must exist
-    prefix: soft-serve/sessions  # the default
-    credentials_file: /etc/soft-serve/secrets/s3-credentials
+    prefix: sundae/sessions  # the default
+    credentials_file: /etc/sundae/secrets/s3-credentials
     sse: ""                      # AES256, aws:kms, or "" for the bucket's default
     path_style: false            # true for most MinIO and RGW setups
     "on": [end]                  # add park for a backup before every memory-retaining park
@@ -788,14 +747,14 @@ sessions:
 holding the files `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, which is
 what a Kubernetes Secret with those keys mounts as (a Rook
 ObjectBucketClaim's, for example). It is read for every operation, so
-rotated keys need no restart, and `soft config check` reads it. The keys need
+rotated keys need no restart, and `sundae config check` reads it. The keys need
 `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` and `s3:ListBucket` on the
-prefix. They never enter a sandbox: Soft Serve signs a URL for one object
+prefix. They never enter a sandbox: Sundae signs a URL for one object
 (AWS Signature V4, valid for an hour) and the sandbox uses that.
 
-**How a snapshot moves.** The archive never passes through Soft Serve. To
-snapshot, Soft Serve runs `tar | gzip` in the sandbox into a file in
-`/tmp/soft-serve` (outside `/sandbox`), presigns a PUT that signs the
+**How a snapshot moves.** The archive never passes through Sundae. To
+snapshot, Sundae runs `tar | gzip` in the sandbox into a file in
+`/tmp/sundae` (outside `/sandbox`), presigns a PUT that signs the
 archive's MD5 and the `sse` header, and the sandbox uploads the file with
 `curl`; then the file is deleted. To restore, the sandbox streams `curl |
 gzip -d | tar -x` into `/sandbox`. The sandbox therefore needs `sh`, `tar`
@@ -818,14 +777,14 @@ want old ones gone.
 
 **What is left out.** Everything under `/sandbox` is saved except: osewa's
 runtime (`~/.config/osewa`, `~/.local/state/osewa`, the bridge's client key
-and session id under `~/.config/soft-serve`), which would point at a server
-that no longer exists, and is recreated; the osewa build Soft Serve uploads
-(`~/.local/lib/soft-serve`), uploaded and checksummed again; the XDG cache
+and session id under `~/.config/sundae`), which would point at a server
+that no longer exists, and is recreated; the osewa build Sundae uploads
+(`~/.local/lib/sundae`), uploaded and checksummed again; the XDG cache
 (`~/.cache`); and credentials: `~/.ssh`, `~/.gnupg`, `~/.netrc`,
 `~/.git-credentials`, `~/.aws`, `~/.kube`, `~/.docker/config.json`, and the
 logins of `gh`, `glab`, Claude Code (`~/.claude/.credentials.json`) and Codex
 (`~/.codex/auth.json`). Paths are relative to `/sandbox` only: a checkout's
-own `.cache` or `.ssh` is kept. Soft Serve's git token is never under
+own `.cache` or `.ssh` is kept. Sundae's git token is never under
 `/sandbox`. Anything else secret you keep in `/sandbox` (an `.env` file in a
 checkout) is in the snapshot: protect the bucket accordingly.
 
@@ -844,7 +803,7 @@ snapshot stays until the next one replaces it). If the restore fails, the new
 sandbox is deleted again and the start fails, so the next start tries again
 from scratch; no half-restored session is left. The snapshot wins over what
 the image put in the new `/sandbox` (shell start-up files) without asking. If
-the new sandbox already holds work, Soft Serve's own state or the checkout,
+the new sandbox already holds work, Sundae's own state or the checkout,
 which a new sandbox only does when a volume outlived its sandbox, the start
 asks first: `Restore the snapshot over them? [y/N]` (files the snapshot has
 replace those in the sandbox; files only in the sandbox are kept). Without a
@@ -860,7 +819,7 @@ in memory is lost. `session ls` shows it as `parked (snapshot)` (phase
 snapshot park; attach restarts it`, distinct from a memory-retaining
 `parked`. The session's record while it has no sandbox is a small object next
 to its snapshot, `<prefix>/<user-id>/<sandbox>.parked.json` (repository,
-session, profile, image and its last status): Soft Serve keeps no session
+session, profile, image and its last status): Sundae keeps no session
 state of its own, and the sandbox that would carry it is gone. `session
 start`, `attach` and `resume` create the sandbox again from the same image,
 restore `/sandbox`, delete that object and start the program, with the usual
@@ -878,7 +837,7 @@ notification trigger covers.
 
 #### Notifications
 
-Soft Serve can push a notification to your phone when an agent session needs
+Sundae can push a notification to your phone when an agent session needs
 you or has finished, through [ntfy](https://ntfy.sh): the public ntfy.sh
 server or a self-hosted one. It is off by default.
 
@@ -896,7 +855,7 @@ notifications:
     topic: my-unguessable-topic
     # Optional access token (tk_...), sent as a bearer token. The file is
     # read again for every message, so a rotated token needs no restart.
-    token_file: /etc/soft-serve/secrets/ntfy-token
+    token_file: /etc/sundae/secrets/ntfy-token
     # Optional URL opened when the notification is tapped.
     click_url: "https://git.example.com/{repo}?session={session}"
 ```
@@ -914,7 +873,7 @@ notifications:
 
 The default is `[blocked, done, error]`. Agent states come from the
 [Program Status Protocol (OSC 7501)](https://www.superlogical.com/rex/docs/build/program-status)
-that agents report, as Soft Serve polls them (see "Session status" under
+that agents report, as Sundae polls them (see "Session status" under
 "OpenShell Agent Sessions"): a change is seen up to `sessions.status.poll_interval`
 late, and a state that lasts less than that may not be seen at all.
 
@@ -950,7 +909,7 @@ up to 2 minutes; other responses, such as `401`, are not retried. Redirects
 are not followed. Sending happens off the event bus, so a slow or unreachable
 ntfy server never holds up sessions; if it stays down long enough for 64
 messages to queue, further messages are dropped and counted in
-`soft_serve_notifications_total{result="dropped"}`.
+`sundae_notifications_total{result="dropped"}`.
 
 **Checks.** While `ntfy.enabled` is false nothing in this section is checked
 beyond its types. When it is true, `url` and `topic` are required, `url` must
@@ -958,32 +917,32 @@ be an `http(s)` base URL without credentials or the topic, every `on` entry
 must be a trigger, `debounce` must not be negative, `click_url` may only use
 the placeholders above, and `token_file` must be readable and not empty (a
 relative path resolves against the data path). There is no inline `token`
-key. `soft config check` reports all of it.
+key. `sundae config check` reports all of it.
 
-**YAML 1.1 tools.** Quote the `on` key (`"on":`). Soft Serve reads a bare
+**YAML 1.1 tools.** Quote the `on` key (`"on":`). Sundae reads a bare
 `on:` correctly, but YAML 1.1 tools such as Helm read it as the boolean
-`true`; Soft Serve then reports `unknown key notifications.true` with a hint,
+`true`; Sundae then reports `unknown key notifications.true` with a hint,
 and the Helm chart refuses to render.
 
 **Topic privacy.** On a public server anyone who knows a topic can read and
 publish to it. Use an unguessable topic name, or an access-controlled topic
 with an access token in `token_file`. The topic itself is in the config file.
 
-Each setting has a `SOFT_SERVE_NOTIFICATIONS_*` environment variable, for
-example `SOFT_SERVE_NOTIFICATIONS_ON=blocked,done` or
-`SOFT_SERVE_NOTIFICATIONS_NTFY_TOKEN_FILE=...`.
+Each setting has a `SUNDAE_NOTIFICATIONS_*` environment variable, for
+example `SUNDAE_NOTIFICATIONS_ON=blocked,done` or
+`SUNDAE_NOTIFICATIONS_NTFY_TOKEN_FILE=...`.
 
 **Event bus.** Notifications are one subscriber of an in-process event bus
 that carries session status changes, session lifecycle steps (created,
 resumed, ready, parked, exited, ended, failed, each naming the repository,
 session name and sandbox) and forge outcomes. Each subscriber
 has a bounded buffer; one that falls behind loses events rather than slowing
-anything down, counted in `soft_serve_events_dropped_total{subscriber}`.
-`soft_serve_events_published_total{kind}` counts what was published.
+anything down, counted in `sundae_events_dropped_total{subscriber}`.
+`sundae_events_published_total{kind}` counts what was published.
 
 ## Server Access
 
-Soft Serve at its core manages your server authentication and authorization. Authentication verifies the identity of a user, while authorization determines their access rights to a repository.
+Sundae at its core manages your server authentication and authorization. Authentication verifies the identity of a user, while authorization determines their access rights to a repository.
 
 To manage the server users, access, and repos, you can use the SSH command line interface.
 
@@ -992,27 +951,27 @@ you use your key here.
 
 > **Note** The `IdentitiesOnly` option is used to prevent SSH from using any
 > other keys in your `~/.ssh` directory. This is useful when you have multiple
-> keys, and you want to use a specific key for Soft Serve.
+> keys, and you want to use a specific key for Sundae.
 
 For ease of use, instead of specifying the key, port, and hostname every time
-you SSH into Soft Serve, add your own Soft Serve instance entry to your SSH
-config. For instance, to use `ssh soft` instead of typing `ssh localhost -i
-~/.ssh/id_ed25519 -o IdentitiesOnly=yes -p 23231`, we can define a `soft` entry in our SSH config
+you SSH into Sundae, add your own Sundae instance entry to your SSH
+config. For instance, to use `ssh sundae` instead of typing `ssh localhost -i
+~/.ssh/id_ed25519 -o IdentitiesOnly=yes -p 23231`, we can define a `sundae` entry in our SSH config
 file `~/.ssh/config`.
 
 ```conf
-Host soft
+Host sundae
   HostName localhost
   Port 23231
   IdentityFile ~/.ssh/id_ed25519
   IdentitiesOnly yes
 ```
 
-Now, we can do `ssh soft` to SSH into Soft Serve. Since `git` is also aware of
-this config, you can use `soft` as the hostname for your clone commands.
+Now, we can do `ssh sundae` to SSH into Sundae. Since `git` is also aware of
+this config, you can use `sundae` as the hostname for your clone commands.
 
 ```sh
-git clone ssh://soft/dotfiles
+git clone ssh://sundae/dotfiles
 # make changes
 # add & commit
 git push origin main
@@ -1024,9 +983,9 @@ git push origin main
 ### Authentication
 
 Everything that needs authentication is done using SSH. Make sure you have
-added an entry for your Soft Serve instance in your `~/.ssh/config` file.
+added an entry for your Sundae instance in your `~/.ssh/config` file.
 
-By default, Soft Serve gives read-only permission to anonymous connections to
+By default, Sundae gives read-only permission to anonymous connections to
 any of the above protocols. This is controlled by two settings `anon-access`
 and `allow-keyless`.
 
@@ -1075,16 +1034,16 @@ which means scripting a fully open server from a cold start would otherwise
 require booting with an admin key, waiting for the server to come up, then
 SSHing in as that admin to run `settings` commands. For local development
 tooling (e.g. standing up a throwaway Git remote for something like Argo CD
-to pull from in a dev environment), you can instead set the `SOFT_SERVE_ANON_ACCESS`
-and `SOFT_SERVE_ALLOW_KEYLESS` environment variables (or the equivalent
+to pull from in a dev environment), you can instead set the `SUNDAE_ANON_ACCESS`
+and `SUNDAE_ALLOW_KEYLESS` environment variables (or the equivalent
 `anon_access`/`allow_keyless` `config.yaml` fields) to grant full,
 unauthenticated access from the moment the server starts, with no admin key
 and no `settings` command required:
 
 ```sh
-SOFT_SERVE_ANON_ACCESS=admin-access \
-SOFT_SERVE_ALLOW_KEYLESS=true \
-  soft serve
+SUNDAE_ANON_ACCESS=admin-access \
+SUNDAE_ALLOW_KEYLESS=true \
+  sundae serve
 ```
 
 > **Warning** This grants anyone who can reach the server full admin access
@@ -1095,17 +1054,17 @@ SOFT_SERVE_ALLOW_KEYLESS=true \
 >
 > Unlike the `settings` command, these overrides always take precedence over
 > the database for as long as they're set — not just on first run. If you
-> also try to tighten access via `ssh soft settings ...` while an override is
+> also try to tighten access via `ssh sundae settings ...` while an override is
 > active, the change is saved but has no effect until the override is
 > removed; the `settings` command will warn you when this happens.
 
 #### SSH
 
-Soft Serve doesn't allow duplicate SSH public keys for users. A public key can be associated with one user only. This makes SSH authentication simple and straight forward, add your public key to your Soft Serve user to be able to access Soft Serve.
+Sundae doesn't allow duplicate SSH public keys for users. A public key can be associated with one user only. This makes SSH authentication simple and straight forward, add your public key to your Sundae user to be able to access Sundae.
 
 #### HTTP
 
-You can generate user access tokens through the SSH command line interface. Access tokens can have an optional expiration date. Use your access token as the basic auth user to access your Soft Serve repos through HTTP.
+You can generate user access tokens through the SSH command line interface. Access tokens can have an optional expiration date. Use your access token as the basic auth user to access your Sundae repos through HTTP.
 
 ```sh
 # Create a user token
@@ -1126,7 +1085,7 @@ git clone http://ss_98fghi1234abc56789012345678901234de246d7@localhost:23232/my-
 
 ### Authorization
 
-Soft Serve offers a simple access control. There are four access levels,
+Sundae offers a simple access control. There are four access levels,
 no-access, read-only, read-write, and admin-access.
 
 `admin-access` has full control of the server and can make changes to users and repos.
@@ -1243,7 +1202,7 @@ ssh -p 23231 localhost repo create icecream -p '-d "This is an Ice Cream descrip
 ssh -p 23231 localhost repo create -h
 ```
 
-Or you can add your Soft Serve server as a remote to any existing repo, given
+Or you can add your Sundae server as a remote to any existing repo, given
 you have write access, and push to remote:
 
 ```
@@ -1285,7 +1244,7 @@ form), by the server administrator:
 projects:
   templates:
     go-service:
-      repo: templates/go-service   # an existing Soft Serve repository (required)
+      repo: templates/go-service   # an existing Sundae repository (required)
       ref: main                    # branch, tag or commit hash; empty: its HEAD
       subdir: ""                   # copy only this directory, as the new root
       description: Go service with a Containerfile and CI
@@ -1297,7 +1256,7 @@ when set) into the new repository as one initial commit on the branch its
 `HEAD` names. None of the template's history comes along: only the objects of
 that tree are copied. The commit is authored and committed by you, as
 `<username> <username@host>`, where host is the host of `ssh.public_url`
-(Soft Serve does not know email addresses); its message names the template,
+(Sundae does not know email addresses); its message names the template,
 the template repository and its commit. This works the same for `git` and
 `jj` repositories; jj gives the commit a change id when it imports it. File
 contents are copied unchanged: there are no placeholders. Git LFS objects are
@@ -1319,7 +1278,7 @@ match and none. `--start` needs OpenShell enabled, and starts the `main`
 session as `session start --detach` does; a failed start leaves the
 repository and says so.
 
-`soft config check` checks the templates: names are DNS labels, `repo` is a
+`sundae config check` checks the templates: names are DNS labels, `repo` is a
 repository name, `ref` is a ref or hash (no revision syntax such as `~1`),
 `subdir` stays inside the repository, and `profile` is defined. It cannot
 check that the repositories exist; that happens when one is used.
@@ -1342,15 +1301,15 @@ git push charm main
 You can also *import* repositories from any public remote. Use the `repo import` command.
 
 ```sh
-ssh -p 23231 localhost repo import soft-serve https://github.com/charmbracelet/soft-serve
+ssh -p 23231 localhost repo import glow https://github.com/charmbracelet/glow
 ```
 
 Use `--mirror` or `-m` to mark the repository as a *pull* mirror.
 
 ### Forges
 
-Soft Serve can see your repositories on GitHub and GitLab, import them, and
-keep them in sync without ever losing work you pushed only to Soft Serve.
+Sundae can see your repositories on GitHub and GitLab, import them, and
+keep them in sync without ever losing work you pushed only to Sundae.
 Unlike a mirror, a forge repository is a normal, writable repository: sync
 never rewrites or deletes a branch, and pushing back to the forge is a
 separate, explicit command.
@@ -1362,14 +1321,14 @@ forge"), and their tokens only ever come from a file:
 forges:
   - name: github                    # DNS label: commands, ref namespace, git config
     kind: github                    # github or gitlab
-    token_file: /etc/soft-serve/secrets/github-token
+    token_file: /etc/sundae/secrets/github-token
     include: ["me/*", "my-org/**"]  # globs on owner/repo; empty = everything
     exclude: ["me/old-*"]
     sync: 10m                       # scheduled sync, at least 1m (default 10m)
   - name: gitlab
     kind: gitlab
     url: https://gitlab.example.com # default https://github.com / https://gitlab.com
-    token_file: /etc/soft-serve/secrets/gitlab-token
+    token_file: /etc/sundae/secrets/gitlab-token
     prefix: work                    # import as work/<group>/<project> (default: name)
 ```
 
@@ -1385,10 +1344,10 @@ forges:
 - `prefix` must be unique and must not nest inside another forge's prefix, so
   two forges can never produce the same repository name.
 - Changing forges means editing the file and restarting (the Helm chart rolls
-  the pod when its ConfigMap changes). `soft config check` validates them,
+  the pod when its ConfigMap changes). `sundae config check` validates them,
   including that every token file is readable.
 
-The forge host you declare is trusted: Soft Serve's SSRF guard for
+The forge host you declare is trusted: Sundae's SSRF guard for
 user-supplied remotes (which refuses private addresses) does not apply to it,
 so a self-hosted GitLab on a private address works by declaring its `url`.
 What the forge API returns is not trusted: a clone URL that is not on the
@@ -1414,13 +1373,13 @@ ssh -p 23231 localhost forge push github/me/tool [main] [--force-with-lease]
 a repository that was not imported from the same forge path is a collision:
 that repository is left untouched and its import fails. Importing an
 already-imported repository does nothing. A repository private (or GitLab
-internal) on the forge is private on Soft Serve. Imported repositories get the
+internal) on the forge is private on Sundae. Imported repositories get the
 server's default VCS kind, `jj`, like any other new repository; pass `--vcs
 git` to `forge import` for git presentation.
 
 **Sync.** Upstream branches and tags are fetched into the forge's own
 namespace, `refs/remotes/<forge>/heads/*` and `refs/remotes/<forge>/tags/*`,
-which the TUI and web views do not list and pushes to Soft Serve cannot write.
+which the TUI and web views do not list and pushes to Sundae cannot write.
 Pruning happens only there. Then, for each upstream branch:
 
 | Local branch | Sync |
@@ -1428,11 +1387,11 @@ Pruning happens only there. Then, for each upstream branch:
 | missing | created at upstream |
 | strictly behind upstream (no local-only commits) | fast-forwarded |
 | equal, ahead, or diverged | left alone; ahead/behind reported |
-| exists only on Soft Serve, or deleted upstream | left alone, never deleted |
+| exists only on Sundae, or deleted upstream | left alone, never deleted |
 
 Upstream tags missing locally are created; an existing tag is never moved.
 Every update is a compare-and-swap, so a push landing meanwhile wins. A
-branch deleted on Soft Serve but still upstream is created again by the next
+branch deleted on Sundae but still upstream is created again by the next
 sync.
 
 **Push.** `forge push` pushes one branch (default: the branch `HEAD` points
@@ -1477,17 +1436,17 @@ be achieved by adding a collaborator to your repository.
 Use the `repo collab <command> <repo>` command to manage repo collaborators.
 
 ```sh
-# Add collaborator to soft-serve
-ssh -p 23231 localhost repo collab add soft-serve frankie
+# Add collaborator to sundae
+ssh -p 23231 localhost repo collab add sundae frankie
 
 # Add collaborator with a specific access level
-ssh -p 23231 localhost repo collab add soft-serve beatrice read-only
+ssh -p 23231 localhost repo collab add sundae beatrice read-only
 
 # Remove collaborator
-ssh -p 23231 localhost repo collab remove soft-serve beatrice
+ssh -p 23231 localhost repo collab remove sundae beatrice
 
 # List collaborators
-ssh -p 23231 localhost repo collab list soft-serve
+ssh -p 23231 localhost repo collab list sundae
 ```
 
 ### Repository Metadata
@@ -1549,7 +1508,7 @@ jj bookmark create main -r @
 jj git push --bookmark main
 ```
 
-HTTP responses for repository routes carry an `X-Soft-Serve-VCS` header (`git`
+HTTP responses for repository routes carry an `X-Sundae-VCS` header (`git`
 or `jj`) for callers that are authorized to read the repository.
 
 ### Repository Branches & Tags
@@ -1560,30 +1519,30 @@ also use `repo branch default` to set or get the repository default branch.
 ### Repository Tree
 
 To print a file tree for the project, just use the `repo tree` command along with
-the repo name as the SSH command to your Soft Serve server:
+the repo name as the SSH command to your Sundae server:
 
 ```sh
-ssh -p 23231 localhost repo tree soft-serve
+ssh -p 23231 localhost repo tree sundae
 ```
 
 You can also specify the sub-path and a specific reference or branch.
 
 ```sh
-ssh -p 23231 localhost repo tree soft-serve server/config
-ssh -p 23231 localhost repo tree soft-serve main server/config
+ssh -p 23231 localhost repo tree sundae server/config
+ssh -p 23231 localhost repo tree sundae main server/config
 ```
 
 From there, you can print individual files using the `repo blob` command:
 
 ```sh
-ssh -p 23231 localhost repo blob soft-serve cmd/soft/main.go
+ssh -p 23231 localhost repo blob sundae cmd/sundae/main.go
 ```
 
 You can add the `-c` flag to enable syntax coloring and `-l` to print line
 numbers:
 
 ```sh
-ssh -p 23231 localhost repo blob soft-serve cmd/soft/main.go -c -l
+ssh -p 23231 localhost repo blob sundae cmd/sundae/main.go -c -l
 
 ```
 
@@ -1591,7 +1550,7 @@ Use `--raw` to print raw file contents. This is useful for dumping binary data.
 
 ### Repository webhooks
 
-Soft Serve supports repository webhooks using the `repo webhook` command. You
+Sundae supports repository webhooks using the `repo webhook` command. You
 can create and manage webhooks for different repository events such as _push_,
 _collaborators_, and _branch_tag_create_ events.
 
@@ -1615,12 +1574,10 @@ Flags:
   -h, --help   help for webhook
 ```
 
-## The Soft Serve TUI
+## The Sundae TUI
 
-<img src="https://stuff.charm.sh/soft-serve/soft-serve-demo-commit.png" width="750" alt="TUI example showing a diff">
-
-Soft Serve TUI is mainly used to browse repos over SSH. You can also use it to
-browse local repositories with `soft browse` or running `soft` within a Git
+Sundae TUI is mainly used to browse repos over SSH. You can also use it to
+browse local repositories with `sundae browse` or running `sundae` within a Git
 repository.
 
 ```sh
@@ -1630,7 +1587,7 @@ ssh localhost -p 23231
 It's also possible to “link” to a specific repo:
 
 ```sh
-ssh -p 23231 localhost -t soft-serve
+ssh -p 23231 localhost -t sundae
 ```
 
 You can copy text to your clipboard over SSH. For instance, you can press
@@ -1682,14 +1639,14 @@ line show up live.
 
 ## Hooks
 
-Soft Serve supports git server-side hooks `pre-receive`, `update`,
+Sundae supports git server-side hooks `pre-receive`, `update`,
 `post-update`, and `post-receive`. This means you can define your own hooks to
 run on repository push events. Hooks can be defined as a per-repository hook,
 and/or global hooks that run for all repositories.
 
 You can find per-repository hooks under the repository `hooks` directory.
 
-Globs hooks can be found in your `SOFT_SERVE_DATA_PATH` directory under
+Globs hooks can be found in your `SUNDAE_DATA_PATH` directory under
 `hooks`. Defining global hooks is useful if you want to run CI/CD for example.
 
 Here's an example of sending a message after receiving a push event. Create an
@@ -1727,7 +1684,7 @@ else
         newrev_type=$(git cat-file -t $newrev)
 fi
 
-echo "Hi from Soft Serve update hook!"
+echo "Hi from Sundae update hook!"
 echo
 echo "RefName: $refname"
 echo "Change Type: $newrev_type"
@@ -1741,7 +1698,7 @@ Now, you should get a message after pushing changes to any repository.
 
 ## A note about RSA keys
 
-Unfortunately, due to a shortcoming in Go’s `x/crypto/ssh` package, Soft Serve
+Unfortunately, due to a shortcoming in Go’s `x/crypto/ssh` package, Sundae
 does not currently support access via new SSH RSA keys: only the old SHA-1
 ones will work.
 
@@ -1759,28 +1716,10 @@ If you’re curious about the inner workings of this problem have a look at:
 - https://go-review.googlesource.com/c/crypto/+/220037
 - https://github.com/golang/crypto/pull/197
 
-## Contributing
-
-See [contributing][contribute].
-
-[contribute]: https://github.com/charmbracelet/soft-serve/contribute
-
-## Feedback
-
-We’d love to hear your thoughts on this project. Feel free to drop us a note!
-
-- [Twitter](https://twitter.com/charmcli)
-- [The Fediverse](https://mastodon.social/@charmcli)
-- [Discord](https://charm.sh/chat)
-
 ## License
 
-[MIT](https://github.com/charmbracelet/soft-serve/raw/main/LICENSE)
+Sundae is released under the [MIT license](LICENSE).
 
----
-
-Part of [Charm](https://charm.sh).
-
-<a href="https://charm.sh/"><img alt="The Charm logo" src="https://stuff.charm.sh/charm-badge.jpg" width="400"></a>
-
-Charm热爱开源 • Charm loves open source
+Sundae is a fork of [Soft Serve](https://github.com/charmbracelet/soft-serve),
+Copyright (c) 2021-2023 Charmbracelet, Inc, also MIT licensed. Charm's
+copyright notice is kept in [LICENSE](LICENSE) alongside the fork's.

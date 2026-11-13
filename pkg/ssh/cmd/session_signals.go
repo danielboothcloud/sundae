@@ -12,11 +12,11 @@ import (
 	"time"
 
 	"charm.land/ssh"
-	"github.com/charmbracelet/soft-serve/pkg/events"
-	"github.com/charmbracelet/soft-serve/pkg/proto"
-	"github.com/charmbracelet/soft-serve/pkg/signals"
-	"github.com/charmbracelet/soft-serve/pkg/sshutils"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/danielboothcloud/sundae/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/signals"
+	"github.com/danielboothcloud/sundae/pkg/sshutils"
 	"github.com/spf13/cobra"
 )
 
@@ -47,7 +47,7 @@ func sessionSignalsCommand() *cobra.Command {
 		Short: "Show what your agent sessions reported, newest first",
 		Long: `Show the signals of your agent sessions, newest first: every status
 change (OSC 7501) and lifecycle step (created, ready, resumed, parked,
-exited, ended, failed) Soft Serve has seen, with when it happened, the state,
+exited, ended, failed) Sundae has seen, with when it happened, the state,
 the session (and the record id of a child record) and the message.
 
 --attention shows only what asks for you: blocked, error and done reports,

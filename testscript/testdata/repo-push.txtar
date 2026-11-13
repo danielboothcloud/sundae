@@ -1,12 +1,12 @@
 # vi: set ft=conf
 
-# start soft serve
-exec soft serve &
+# start sundae serve
+exec sundae serve &
 # wait for SSH server to start
 ensureserverrunning SSH_PORT
 
 # create a repo
-soft repo create repo-empty -d 'description' -H -p -n 'repo-empty'
+sundae repo create repo-empty -d 'description' -H -p -n 'repo-empty'
 
 # clone repo
 git clone ssh://localhost:$SSH_PORT/repo-empty repo-empty

@@ -3,8 +3,8 @@ package backend
 import (
 	"path/filepath"
 
-	"github.com/charmbracelet/soft-serve/git"
-	"github.com/charmbracelet/soft-serve/pkg/proto"
+	"github.com/danielboothcloud/sundae/git"
+	"github.com/danielboothcloud/sundae/pkg/proto"
 )
 
 // LatestFile returns the contents of the latest file at the specified path in

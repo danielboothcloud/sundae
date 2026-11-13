@@ -3,24 +3,24 @@
 # convert crlf to lf on windows
 [windows] dos2unix readme.md branch_list.1.txt info.txt
 
-# start soft serve
-exec soft serve &
+# start sundae serve
+exec sundae serve &
 # wait for SSH server to start
 ensureserverrunning SSH_PORT
 
 # create a repo
-soft repo create repo1 -d 'description' -H -p -n 'repo11'
+sundae repo create repo1 -d 'description' -H -p -n 'repo11'
 stderr 'Created repository repo1.*'
 stdout ssh://localhost:$SSH_PORT/repo1.git
-soft repo hidden repo1
+sundae repo hidden repo1
 stdout true
-soft repo private repo1
+sundae repo private repo1
 stdout true
 ! exists $DATA_PATH/repos/repo1.git/git-daemon-export-ok
-soft repo description repo1
+sundae repo description repo1
 stdout 'description'
 readfile $DATA_PATH/repos/repo1.git/description 'description'
-soft repo project-name repo1
+sundae repo project-name repo1
 stdout 'repo1'
 
 # clone repo
@@ -45,20 +45,20 @@ git -C repo1 commit -m 'lfs'
 git -C repo1 push origin HEAD
 
 # info
-soft repo info repo1
+sundae repo info repo1
 cmp stdout info.txt
 
 # list tags
-soft repo tag list repo1
+sundae repo tag list repo1
 stdout 'v0.1.0'
 
 # delete tag
-soft repo tag delete repo1 v0.1.0
-soft repo tag list repo1
+sundae repo tag delete repo1 v0.1.0
+sundae repo tag list repo1
 ! stdout .
 
 # print tree
-soft repo tree repo1
+sundae repo tree repo1
 cp stdout tree.txt
 grep '.gitattributes' tree.txt
 grep 'README.md' tree.txt
@@ -66,57 +66,57 @@ grep 'foo.png' tree.txt
 grep 'bar.png' tree.txt
 
 # cat blob
-soft repo blob repo1 README.md
+sundae repo blob repo1 README.md
 cmp stdout readme.md
 
 # cat blob that doesn't exist
-! soft repo blob repo1 README.txt
+! sundae repo blob repo1 README.txt
 ! stdout .
 stderr '.*revision does not exist.*'
 
 # check main branch
-soft repo branch default repo1
+sundae repo branch default repo1
 stdout master
 
 # create a new branch
 git -C repo1 checkout -b branch1
 git -C repo1 push origin branch1
-soft repo branch list repo1
+sundae repo branch list repo1
 cmp stdout branch_list.1.txt
 
 # change default branch
-soft repo branch default repo1 branch1
-soft repo branch default repo1
+sundae repo branch default repo1 branch1
+sundae repo branch default repo1
 stdout branch1
 
 # cannot delete main branch
-! soft repo branch delete repo1 branch1
+! sundae repo branch delete repo1 branch1
 
 # delete other branch
-soft repo branch delete repo1 master
-soft repo branch list repo1
+sundae repo branch delete repo1 master
+sundae repo branch list repo1
 stdout branch1
 
 # create a new user
-soft user create bar --key "$USER1_AUTHORIZED_KEY"
+sundae user create bar --key "$USER1_AUTHORIZED_KEY"
 
 # user create a repo
-usoft repo create repo2 -d 'description' -H -p -n 'repo2'
+usundae repo create repo2 -d 'description' -H -p -n 'repo2'
 stderr 'Created repository repo2.*'
 stdout ssh://localhost:$SSH_PORT/repo2.git
-usoft repo hidden repo2
+usundae repo hidden repo2
 stdout true
-usoft repo private repo2
+usundae repo private repo2
 stdout true
 ! exists $DATA_PATH/repos/repo2.git/git-daemon-export-ok
-usoft repo description repo2
+usundae repo description repo2
 stdout 'description'
 readfile $DATA_PATH/repos/repo2.git/description 'description'
-usoft repo project-name repo2
+usundae repo project-name repo2
 stdout 'repo2'
 
 # user delete a repo
-usoft repo delete repo2
+usundae repo delete repo2
 ! exists $DATA_PATH/repos/repo2.git
 
 # stop the server

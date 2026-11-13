@@ -1,5 +1,8 @@
 name: build
 
+# Self-contained CI for Sundae: build, vet and test on every push and pull
+# request. Nothing is published.
+
 on:
   push:
     branches:
@@ -8,12 +11,21 @@ on:
 
 jobs:
   build:
-    uses: charmbracelet/meta/.github/workflows/build.yml@main
-
-  snapshot:
-    uses: charmbracelet/meta/.github/workflows/snapshot.yml@main
-    secrets:
-      goreleaser_key: ${{ secrets.GORELEASER_KEY }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+      - name: Install Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test -race ./...
 
   test_postgres:
     services:
@@ -35,12 +47,12 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v7
         with:
-          go-version: ^1
+          go-version-file: go.mod
           cache: true
       - name: Download Go modules
         run: go mod download
       - name: Test
         run: go test ./...
         env:
-          SOFT_SERVE_DB_DRIVER: postgres
-          SOFT_SERVE_DB_DATA_SOURCE: postgres://postgres:postgres@localhost/postgres?sslmode=disable
+          SUNDAE_DB_DRIVER: postgres
+          SUNDAE_DB_DATA_SOURCE: postgres://postgres:postgres@localhost/postgres?sslmode=disable

@@ -1,16 +1,16 @@
 # vi: set ft=conf
 
-# start soft serve
-exec soft serve &
+# start sundae serve
+exec sundae serve &
 # wait for SSH server to start
 ensureserverrunning SSH_PORT
 
 # set settings
-soft settings allow-keyless true
-soft settings anon-access no-access
+sundae settings allow-keyless true
+sundae settings anon-access no-access
 
 # create a repo
-soft repo create repo1
+sundae repo create repo1
 git clone ssh://localhost:$SSH_PORT/repo1 repo1
 mkfile ./repo1/README.md '# Hello\n\nwelcome'
 git -C repo1 add -A
@@ -22,11 +22,11 @@ git -C repo1 push origin HEAD
 stderr 'Error: you are not authorized to do this'
 
 # list repo as anon
-usoft repo list
+usundae repo list
 stdout ''
 
 # create repo as anon
-! usoft repo create urepo2
+! usundae repo create urepo2
 stderr 'Error: unauthorized'
 
 # stop the server

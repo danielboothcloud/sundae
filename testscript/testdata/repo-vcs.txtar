@@ -3,33 +3,33 @@
 # convert crlf to lf on windows
 [windows] dos2unix commit.txt
 
-# start soft serve
-exec soft serve &
+# start sundae serve
+exec sundae serve &
 # wait for SSH server to start
 ensureserverrunning SSH_PORT
 
 # no --vcs defaults to jj and prints the jj clone command
-soft repo create defrepo
+sundae repo create defrepo
 stdout 'jj git clone ssh://localhost:'$SSH_PORT'/defrepo.git'
 
 # explicit jj
-soft repo create jjrepo --vcs jj
+sundae repo create jjrepo --vcs jj
 stdout 'jj git clone ssh://localhost:'$SSH_PORT'/jjrepo.git'
 
 # explicit git prints a plain url
-soft repo create gitrepo --vcs git
+sundae repo create gitrepo --vcs git
 ! stdout 'jj git clone'
 stdout 'ssh://localhost:'$SSH_PORT'/gitrepo.git'
 
 # invalid --vcs value
-! soft repo create badrepo --vcs hg
+! sundae repo create badrepo --vcs hg
 stderr 'invalid vcs'
-! soft repo import badimport https://example.com/x.git --vcs hg
+! sundae repo import badimport https://example.com/x.git --vcs hg
 stderr 'invalid vcs'
 
 # bookmark is an alias of branch
-soft repo bookmark list jjrepo
-soft repo branch list jjrepo
+sundae repo bookmark list jjrepo
+sundae repo branch list jjrepo
 
 # push a commit carrying a jj change-id header and a plain one
 git clone ssh://localhost:$SSH_PORT/jjrepo jjclone
@@ -38,7 +38,7 @@ exec git -C jjclone hash-object -t commit -w --stdin
 exec git -C jjclone update-ref refs/heads/main 15eb8dce36dc13573eb3f49723e1e2102ced6ac6
 exec git -C jjclone push origin main
 
-soft repo commit jjrepo 15eb8dce36dc13573eb3f49723e1e2102ced6ac6
+sundae repo commit jjrepo 15eb8dce36dc13573eb3f49723e1e2102ced6ac6
 stdout '^change zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz$'
 stdout '^commit 15eb8dce36dc13573eb3f49723e1e2102ced6ac6$'
 
@@ -48,10 +48,10 @@ stdin commit.txt
 exec git -C defclone hash-object -t commit -w --stdin
 exec git -C defclone update-ref refs/heads/main 15eb8dce36dc13573eb3f49723e1e2102ced6ac6
 exec git -C defclone push origin main
-soft repo info defrepo
+sundae repo info defrepo
 stdout '^VCS: jj$'
 stdout '^Default Bookmark:'
-soft repo info jjrepo
+sundae repo info jjrepo
 stdout '^VCS: jj$'
 stdout '^Bookmarks:$'
 
@@ -61,9 +61,9 @@ stdin commit.txt
 exec git -C gitclone hash-object -t commit -w --stdin
 exec git -C gitclone update-ref refs/heads/main 15eb8dce36dc13573eb3f49723e1e2102ced6ac6
 exec git -C gitclone push origin main
-soft repo commit gitrepo 15eb8dce36dc13573eb3f49723e1e2102ced6ac6
+sundae repo commit gitrepo 15eb8dce36dc13573eb3f49723e1e2102ced6ac6
 ! stdout 'change '
-soft repo info gitrepo
+sundae repo info gitrepo
 stdout '^VCS: git$'
 stdout '^Default Branch:'
 

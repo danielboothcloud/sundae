@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/charmbracelet/soft-serve/pkg/db"
+	"github.com/danielboothcloud/sundae/pkg/db"
 )
 
 // OpenSqlite opens a new temp SQLite database for testing.

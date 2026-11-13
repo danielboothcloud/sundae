@@ -1,0 +1,48 @@
+[Unit]
+Description=Sundae git server 🍦
+Documentation=https://github.com/danielboothcloud/sundae
+Requires=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=sundae
+Group=sundae
+Restart=always
+RestartSec=1
+ExecStart=/usr/bin/sundae serve
+Environment=SUNDAE_DATA_PATH=/var/lib/sundae
+EnvironmentFile=-/etc/sundae.conf
+WorkingDirectory=/var/lib/sundae
+
+# Hardening
+ReadWritePaths=/var/lib/sundae
+UMask=0027
+NoNewPrivileges=true
+LimitNOFILE=1048576
+ProtectSystem=strict
+ProtectHome=true
+PrivateUsers=yes
+PrivateTmp=true
+PrivateDevices=true
+ProtectHostname=true
+ProtectClock=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RemoveIPC=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

@@ -13,7 +13,7 @@ import (
 	"testing"
 )
 
-// allScripts are the shell scripts Soft Serve runs in sandboxes.
+// allScripts are the shell scripts Sundae runs in sandboxes.
 var allScripts = map[string]string{
 	uploadBeginName:    uploadBeginScript,
 	uploadChunkName:    uploadChunkScript,
@@ -39,10 +39,10 @@ func TestScriptsParse(t *testing.T) {
 			t.Errorf("%s: %v: %s", name, err, out)
 		}
 		// Secrets never reach a script as an argument.
-		if regexp.MustCompile(`\$\{?SOFT_SERVE_[A-Z_]+`).MatchString(script) {
-			for _, v := range regexp.MustCompile(`\$\{?(SOFT_SERVE_[A-Z_]+)`).FindAllStringSubmatch(script, -1) {
+		if regexp.MustCompile(`\$\{?SUNDAE_[A-Z_]+`).MatchString(script) {
+			for _, v := range regexp.MustCompile(`\$\{?(SUNDAE_[A-Z_]+)`).FindAllStringSubmatch(script, -1) {
 				switch v[1] {
-				case "SOFT_SERVE_OSEWA_KEY", "SOFT_SERVE_OSEWA_HOSTS", "SOFT_SERVE_GITCONFIG":
+				case "SUNDAE_OSEWA_KEY", "SUNDAE_OSEWA_HOSTS", "SUNDAE_GITCONFIG":
 				default:
 					t.Errorf("%s reads unexpected variable %s", name, v[1])
 				}
@@ -58,18 +58,18 @@ func TestGitCredentialsScript(t *testing.T) {
 		t.Skip("no git")
 	}
 	home := t.TempDir()
-	dir := filepath.Join(home, "tmp", "soft-serve")
+	dir := filepath.Join(home, "tmp", "sundae")
 	file := filepath.Join(dir, "gitconfig")
 	run := func(content string) {
 		t.Helper()
 		cmd := exec.CommandContext(t.Context(), "sh", "-c", gitCredentialsScript, gitCredentialsName, dir, file)
-		cmd.Env = []string{"HOME=" + home, "PATH=" + os.Getenv("PATH"), "SOFT_SERVE_GITCONFIG=" + execEnvValue(content)}
+		cmd.Env = []string{"HOME=" + home, "PATH=" + os.Getenv("PATH"), "SUNDAE_GITCONFIG=" + execEnvValue(content)}
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("%v: %s", err, out)
 		}
 	}
-	run(gitCredentialConfig("http://soft-serve.svc:23232", "alice", "first"))
-	run(gitCredentialConfig("http://soft-serve.svc:23232", "alice", "second"))
+	run(gitCredentialConfig("http://sundae.svc:23232", "alice", "first"))
+	run(gitCredentialConfig("http://sundae.svc:23232", "alice", "second"))
 
 	st, err := os.Stat(dir)
 	if err != nil || st.Mode().Perm() != 0o700 {
@@ -93,7 +93,7 @@ func TestGitCredentialsScript(t *testing.T) {
 		return strings.TrimSpace(string(out))
 	}
 	want := "Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte("alice:second"))
-	if got := git("config", "--get-urlmatch", "http.extraHeader", "http://soft-serve.svc:23232/r.git"); got != want {
+	if got := git("config", "--get-urlmatch", "http.extraHeader", "http://sundae.svc:23232/r.git"); got != want {
 		t.Fatalf("header for the clone URL = %q, want %q", got, want)
 	}
 	if got := git("config", "--get-urlmatch", "http.extraHeader", "https://github.com/r.git"); got != "" {

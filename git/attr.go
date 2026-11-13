@@ -18,7 +18,7 @@ type Attribute struct {
 // CheckAttributes checks the attributes of the given ref and path.
 func (r *Repository) CheckAttributes(ref *Reference, path string) ([]Attribute, error) {
 	rnd := rand.NewSource(time.Now().UnixNano())
-	fn := "soft-serve-index-" + strconv.Itoa(rand.New(rnd).Int()) //nolint: gosec
+	fn := "sundae-index-" + strconv.Itoa(rand.New(rnd).Int()) //nolint: gosec
 	tmpindex := filepath.Join(os.TempDir(), fn)
 
 	defer os.Remove(tmpindex) //nolint: errcheck

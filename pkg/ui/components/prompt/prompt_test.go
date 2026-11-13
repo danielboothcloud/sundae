@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/soft-serve/pkg/ui/common"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/danielboothcloud/sundae/pkg/ui/common"
 )
 
 // press returns the key press for a key name ("enter", "left") or text.
@@ -43,7 +43,7 @@ func newTestForm() *Form {
 		return nil
 	}
 	return NewForm(newCommon(), "New session", "create",
-		FixedField("repo", "Repository", "soft-serve"),
+		FixedField("repo", "Repository", "sundae"),
 		TextField("name", "Name", "claude-1", notEmpty),
 		ChoiceField("profile", "Profile", []Option{
 			{Value: "claude", Detail: "img-claude · claude"},
@@ -142,7 +142,7 @@ func TestFormTextEditAndValidation(t *testing.T) {
 }
 
 func TestFormFilterableChoice(t *testing.T) {
-	opts := []Option{{Value: "dotfiles"}, {Value: "infra"}, {Value: "soft-serve"}, {Value: "scratch"}}
+	opts := []Option{{Value: "dotfiles"}, {Value: "infra"}, {Value: "sundae"}, {Value: "scratch"}}
 	f := NewForm(newCommon(), "New session", "create", ChoiceField("repo", "Repository", opts, "", true))
 	repo := f.Field("repo")
 	f.Update(press("s"))
@@ -179,7 +179,7 @@ func TestFormView(t *testing.T) {
 	want := strings.Join([]string{
 		"New session",
 		"",
-		"  Repository   soft-serve",
+		"  Repository   sundae",
 		"  Name         claude-1 ",
 		"  Profile      ‹ codex ›   img-codex · codex",
 		"  Attach       yes",

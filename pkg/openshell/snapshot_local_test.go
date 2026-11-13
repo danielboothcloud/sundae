@@ -16,13 +16,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/events"
-	"github.com/charmbracelet/soft-serve/pkg/s3store/s3test"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/s3store/s3test"
 )
 
 // localSandbox runs the snapshot scripts on this machine, with /sandbox and
-// /tmp/soft-serve mapped to temporary directories: the real tar, gzip,
+// /tmp/sundae mapped to temporary directories: the real tar, gzip,
 // md5sum and curl against the fake S3 server, which checks the presigned
 // requests' signatures.
 type localSandbox struct {
@@ -143,36 +143,36 @@ func TestSnapshotPipelineLocal(t *testing.T) {
 	snaps := newSnapshotStore(cfg)
 
 	root := filepath.Join(t.TempDir(), "sandbox")
-	spool := filepath.Join(t.TempDir(), "soft-serve")
+	spool := filepath.Join(t.TempDir(), "sundae")
 	writeTree(t, root, map[string]string{
-		"r/main.go":                             "package main // unpushed\n",
-		"r/.git/HEAD":                           "ref: refs/heads/main\n",
-		"r/.cache/kept":                         "a repo's own .cache is not the XDG cache\n",
-		"r/.ssh/fixture":                        "a repo's test fixture\n",
-		".bashrc":                               "# mine\n",
-		".claude/settings.json":                 "{}\n",
-		".claude/.credentials.json":             "{\"token\":\"x\"}\n",
-		".config/osewa/server.key":              "server key\n",
-		".local/state/osewa/osewa.log":          "log\n",
-		".config/soft-serve/osewa-session":      "osewa1\n",
-		".config/soft-serve/osewa-session.lock": "",
-		".config/soft-serve/osewa-client/hosts": "[]\n",
-		".config/soft-serve/notes":              "kept\n",
-		".local/lib/soft-serve/osewa-0.1.4":     "binary\n",
-		".cache/go-build/00/x":                  "cache\n",
-		".ssh/id_ed25519":                       "PRIVATE KEY\n",
-		".aws/credentials":                      "[default]\n",
-		".docker/config.json":                   "{}\n",
-		".docker/cli-plugins/kept":              "kept\n",
-		".config/gh/hosts.yml":                  "token\n",
-		".config/gh/config.yml":                 "kept\n",
-		".git-credentials":                      "https://u:p@host\n",
-		".netrc":                                "machine x\n",
-		".kube/config":                          "kubeconfig\n",
-		".gnupg/private-keys-v1.d/x.key":        "key\n",
-		".codex/auth.json":                      "{}\n",
-		".config/glab-cli/config.yml":           "token\n",
-		".local/share/kept":                     "kept\n",
+		"r/main.go":                         "package main // unpushed\n",
+		"r/.git/HEAD":                       "ref: refs/heads/main\n",
+		"r/.cache/kept":                     "a repo's own .cache is not the XDG cache\n",
+		"r/.ssh/fixture":                    "a repo's test fixture\n",
+		".bashrc":                           "# mine\n",
+		".claude/settings.json":             "{}\n",
+		".claude/.credentials.json":         "{\"token\":\"x\"}\n",
+		".config/osewa/server.key":          "server key\n",
+		".local/state/osewa/osewa.log":      "log\n",
+		".config/sundae/osewa-session":      "osewa1\n",
+		".config/sundae/osewa-session.lock": "",
+		".config/sundae/osewa-client/hosts": "[]\n",
+		".config/sundae/notes":              "kept\n",
+		".local/lib/sundae/osewa-0.1.4":     "binary\n",
+		".cache/go-build/00/x":              "cache\n",
+		".ssh/id_ed25519":                   "PRIVATE KEY\n",
+		".aws/credentials":                  "[default]\n",
+		".docker/config.json":               "{}\n",
+		".docker/cli-plugins/kept":          "kept\n",
+		".config/gh/hosts.yml":              "token\n",
+		".config/gh/config.yml":             "kept\n",
+		".git-credentials":                  "https://u:p@host\n",
+		".netrc":                            "machine x\n",
+		".kube/config":                      "kubeconfig\n",
+		".gnupg/private-keys-v1.d/x.key":    "key\n",
+		".codex/auth.json":                  "{}\n",
+		".config/glab-cli/config.yml":       "token\n",
+		".local/share/kept":                 "kept\n",
 	})
 	if err := os.Chmod(filepath.Join(root, "r/main.go"), 0o755); err != nil {
 		t.Fatal(err)
@@ -181,7 +181,7 @@ func TestSnapshotPipelineLocal(t *testing.T) {
 		t.Fatal(err)
 	}
 	box := &localSandbox{root: root, spool: spool}
-	sess := events.Session{User: "alice", Repo: "r", Name: "main", Sandbox: "soft-alice-r"}
+	sess := events.Session{User: "alice", Repo: "r", Name: "main", Sandbox: "sundae-alice-r"}
 
 	var progress bytes.Buffer
 	info, err := snaps.take(ctx, box, 1, sess, &progress)
@@ -195,7 +195,7 @@ func TestSnapshotPipelineLocal(t *testing.T) {
 	names := archiveNames(t, o.Body)
 	want := []string{
 		"./r/main.go", "./r/.git/HEAD", "./.bashrc", "./link",
-		"./.claude/settings.json", "./.config/soft-serve/notes", "./.docker/cli-plugins/kept", "./.config/gh/config.yml", "./.local/share/kept",
+		"./.claude/settings.json", "./.config/sundae/notes", "./.docker/cli-plugins/kept", "./.config/gh/config.yml", "./.local/share/kept",
 	}
 	if gnuTar() {
 		// Anchored: only the home's .cache and .ssh are left out.
@@ -213,7 +213,7 @@ func TestSnapshotPipelineLocal(t *testing.T) {
 			t.Errorf("archive has excluded %s", name)
 		}
 	}
-	for _, gone := range []string{"./.ssh/id_ed25519", "./.config/osewa/server.key", "./.cache/go-build/00/x", "./.config/soft-serve/osewa-session.lock"} {
+	for _, gone := range []string{"./.ssh/id_ed25519", "./.config/osewa/server.key", "./.cache/go-build/00/x", "./.config/sundae/osewa-session.lock"} {
 		if slices.Contains(names, gone) {
 			t.Errorf("archive has %s", gone)
 		}
@@ -226,11 +226,11 @@ func TestSnapshotPipelineLocal(t *testing.T) {
 	// snapshot's files win, the image's other files stay.
 	newRoot := filepath.Join(t.TempDir(), "sandbox")
 	writeTree(t, newRoot, map[string]string{".bashrc": "# image\n", ".profile": "# image profile\n"})
-	box2 := &localSandbox{root: newRoot, spool: filepath.Join(t.TempDir(), "soft-serve")}
-	if found, err := probePaths(ctx, box2, "soft-alice-r", "/sandbox/r", softServeStateDir); err != nil || len(found) != 0 {
+	box2 := &localSandbox{root: newRoot, spool: filepath.Join(t.TempDir(), "sundae")}
+	if found, err := probePaths(ctx, box2, "sundae-alice-r", "/sandbox/r", sundaeStateDir); err != nil || len(found) != 0 {
 		t.Fatalf("probe new = %v %v", found, err)
 	}
-	if err := snaps.restore(ctx, box2, 1, "soft-alice-r"); err != nil {
+	if err := snaps.restore(ctx, box2, 1, "sundae-alice-r"); err != nil {
 		t.Fatal(err)
 	}
 	got := readTree(t, newRoot)
@@ -243,7 +243,7 @@ func TestSnapshotPipelineLocal(t *testing.T) {
 	if fi, err := os.Stat(filepath.Join(newRoot, "r/main.go")); err != nil || fi.Mode().Perm() != 0o755 {
 		t.Fatalf("mode = %v %v", fi.Mode(), err)
 	}
-	if found, err := probePaths(ctx, box2, "soft-alice-r", "/sandbox/r", softServeStateDir); err != nil || strings.ReplaceAll(strings.Join(found, ","), newRoot, "/sandbox") != "/sandbox/r,/sandbox/.config/soft-serve" {
+	if found, err := probePaths(ctx, box2, "sundae-alice-r", "/sandbox/r", sundaeStateDir); err != nil || strings.ReplaceAll(strings.Join(found, ","), newRoot, "/sandbox") != "/sandbox/r,/sandbox/.config/sundae" {
 		t.Fatalf("probe restored = %v %v", found, err)
 	}
 
@@ -269,19 +269,19 @@ func TestSnapshotPipelineLocal(t *testing.T) {
 
 	// A corrupt object fails the restore.
 	srv.PutObject(snapKey, []byte("not gzip"), nil)
-	err = snaps.restore(ctx, &localSandbox{root: t.TempDir(), spool: t.TempDir()}, 1, "soft-alice-r")
+	err = snaps.restore(ctx, &localSandbox{root: t.TempDir(), spool: t.TempDir()}, 1, "sundae-alice-r")
 	if err == nil || !strings.Contains(err.Error(), "decompress") {
 		t.Fatalf("corrupt restore = %v", err)
 	}
 	// A missing object fails the download.
 	srv.DeleteObject(snapKey)
-	err = snaps.restore(ctx, &localSandbox{root: t.TempDir(), spool: t.TempDir()}, 1, "soft-alice-r")
+	err = snaps.restore(ctx, &localSandbox{root: t.TempDir(), spool: t.TempDir()}, 1, "sundae-alice-r")
 	if err == nil || !strings.Contains(err.Error(), "download") {
 		t.Fatalf("missing restore = %v", err)
 	}
 
 	// An archive over the limit is refused before any upload.
-	out, err := runScript(ctx, box, "soft-alice-r", snapshotPackName, snapshotPackScript, nil, SandboxRoot, snapshotSpoolDir, "10")
+	out, err := runScript(ctx, box, "sundae-alice-r", snapshotPackName, snapshotPackScript, nil, SandboxRoot, snapshotSpoolDir, "10")
 	if err == nil || !strings.Contains(err.Error(), "exit status 3") || !strings.Contains(err.Error(), "more than the 10 bytes") {
 		t.Fatalf("pack over limit = %q %v", out, err)
 	}
@@ -297,13 +297,13 @@ func gnuTar() bool {
 }
 
 // TestSnapshotPipelineS3 runs the snapshot pipeline against a real S3 store
-// when SOFT_SERVE_S3_E2E_ENDPOINT is set (with _BUCKET, _CREDENTIALS_FILE,
+// when SUNDAE_S3_E2E_ENDPOINT is set (with _BUCKET, _CREDENTIALS_FILE,
 // and optionally _REGION, _SSE and _BIG_MB, the size of an incompressible
 // file to add). It was run against a local MinIO; see the change's report.
 func TestSnapshotPipelineS3(t *testing.T) {
-	endpoint := os.Getenv("SOFT_SERVE_S3_E2E_ENDPOINT")
+	endpoint := os.Getenv("SUNDAE_S3_E2E_ENDPOINT")
 	if endpoint == "" {
-		t.Skip("SOFT_SERVE_S3_E2E_ENDPOINT is not set")
+		t.Skip("SUNDAE_S3_E2E_ENDPOINT is not set")
 	}
 	requireTools(t)
 	ctx := context.Background()
@@ -312,10 +312,10 @@ func TestSnapshotPipelineS3(t *testing.T) {
 	cfg.Snapshots.S3 = config.S3SnapshotConfig{
 		Enabled:         true,
 		Endpoint:        endpoint,
-		Region:          os.Getenv("SOFT_SERVE_S3_E2E_REGION"),
-		Bucket:          os.Getenv("SOFT_SERVE_S3_E2E_BUCKET"),
-		CredentialsFile: os.Getenv("SOFT_SERVE_S3_E2E_CREDENTIALS_FILE"),
-		SSE:             os.Getenv("SOFT_SERVE_S3_E2E_SSE"),
+		Region:          os.Getenv("SUNDAE_S3_E2E_REGION"),
+		Bucket:          os.Getenv("SUNDAE_S3_E2E_BUCKET"),
+		CredentialsFile: os.Getenv("SUNDAE_S3_E2E_CREDENTIALS_FILE"),
+		SSE:             os.Getenv("SUNDAE_S3_E2E_SSE"),
 		PathStyle:       true,
 		Prefix:          "e2e/" + strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-")),
 	}
@@ -328,7 +328,7 @@ func TestSnapshotPipelineS3(t *testing.T) {
 	}
 
 	root := filepath.Join(t.TempDir(), "sandbox")
-	spool := filepath.Join(t.TempDir(), "soft-serve")
+	spool := filepath.Join(t.TempDir(), "sundae")
 	writeTree(t, root, map[string]string{
 		"r/main.go":                "package main\n",
 		".bashrc":                  "# mine\n",
@@ -336,7 +336,7 @@ func TestSnapshotPipelineS3(t *testing.T) {
 		".config/osewa/server.key": "key\n",
 	})
 	var bigSize int64
-	if mb := os.Getenv("SOFT_SERVE_S3_E2E_BIG_MB"); mb != "" {
+	if mb := os.Getenv("SUNDAE_S3_E2E_BIG_MB"); mb != "" {
 		// Random bytes: gzip cannot shrink them, so the upload is as big.
 		p := filepath.Join(root, "r", "big.bin")
 		cmd := exec.CommandContext(ctx, "dd", "if=/dev/urandom", "of="+p, "bs=1048576", "count="+mb)
@@ -347,7 +347,7 @@ func TestSnapshotPipelineS3(t *testing.T) {
 		bigSize = fi.Size()
 	}
 	box := &localSandbox{root: root, spool: spool}
-	sess := events.Session{User: "alice", Repo: "r", Name: "main", Sandbox: "soft-alice-r"}
+	sess := events.Session{User: "alice", Repo: "r", Name: "main", Sandbox: "sundae-alice-r"}
 
 	info, err := snaps.take(ctx, box, 1, sess, io.Discard)
 	if err != nil {
@@ -357,8 +357,8 @@ func TestSnapshotPipelineS3(t *testing.T) {
 	if info.Size < bigSize {
 		t.Fatalf("snapshot of %d bytes holds a %d byte file", info.Size, bigSize)
 	}
-	head, err := snaps.store.Head(ctx, snaps.key(1, "soft-alice-r"))
-	if err != nil || head.Size != info.Size || head.Metadata["soft-serve-repo"] != "r" {
+	head, err := snaps.store.Head(ctx, snaps.key(1, "sundae-alice-r"))
+	if err != nil || head.Size != info.Size || head.Metadata["sundae-repo"] != "r" {
 		t.Fatalf("head = %+v, %v", head, err)
 	}
 	if sse := cfg.Snapshots.S3.SSE; sse != "" && head.SSE != sse {
@@ -374,8 +374,8 @@ func TestSnapshotPipelineS3(t *testing.T) {
 
 	newRoot := filepath.Join(t.TempDir(), "sandbox")
 	writeTree(t, newRoot, map[string]string{".bashrc": "# image\n"})
-	box2 := &localSandbox{root: newRoot, spool: filepath.Join(t.TempDir(), "soft-serve")}
-	if err := snaps.restore(ctx, box2, 1, "soft-alice-r"); err != nil {
+	box2 := &localSandbox{root: newRoot, spool: filepath.Join(t.TempDir(), "sundae")}
+	if err := snaps.restore(ctx, box2, 1, "sundae-alice-r"); err != nil {
 		t.Fatal(err)
 	}
 	got := readTree(t, newRoot)
@@ -404,7 +404,7 @@ func TestSnapshotPipelineS3(t *testing.T) {
 	if err := os.MkdirAll(newer, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := snaps.restore(ctx, &localSandbox{root: newer, spool: filepath.Join(t.TempDir(), "s")}, 1, "soft-alice-r"); err != nil {
+	if err := snaps.restore(ctx, &localSandbox{root: newer, spool: filepath.Join(t.TempDir(), "s")}, 1, "sundae-alice-r"); err != nil {
 		t.Fatal(err)
 	}
 	if got := readTree(t, newer)["r/main.go"]; got != "package main // v2\n" {
@@ -412,20 +412,20 @@ func TestSnapshotPipelineS3(t *testing.T) {
 	}
 
 	// The parked marker round-trips and lists.
-	m := ParkedSnapshot{UserID: 1, User: "alice", Repo: "r", Session: "main", Sandbox: "soft-alice-r", Parked: time.Now().UTC().Truncate(time.Second), Op: ParkAuto}
+	m := ParkedSnapshot{UserID: 1, User: "alice", Repo: "r", Session: "main", Sandbox: "sundae-alice-r", Parked: time.Now().UTC().Truncate(time.Second), Op: ParkAuto}
 	if err := snaps.writeMarker(ctx, m); err != nil {
 		t.Fatal(err)
 	}
 	ms, err := snaps.listMarkers(ctx, 1)
-	if err != nil || len(ms) != 1 || ms[0].Sandbox != "soft-alice-r" {
+	if err != nil || len(ms) != 1 || ms[0].Sandbox != "sundae-alice-r" {
 		t.Fatalf("markers = %+v, %v", ms, err)
 	}
-	if err := snaps.deleteMarker(ctx, 1, "soft-alice-r"); err != nil {
+	if err := snaps.deleteMarker(ctx, 1, "sundae-alice-r"); err != nil {
 		t.Fatal(err)
 	}
 
 	// Clean up the snapshot.
-	if err := snaps.store.Delete(ctx, snaps.key(1, "soft-alice-r")); err != nil {
+	if err := snaps.store.Delete(ctx, snaps.key(1, "sundae-alice-r")); err != nil {
 		t.Fatal(err)
 	}
 }

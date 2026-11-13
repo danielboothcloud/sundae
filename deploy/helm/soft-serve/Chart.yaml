@@ -1,9 +1,0 @@
-apiVersion: v2
-name: soft-serve
-description: Soft Serve git server, configured from a mounted read-only config file, with optional OpenShell agent sessions.
-type: application
-version: 0.1.0
-# Default image tag when image.tag is empty. No image is published yet, so set
-# image.tag to the tag you built and pushed (see deploy/README.md).
-appVersion: "0.1.0"
-home: https://github.com/charmbracelet/soft-serve

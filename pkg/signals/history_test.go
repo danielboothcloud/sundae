@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"charm.land/log/v2"
-	"github.com/charmbracelet/soft-serve/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/events"
 )
 
 func newTestHistory(keep int, opts ...Option) *History {
@@ -18,7 +18,7 @@ func newTestHistory(keep int, opts ...Option) *History {
 }
 
 func sess(repo, name string) events.Session {
-	return events.Session{User: "alice", Repo: repo, Name: name, Sandbox: "soft-alice-" + repo + "-" + name}
+	return events.Session{User: "alice", Repo: repo, Name: name, Sandbox: "sundae-alice-" + repo + "-" + name}
 }
 
 func status(user int64, s events.Session, state events.State, msg string) events.Event {

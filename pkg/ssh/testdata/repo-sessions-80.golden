@@ -1,6 +1,6 @@
 
-  soft-serve                 jj git clone ssh://localhost:23231/soft-serve.git
-  about soft-serve
+  sundae                         jj git clone ssh://localhost:23231/sundae.git
+  about sundae
   Readme │ Files │ Commits │ Bookmarks │ Tags │ Sessions
 
 
@@ -16,4 +16,4 @@
 
 
 
-   soft-serve  forge-sync                         1 of 2  *  ? Help  ▲1 ✓1 ●2
+   sundae  forge-sync                             1 of 2  *  ? Help  ▲1 ✓1 ●2

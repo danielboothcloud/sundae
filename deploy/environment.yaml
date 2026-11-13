@@ -4,16 +4,16 @@
 # on the command line:
 #
 #   helmfile -f deploy/helmfile.yaml \
-#     --state-values-set openshell.sandboxImage=ghcr.io/you/sandbox:1.0 \
-#     --state-values-set softServe.image.tag=abc1234 sync
+#     --state-values-set openshell.sandboxImage=ghcr.io/danielboothcloud/sundae-sandbox:abc1234 \
+#     --state-values-set sundae.image.tag=abc1234 sync
 #
 # Values marked REQUIRED have no usable default; helmfile stops with a message
 # naming the value when one is empty.
 
 # The one namespace everything application-side goes into: the OpenShell
-# gateway, the sandboxes it creates, and Soft Serve. They share it so Soft
-# Serve can mount the gateway's client TLS secret directly.
-namespace: openshell
+# gateway, the sandboxes it creates, and Sundae. They share it so Sundae
+# can mount the gateway's client TLS secret directly.
+namespace: sundae
 
 agentSandbox:
   # Install the Kubernetes Agent Sandbox CRDs and controller (pinned to v1.0.10
@@ -21,10 +21,10 @@ agentSandbox:
   enabled: true
 
 openshell:
-  # REQUIRED. The default image for the sandboxes Soft Serve starts. It must
+  # REQUIRED. The default image for the sandboxes Sundae starts. It must
   # provide git and jj, and the cluster must be able to pull it. Build it from
   # sandbox/Containerfile and push it (README.md, step 1, "Sandbox"), then set
-  # the image and tag you pushed here, e.g. ghcr.io/you/soft-serve-sandbox:abc1234.
+  # the image and tag you pushed here, e.g. ghcr.io/danielboothcloud/sundae-sandbox:abc1234.
   sandboxImage: ""
 
   # Extra values for the OpenShell chart, merged over what helmfile sets (see
@@ -36,10 +36,10 @@ openshell:
   #       workspaceStorageClass: longhorn
   chartValues: {}
 
-softServe:
+sundae:
   image:
     # Placeholder registry path: confirm it, or point it at your own registry.
-    repository: ghcr.io/danielboothcloud/soft-serve
+    repository: ghcr.io/danielboothcloud/sundae
     # REQUIRED. The tag you built and pushed (see README.md). No image is
     # published for this fork, so there is no default.
     tag: ""
@@ -57,7 +57,7 @@ softServe:
     # Cilium LB-IPAM:
     #   lbipam.cilium.io/ips: "192.0.2.10"
     serviceAnnotations: {}
-    # The address users put in `ssh` and `git clone` commands. Soft Serve only
+    # The address users put in `ssh` and `git clone` commands. Sundae only
     # shows it in clone URLs; set it once you know the external address.
     publicURL: "ssh://localhost:23231"
 
@@ -68,10 +68,10 @@ softServe:
     # Empty uses the cluster's default StorageClass.
     storageClass: ""
 
-  # Extra values for the Soft Serve chart, merged over what helmfile sets (see
-  # values/soft-serve.yaml.gotmpl and helm/soft-serve/values.yaml).
+  # Extra values for the Sundae chart, merged over what helmfile sets (see
+  # values/sundae.yaml.gotmpl and helm/sundae/values.yaml).
   #
-  # The gateway authenticates Soft Serve by its client certificate, so no
+  # The gateway authenticates Sundae by its client certificate, so no
   # gateway token is set. If your gateway also wants a bearer token, put it in
   # a Secret in `namespace` and name it here; the chart mounts it as a file and
   # sets openshell.token_file (a token is never put in the ConfigMap):
@@ -87,13 +87,13 @@ softServe:
   #   chartValues:
   #     secretMounts:
   #       - name: github-token
-  #         secretName: soft-serve-github-token
-  #         mountPath: /etc/soft-serve-forges/github
+  #         secretName: sundae-github-token
+  #         mountPath: /etc/sundae-forges/github
   #     config:
   #       forges:
   #         - name: github
   #           kind: github
-  #           token_file: /etc/soft-serve-forges/github/token
+  #           token_file: /etc/sundae-forges/github/token
   #           include: ["me/*"]
   #
   # Notifications through ntfy are off by default. Quote the "on" key: Helm
@@ -102,7 +102,7 @@ softServe:
   #   chartValues:
   #     notifications:
   #       ntfyToken:
-  #         secretName: soft-serve-ntfy-token
+  #         secretName: sundae-ntfy-token
   #         key: token
   #     config:
   #       notifications:
@@ -129,7 +129,7 @@ softServe:
   # Project templates: `repo create <name> --template go-service` (and the
   # TUI's new-repository form, n on Repositories) seeds the new repository
   # with one commit holding the template repository's tree. The template
-  # repository must exist in Soft Serve; the profile, if set, becomes the new
+  # repository must exist in Sundae; the profile, if set, becomes the new
   # repository's default session profile (`repo profile`):
   #   chartValues:
   #     config:
@@ -141,9 +141,9 @@ softServe:
   #             description: Go service with a Containerfile and CI
   #             profile: claude
   #
-  # Session status and parking: how often Soft Serve reads each session's
+  # Session status and parking: how often Sundae reads each session's
   # status, and when it suspends an idle one. The OpenShell 0.1.8 Kubernetes
-  # compute driver cannot suspend; Soft Serve logs that once and leaves
+  # compute driver cannot suspend; Sundae logs that once and leaves
   # sandboxes running, so `enabled: false` only silences the attempt:
   #   chartValues:
   #     config:
@@ -164,14 +164,14 @@ softServe:
   #   chartValues:
   #     snapshots:
   #       s3Credentials:
-  #         secretName: soft-serve-snapshots   # the ObjectBucketClaim's name
+  #         secretName: sundae-snapshots   # the ObjectBucketClaim's name
   #         key: ""
   #     config:
   #       snapshots:
   #         s3:
   #           enabled: true
   #           endpoint: http://rook-ceph-rgw-store.rook-ceph.svc:80
-  #           bucket: soft-serve-snapshots-<generated>   # the OBC's BUCKET_NAME
+  #           bucket: sundae-snapshots-<generated>   # the OBC's BUCKET_NAME
   #           path_style: true
   #           "on": [end]
   #       sessions:

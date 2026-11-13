@@ -16,8 +16,8 @@ import (
 
 	"charm.land/log/v2"
 	"github.com/NVIDIA/OpenShell/sdk/go/openshell/v1/types"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/events"
 )
 
 // localClient runs a sandbox's commands on this machine, with HOME (and
@@ -86,14 +86,14 @@ func (c *localClient) Interactive(context.Context, string, []string, uint32, uin
 }
 func (c *localClient) Close() error { return nil }
 
-// TestOsewaLive runs Soft Serve's osewa bootstrap and status poll against a
-// real osewa build for this machine, given in SOFT_SERVE_TEST_OSEWA (it must
+// TestOsewaLive runs Sundae's osewa bootstrap and status poll against a
+// real osewa build for this machine, given in SUNDAE_TEST_OSEWA (it must
 // be the pinned version). The session's program reports OSC 7501 states
 // one after another and exits 7; the Monitor must see each of them.
 func TestOsewaLive(t *testing.T) {
-	bin := os.Getenv("SOFT_SERVE_TEST_OSEWA")
+	bin := os.Getenv("SUNDAE_TEST_OSEWA")
 	if bin == "" {
-		t.Skip("set SOFT_SERVE_TEST_OSEWA to an osewa " + OsewaVersion + " binary for this machine")
+		t.Skip("set SUNDAE_TEST_OSEWA to an osewa " + OsewaVersion + " binary for this machine")
 	}
 	bin, err := filepath.Abs(bin)
 	if err != nil {
@@ -120,14 +120,14 @@ func TestOsewaLive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The scripts take Soft Serve's paths in the sandbox as arguments.
+	// The scripts take Sundae's paths in the sandbox as arguments.
 	for _, v := range []struct {
 		p   *string
 		val string
 	}{
 		{&osewaInstallDir, filepath.Join(home, "not-installed")}, // poll falls back to PATH
-		{&osewaClientDir, filepath.Join(home, ".config/soft-serve/osewa-client")},
-		{&osewaSessionFile, filepath.Join(home, ".config/soft-serve/osewa-session")},
+		{&osewaClientDir, filepath.Join(home, ".config/sundae/osewa-client")},
+		{&osewaSessionFile, filepath.Join(home, ".config/sundae/osewa-session")},
 	} {
 		old := *v.p
 		*v.p = v.val
@@ -142,7 +142,7 @@ func TestOsewaLive(t *testing.T) {
 	port := l.Addr().(*net.TCPAddr).Port
 	_ = l.Close()
 
-	lc := &localClient{home: home, bin: binDir, sandbox: "soft-alice-r"}
+	lc := &localClient{home: home, bin: binDir, sandbox: "sundae-alice-r"}
 	m := &Manager{client: lc, osewaPort: port}
 	t.Cleanup(func() {
 		_ = exec.CommandContext(context.Background(), "pkill", "-f", "--", "--listen 127.0.0.1:"+strconv.Itoa(port)).Run()
@@ -167,11 +167,11 @@ func TestOsewaLive(t *testing.T) {
 
 	program := `emit() { printf '\033]7501;%s\033\\' "$1"; }
 wait_for() { while [ ! -e "$1" ]; do sleep 0.05; done; }
-emit 'state=working:app=soft-test:progress=40:msg=QnVpbGRpbmc='
+emit 'state=working:app=sundae-test:progress=40:msg=QnVpbGRpbmc='
 wait_for step1
-emit 'state=blocked:kind=permission:app=soft-test:msg=QXBwbHkgMyBjaGFuZ2VzPw=='
+emit 'state=blocked:kind=permission:app=sundae-test:msg=QXBwbHkgMyBjaGFuZ2VzPw=='
 wait_for step2
-emit 'state=done:app=soft-test:title=VGVzdHM=:msg=QWxsIHRlc3RzIHBhc3M='
+emit 'state=done:app=sundae-test:title=VGVzdHM=:msg=QWxsIHRlc3RzIHBhc3M='
 wait_for step3
 exit 7`
 	id, started, err := m.ensureOsewaSession(ctx, lc.sandbox, filepath.Join(binDir, "osewa"), work, []string{"/bin/sh", "-c", program})
@@ -221,7 +221,7 @@ exit 7`
 
 	st := await("working", func(st SessionStatus) bool { return st.Record.State == events.StateWorking })
 	t.Logf("osewa local ls, working: %s", raw())
-	if st.OsewaID != id || !st.Running || st.Record.App != "soft-test" || st.Record.Msg != "Building" ||
+	if st.OsewaID != id || !st.Running || st.Record.App != "sundae-test" || st.Record.Msg != "Building" ||
 		st.Record.Progress == nil || *st.Record.Progress != 40 || st.Attached != 0 {
 		t.Fatalf("working: %+v", st)
 	}

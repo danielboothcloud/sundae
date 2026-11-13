@@ -3,8 +3,8 @@ package store
 import (
 	"context"
 
-	"github.com/charmbracelet/soft-serve/pkg/access"
-	"github.com/charmbracelet/soft-serve/pkg/db"
+	"github.com/danielboothcloud/sundae/pkg/access"
+	"github.com/danielboothcloud/sundae/pkg/db"
 )
 
 // SettingStore is an interface for managing settings.

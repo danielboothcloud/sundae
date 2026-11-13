@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"charm.land/log/v2"
-	"github.com/charmbracelet/soft-serve/pkg/events"
-	"github.com/charmbracelet/soft-serve/pkg/signals"
-	"github.com/charmbracelet/soft-serve/pkg/sshutils"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/danielboothcloud/sundae/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/signals"
+	"github.com/danielboothcloud/sundae/pkg/sshutils"
 	"github.com/matryer/is"
 )
 
@@ -34,7 +34,7 @@ func signalsTestContext(t *testing.T) (context.Context, *events.Bus, *signals.Hi
 }
 
 func sigSession(repo, name string) events.Session {
-	return events.Session{User: "alice", Repo: repo, Name: name, Sandbox: "soft-alice-" + repo + "-" + name}
+	return events.Session{User: "alice", Repo: repo, Name: name, Sandbox: "sundae-alice-" + repo + "-" + name}
 }
 
 // publishAll publishes evs and waits for h to have recorded them.

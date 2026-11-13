@@ -26,8 +26,8 @@ import (
 	v1 "github.com/NVIDIA/OpenShell/sdk/go/openshell/v1"
 	"github.com/NVIDIA/OpenShell/sdk/go/openshell/v1/fake"
 	"github.com/NVIDIA/OpenShell/sdk/go/openshell/v1/types"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/proto"
 	gossh "golang.org/x/crypto/ssh"
 )
 
@@ -323,11 +323,11 @@ func (f *fakeExec) Run(_ context.Context, _, sandbox string, command []string, o
 		b.servers++
 		return ok("osewa server: started (pid 42, " + a[1] + ")\n")
 	case osewaEnrollName:
-		b.files[a[1]+"/client.key"] = env(o, "SOFT_SERVE_OSEWA_KEY")
+		b.files[a[1]+"/client.key"] = env(o, "SUNDAE_OSEWA_KEY")
 		b.files["devices"] += fmt.Sprintf(`{"name":%q,"key":%q}`+"\n", a[3], a[4])
 		return ok(`{"server_key":"c2VydmVyLWtleQ==","port":` + a[2] + `,"version":0}` + "\n")
 	case osewaHostsName:
-		b.files[a[0]+"/hosts.json"] = env(o, "SOFT_SERVE_OSEWA_HOSTS")
+		b.files[a[0]+"/hosts.json"] = env(o, "SUNDAE_OSEWA_HOSTS")
 	case osewaListName:
 		var ls struct {
 			Sessions []osewaSessionInfo `json:"sessions"`
@@ -349,7 +349,7 @@ func (f *fakeExec) Run(_ context.Context, _, sandbox string, command []string, o
 		b.newArgv = append([]string(nil), a[3:]...)
 		return ok("created " + id + "\n")
 	case gitCredentialsName:
-		b.files[a[1]] = env(o, "SOFT_SERVE_GITCONFIG")
+		b.files[a[1]] = env(o, "SUNDAE_GITCONFIG")
 		found := false
 		for _, inc := range b.includes {
 			found = found || inc == a[1]
@@ -437,7 +437,7 @@ type harness struct {
 func newHarnessConfig() *config.Config {
 	cfg := config.DefaultConfig()
 	cfg.HTTP.PublicURL = "https://git.example.com"
-	cfg.OpenShell.CloneURL = "http://soft-serve.svc:23232"
+	cfg.OpenShell.CloneURL = "http://sundae.svc:23232"
 	cfg.OpenShell.Image = "default-image"
 	return cfg
 }
@@ -492,7 +492,7 @@ func TestStartNewSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Name != DefaultSessionName || s.Sandbox != "soft-alice-r" || !s.Created || !s.Cloned || s.WorkDir != "/sandbox/r" {
+	if s.Name != DefaultSessionName || s.Sandbox != "sundae-alice-r" || !s.Created || !s.Cloned || s.WorkDir != "/sandbox/r" {
 		t.Fatalf("unexpected session: %+v", s)
 	}
 	if strings.Join(s.Command, " ") != "bash -l" || !s.Started || s.OsewaID != "osewa1" {
@@ -525,7 +525,7 @@ func TestStartNewSession(t *testing.T) {
 
 	// The program runs in the checkout, through a login shell.
 	newCall := h.exec.last(s.Sandbox, osewaNewName)
-	if !strings.Contains(newCall.command[2], `/bin/sh -lc 'cd "$1" || exit; shift; exec "$@"' soft-serve-session "$dir" "$@"`) {
+	if !strings.Contains(newCall.command[2], `/bin/sh -lc 'cd "$1" || exit; shift; exec "$@"' sundae-session "$dir" "$@"`) {
 		t.Fatalf("new script = %q", newCall.command[2])
 	}
 	if got := strings.Join(h.exec.boxes[s.Sandbox].newArgv, " "); got != "/sandbox/r bash -l" {
@@ -537,7 +537,7 @@ func TestStartNewSession(t *testing.T) {
 	if len(clones) != 1 {
 		t.Fatalf("clones = %d", len(clones))
 	}
-	wantClone := []string{"jj", "git", "clone", "--colocate", "http://soft-serve.svc:23232/r.git", "/sandbox/r"}
+	wantClone := []string{"jj", "git", "clone", "--colocate", "http://sundae.svc:23232/r.git", "/sandbox/r"}
 	if strings.Join(clones[0].command, " ") != strings.Join(wantClone, " ") {
 		t.Fatalf("clone = %q, want %q", clones[0].command, wantClone)
 	}
@@ -560,7 +560,7 @@ func TestStartNewSession(t *testing.T) {
 	if call.opts.Env["TERM"] != "xterm" || call.opts.Env["OSEWA_CONFIG_DIR"] != osewaClientDir || call.opts.Env["OSEWA_AUTO_UPDATE"] != "off" {
 		t.Fatalf("attach env = %v", call.opts.Env)
 	}
-	if !strings.Contains(progress.String(), "Starting sandbox soft-alice-r") {
+	if !strings.Contains(progress.String(), "Starting sandbox sundae-alice-r") {
 		t.Fatalf("progress = %q", progress.String())
 	}
 }
@@ -573,7 +573,7 @@ func TestGitCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	toks := h.tokens.named("openshell:soft-alice-r")
+	toks := h.tokens.named("openshell:sundae-alice-r")
 	if len(toks) != 1 || toks[0].ExpiresAt.IsZero() {
 		t.Fatalf("tokens = %+v", toks)
 	}
@@ -581,8 +581,8 @@ func TestGitCredentials(t *testing.T) {
 
 	b := h.exec.boxes[s.Sandbox]
 	basic := func(token string) string { return base64.StdEncoding.EncodeToString([]byte("alice:" + token)) }
-	want := "# Written by Soft Serve on every session start and attach.\n" +
-		"[http \"http://soft-serve.svc:23232/\"]\n" +
+	want := "# Written by Sundae on every session start and attach.\n" +
+		"[http \"http://sundae.svc:23232/\"]\n" +
 		"\textraHeader = Authorization: Basic " + basic(token) + "\n"
 	if b.files[gitCredentialFile] != want {
 		t.Fatalf("credential file = %q, want %q", b.files[gitCredentialFile], want)
@@ -607,7 +607,7 @@ func TestGitCredentials(t *testing.T) {
 				}
 				for k, v := range r.opts.Env {
 					decoded, _ := base64.StdEncoding.DecodeString(v)
-					if (strings.Contains(v, secret) || strings.Contains(string(decoded), secret)) && (r.script() != gitCredentialsName || k != "SOFT_SERVE_GITCONFIG") {
+					if (strings.Contains(v, secret) || strings.Contains(string(decoded), secret)) && (r.script() != gitCredentialsName || k != "SUNDAE_GITCONFIG") {
 						t.Fatalf("token in env %s of %q", k, r.command)
 					}
 				}
@@ -637,10 +637,10 @@ func TestGitCredentials(t *testing.T) {
 	if _, err := h.mgr.Resume(ctx, StartOptions{User: alice, Repo: "r"}); err != nil {
 		t.Fatal(err)
 	}
-	if n := len(h.tokens.named("openshell:soft-alice-r")); n != 2 {
+	if n := len(h.tokens.named("openshell:sundae-alice-r")); n != 2 {
 		t.Fatalf("tokens after attach = %d", n)
 	}
-	newest := h.tokens.newest("openshell:soft-alice-r")
+	newest := h.tokens.newest("openshell:sundae-alice-r")
 	if newest == token || !strings.Contains(b.files[gitCredentialFile], basic(newest)) {
 		t.Fatalf("credential file not refreshed: %q", b.files[gitCredentialFile])
 	}
@@ -679,7 +679,7 @@ func TestOsewaBootstrap(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if s.Osewa != osewaPath() || s.Osewa != "/sandbox/.local/lib/soft-serve/osewa-"+OsewaVersion {
+			if s.Osewa != osewaPath() || s.Osewa != "/sandbox/.local/lib/sundae/osewa-"+OsewaVersion {
 				t.Fatalf("osewa = %q", s.Osewa)
 			}
 			// Uploaded in chunks, then verified and unpacked.
@@ -728,7 +728,7 @@ func TestOsewaBootstrap(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "SHA-256") {
 			t.Fatalf("err = %v", err)
 		}
-		if h.exec.count("soft-alice-r", uploadBeginName) != 0 {
+		if h.exec.count("sundae-alice-r", uploadBeginName) != 0 {
 			t.Fatal("uploaded a build that failed verification")
 		}
 	})
@@ -750,11 +750,11 @@ func TestOsewaBootstrap(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		b := h.exec.boxes["soft-alice-r"]
-		if h.exec.count("soft-alice-r", osewaServerName) != 3 || b.servers != 1 {
-			t.Fatalf("server calls = %d, servers started = %d", h.exec.count("soft-alice-r", osewaServerName), b.servers)
+		b := h.exec.boxes["sundae-alice-r"]
+		if h.exec.count("sundae-alice-r", osewaServerName) != 3 || b.servers != 1 {
+			t.Fatalf("server calls = %d, servers started = %d", h.exec.count("sundae-alice-r", osewaServerName), b.servers)
 		}
-		server := h.exec.last("soft-alice-r", osewaServerName)
+		server := h.exec.last("sundae-alice-r", osewaServerName)
 		if strings.Join(server.args(), " ") != "/usr/local/bin/osewa 127.0.0.1:7400" {
 			t.Fatalf("server args = %q", server.args())
 		}
@@ -764,10 +764,10 @@ func TestOsewaBootstrap(t *testing.T) {
 		if server.opts.Env["OSEWA_HOME"] != SandboxRoot || server.opts.Env["HOME"] != SandboxRoot || server.opts.Env["OSEWA_AUTO_UPDATE"] != "off" {
 			t.Fatalf("server env = %v", server.opts.Env)
 		}
-		if h.exec.count("soft-alice-r", osewaEnrollName) != 1 || h.exec.count("soft-alice-r", osewaHostsName) != 1 {
+		if h.exec.count("sundae-alice-r", osewaEnrollName) != 1 || h.exec.count("sundae-alice-r", osewaHostsName) != 1 {
 			t.Fatal("enrolled more than once")
 		}
-		if h.exec.count("soft-alice-r", osewaNewName) != 1 {
+		if h.exec.count("sundae-alice-r", osewaNewName) != 1 {
 			t.Fatal("the program was started more than once")
 		}
 	})
@@ -777,8 +777,8 @@ func TestOsewaBootstrap(t *testing.T) {
 		if _, err := h.mgr.Start(ctx, StartOptions{User: alice, Repo: "r"}); err != nil {
 			t.Fatal(err)
 		}
-		b := h.exec.boxes["soft-alice-r"]
-		enroll := h.exec.last("soft-alice-r", osewaEnrollName)
+		b := h.exec.boxes["sundae-alice-r"]
+		enroll := h.exec.last("sundae-alice-r", osewaEnrollName)
 		a := enroll.args()
 		if a[1] != osewaClientDir || a[2] != "7322" || a[3] != osewaDevice {
 			t.Fatalf("enroll args = %q", a)
@@ -836,7 +836,7 @@ func TestOsewaSessionReuse(t *testing.T) {
 	}
 
 	// The program exited: the next attach starts it again.
-	b := h.exec.boxes["soft-alice-r"]
+	b := h.exec.boxes["sundae-alice-r"]
 	b.sessions[first.OsewaID] = false
 	var progress bytes.Buffer
 	third, err := h.mgr.Resume(ctx, StartOptions{User: alice, Repo: "r", Progress: &progress})
@@ -863,7 +863,7 @@ func TestOsewaSessionReuse(t *testing.T) {
 	b.files[osewaSessionFile] = "raced\n"
 	b.sessions["raced"] = true
 	// Pretend the list showed the old record.
-	id, started, err := h.mgr.newOsewaSession(ctx, "soft-alice-r", "/usr/local/bin/osewa", "/sandbox/r", []string{"bash"}, fourth.OsewaID)
+	id, started, err := h.mgr.newOsewaSession(ctx, "sundae-alice-r", "/usr/local/bin/osewa", "/sandbox/r", []string{"bash"}, fourth.OsewaID)
 	if err != nil || id != "raced" || started {
 		t.Fatalf("raced: id=%q started=%v err=%v", id, started, err)
 	}
@@ -936,11 +936,11 @@ func TestStartResumesStoppedSandbox(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(t)
 	h.fc.AddSandbox("default", &types.Sandbox{
-		Name:   "soft-alice-r",
+		Name:   "sundae-alice-r",
 		Labels: ownerLabels(alice),
 		Status: types.SandboxStatus{Phase: types.SandboxStopped},
 	})
-	h.exec.box("soft-alice-r").dirs["/sandbox/r"] = true
+	h.exec.box("sundae-alice-r").dirs["/sandbox/r"] = true
 
 	var progress bytes.Buffer
 	s, err := h.mgr.Start(ctx, StartOptions{User: alice, Repo: "r", Image: "custom", Progress: &progress})
@@ -950,7 +950,7 @@ func TestStartResumesStoppedSandbox(t *testing.T) {
 	if s.Created || s.Cloned {
 		t.Fatalf("created=%v cloned=%v", s.Created, s.Cloned)
 	}
-	sb, _ := h.fc.Sandboxes().Get(ctx, "default", "soft-alice-r")
+	sb, _ := h.fc.Sandboxes().Get(ctx, "default", "sundae-alice-r")
 	if sb.Status.Phase != types.SandboxReady {
 		t.Fatalf("phase = %s", sb.Status.Phase)
 	}
@@ -965,7 +965,7 @@ func TestStartCustomImage(t *testing.T) {
 	if _, err := h.mgr.Start(ctx, StartOptions{User: alice, Repo: "r", Image: "custom"}); err != nil {
 		t.Fatal(err)
 	}
-	sb, _ := h.fc.Sandboxes().Get(ctx, "default", "soft-alice-r")
+	sb, _ := h.fc.Sandboxes().Get(ctx, "default", "sundae-alice-r")
 	if sb.Spec.Template.Image != "custom" {
 		t.Fatalf("image = %q", sb.Spec.Template.Image)
 	}
@@ -1035,7 +1035,7 @@ func TestStartProfiles(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), `unknown profile "nope": use one of claude, shell`) {
 			t.Fatalf("err = %v", err)
 		}
-		if _, err := h.fc.Sandboxes().Get(ctx, "default", "soft-alice-r"); !IsNotFound(err) {
+		if _, err := h.fc.Sandboxes().Get(ctx, "default", "sundae-alice-r"); !IsNotFound(err) {
 			t.Fatal("sandbox created for an unknown profile")
 		}
 		h = newHarness(t)
@@ -1085,7 +1085,7 @@ func TestNamedSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if main.Sandbox != "soft-alice-r" || review.Sandbox != SessionSandboxName("alice", "r", "review") || review.Name != "review" {
+	if main.Sandbox != "sundae-alice-r" || review.Sandbox != SessionSandboxName("alice", "r", "review") || review.Name != "review" {
 		t.Fatalf("main = %q, review = %q (%q)", main.Sandbox, review.Sandbox, review.Name)
 	}
 	if !review.Created || !review.Cloned || !review.Started {
@@ -1134,23 +1134,23 @@ func TestResume(t *testing.T) {
 	// A stopped sandbox from before named sessions is started, and its
 	// program started in osewa.
 	h.fc.AddSandbox("default", &types.Sandbox{
-		Name:   "soft-alice-r",
+		Name:   "sundae-alice-r",
 		Labels: ownerLabels(alice),
 		Status: types.SandboxStatus{Phase: types.SandboxStopped},
 	})
-	h.exec.box("soft-alice-r").dirs["/sandbox/r"] = true
+	h.exec.box("sundae-alice-r").dirs["/sandbox/r"] = true
 	s, err := h.mgr.Resume(ctx, StartOptions{User: alice, Repo: "r", Image: "ignored", Profile: "ignored"})
 	if err != nil || s.Created || s.Cloned || !s.Started {
 		t.Fatalf("resume: %+v err=%v", s, err)
 	}
-	sb, _ := h.fc.Sandboxes().Get(ctx, "default", "soft-alice-r")
+	sb, _ := h.fc.Sandboxes().Get(ctx, "default", "sundae-alice-r")
 	if sb.Status.Phase != types.SandboxReady {
 		t.Fatalf("phase = %s", sb.Status.Phase)
 	}
 
 	// Someone else's sandbox.
 	h.fc.AddSandbox("default", &types.Sandbox{
-		Name:   "soft-alice-x",
+		Name:   "sundae-alice-x",
 		Labels: map[string]string{LabelUserID: "99"},
 		Status: types.SandboxStatus{Phase: types.SandboxReady},
 	})
@@ -1187,7 +1187,7 @@ func TestStartCloneFailure(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("err = %v", err)
 	}
-	if h.exec.count("soft-alice-r", osewaNewName) != 0 {
+	if h.exec.count("sundae-alice-r", osewaNewName) != 0 {
 		t.Fatal("started the program without a checkout")
 	}
 }
@@ -1199,7 +1199,7 @@ func TestStartFailedCreateCleansUp(t *testing.T) {
 	if _, err := h.mgr.Start(ctx, StartOptions{User: alice, Repo: "r"}); err == nil {
 		t.Fatal("expected error")
 	}
-	if _, err := h.fc.Sandboxes().Get(ctx, "default", "soft-alice-r"); !IsNotFound(err) {
+	if _, err := h.fc.Sandboxes().Get(ctx, "default", "sundae-alice-r"); !IsNotFound(err) {
 		t.Fatalf("sandbox left behind: %v", err)
 	}
 	if len(h.exec.clones()) != 0 {
@@ -1210,7 +1210,7 @@ func TestStartFailedCreateCleansUp(t *testing.T) {
 func TestStartRejectsForeignSandbox(t *testing.T) {
 	h := newHarness(t)
 	h.fc.AddSandbox("default", &types.Sandbox{
-		Name:   "soft-alice-r",
+		Name:   "sundae-alice-r",
 		Labels: map[string]string{LabelUserID: "99"},
 		Status: types.SandboxStatus{Phase: types.SandboxReady},
 	})
@@ -1240,7 +1240,7 @@ func TestStartPrunesExpiredTokens(t *testing.T) {
 	if _, err := h.mgr.Start(ctx, StartOptions{User: alice, Repo: "r"}); err != nil {
 		t.Fatal(err)
 	}
-	if n := len(h.tokens.named("openshell:soft-alice-r")); n != 1 {
+	if n := len(h.tokens.named("openshell:sundae-alice-r")); n != 1 {
 		t.Fatalf("tokens = %d, want 1", n)
 	}
 }
@@ -1253,14 +1253,14 @@ func TestStartKeepsUnexpiredTokens(t *testing.T) {
 	if _, err := h.mgr.Start(ctx, StartOptions{User: alice, Repo: "r"}); err != nil {
 		t.Fatal(err)
 	}
-	first := h.tokens.named("openshell:soft-alice-r")
+	first := h.tokens.named("openshell:sundae-alice-r")
 	if len(first) != 1 {
 		t.Fatalf("tokens after first start = %d", len(first))
 	}
 	if _, err := h.mgr.Start(ctx, StartOptions{User: alice, Repo: "r"}); err != nil {
 		t.Fatal(err)
 	}
-	toks := h.tokens.named("openshell:soft-alice-r")
+	toks := h.tokens.named("openshell:sundae-alice-r")
 	if len(toks) != 2 {
 		t.Fatalf("tokens after second start = %d, want 2", len(toks))
 	}
@@ -1288,10 +1288,10 @@ func TestEndIsIdempotent(t *testing.T) {
 	if err != nil || !existed {
 		t.Fatalf("end: existed=%v err=%v", existed, err)
 	}
-	if _, err := h.fc.Sandboxes().Get(ctx, "default", "soft-alice-r"); !IsNotFound(err) {
+	if _, err := h.fc.Sandboxes().Get(ctx, "default", "sundae-alice-r"); !IsNotFound(err) {
 		t.Fatalf("sandbox not deleted: %v", err)
 	}
-	if n := len(h.tokens.named("openshell:soft-alice-r")); n != 0 {
+	if n := len(h.tokens.named("openshell:sundae-alice-r")); n != 0 {
 		t.Fatalf("token not revoked: %d left", n)
 	}
 	if n := len(h.tokens.named("laptop")); n != 1 {
@@ -1310,7 +1310,7 @@ func TestEndIsIdempotent(t *testing.T) {
 func TestEndRejectsForeignSandbox(t *testing.T) {
 	h := newHarness(t)
 	h.fc.AddSandbox("default", &types.Sandbox{
-		Name:   "soft-alice-r",
+		Name:   "sundae-alice-r",
 		Labels: map[string]string{LabelUserID: "99"},
 	})
 	if _, err := h.mgr.End(context.Background(), alice, "r", ""); !errors.Is(err, ErrNotOwned) {
@@ -1334,12 +1334,12 @@ func TestList(t *testing.T) {
 	}
 	// A sandbox created before named sessions has no session annotation.
 	h.fc.AddSandbox("default", &types.Sandbox{
-		Name:        "soft-alice-old",
+		Name:        "sundae-alice-old",
 		Labels:      ownerLabels(alice),
 		Annotations: map[string]string{AnnotationRepo: "old"},
 		Status:      types.SandboxStatus{Phase: types.SandboxStopped},
 	})
-	// A sandbox not created by Soft Serve is ignored.
+	// A sandbox not created by Sundae is ignored.
 	h.fc.AddSandbox("default", &types.Sandbox{Name: "other"})
 
 	infos, err := h.mgr.List(ctx, alice)
@@ -1351,10 +1351,10 @@ func TestList(t *testing.T) {
 		got = append(got, fmt.Sprintf("%s/%s/%s/%s/%s", i.Repo, i.Name, i.Profile, i.Sandbox, i.Phase))
 	}
 	want := []string{
-		"alpha/main//soft-alice-alpha/Ready",
+		"alpha/main//sundae-alice-alpha/Ready",
 		"alpha/review/shell/" + SessionSandboxName("alice", "alpha", "review") + "/Ready",
-		"old/main//soft-alice-old/Stopped",
-		"zeta/main//soft-alice-zeta/Ready",
+		"old/main//sundae-alice-old/Stopped",
+		"zeta/main//sundae-alice-zeta/Ready",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("infos =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

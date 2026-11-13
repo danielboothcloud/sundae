@@ -25,35 +25,35 @@
 # 5. Attacker gains full Admin privileges
 #
 # THIS TEST VERIFIES:
-# - Using "attacksoft" command which offers both admin and attacker keys
+# - Using "attacksundae" command which offers both admin and attacker keys
 # - Attacker should NOT be able to perform admin user operations
 # - Attacker should NOT gain admin user privileges
 
 [windows] dos2unix notauthorizederr.txt
 
-# start soft serve
-exec soft serve &
+# start sundae serve
+exec sundae serve &
 # wait for SSH server to start
 ensureserverrunning SSH_PORT
 
 # Create a private repo as admin that only admin can access
-soft repo create admin-only-repo -p
+sundae repo create admin-only-repo -p
 
-# TEST 1: Simulate the attack using attacksoft command
-! attacksoft repo create attacker-created-repo
+# TEST 1: Simulate the attack using attacksundae command
+! attacksundae repo create attacker-created-repo
 
 # TEST 2: Verify attacker cannot access admin's private repo
-! attacksoft git-upload-pack admin-only-repo
+! attacksundae git-upload-pack admin-only-repo
 cmp stderr notauthorizederr.txt
 
 # TEST 3: Verify admin can still create repos (sanity check)
-soft repo create admin-created-repo
+sundae repo create admin-created-repo
 
 # TEST 4: Verify attacker cannot delete admin's repo
-! attacksoft repo delete admin-only-repo
+! attacksundae repo delete admin-only-repo
 
 # TEST 5: Verify attacker cannot change settings
-! attacksoft settings anon-access read-write
+! attacksundae settings anon-access read-write
 
 # stop the server
 [windows] stopserver

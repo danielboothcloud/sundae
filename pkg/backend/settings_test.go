@@ -4,12 +4,12 @@ import (
 	"context"
 	"testing"
 
-	"github.com/charmbracelet/soft-serve/pkg/access"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/db"
-	"github.com/charmbracelet/soft-serve/pkg/db/migrate"
-	"github.com/charmbracelet/soft-serve/pkg/store"
-	"github.com/charmbracelet/soft-serve/pkg/store/database"
+	"github.com/danielboothcloud/sundae/pkg/access"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/db"
+	"github.com/danielboothcloud/sundae/pkg/db/migrate"
+	"github.com/danielboothcloud/sundae/pkg/store"
+	"github.com/danielboothcloud/sundae/pkg/store/database"
 	"github.com/matryer/is"
 	_ "modernc.org/sqlite"
 )

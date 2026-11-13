@@ -13,10 +13,10 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/soft-serve/pkg/events"
-	"github.com/charmbracelet/soft-serve/pkg/forge"
-	"github.com/charmbracelet/soft-serve/pkg/ui/common"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/danielboothcloud/sundae/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/forge"
+	"github.com/danielboothcloud/sundae/pkg/ui/common"
 )
 
 var update = flag.Bool("update", false, "update golden files")
@@ -160,7 +160,7 @@ func newFakeSource() *fakeSource {
 				{Path: "danielboothcloud/dotfiles", Repo: "github/danielboothcloud/dotfiles", Listed: true},
 				{Path: "danielboothcloud/pi-aio", Repo: "github/danielboothcloud/pi-aio", Listed: true, Imported: true, Ahead: ptr(0), Behind: ptr(2), LastSync: &synced},
 				{Path: "danielboothcloud/quartermaster", Repo: "github/danielboothcloud/quartermaster", Listed: true},
-				{Path: "danielboothcloud/soft-serve", Repo: "github/danielboothcloud/soft-serve", Listed: true, Imported: true, Ahead: ptr(3), Behind: ptr(0), LastSync: &synced},
+				{Path: "danielboothcloud/sundae", Repo: "github/danielboothcloud/sundae", Listed: true, Imported: true, Ahead: ptr(3), Behind: ptr(0), LastSync: &synced},
 			},
 			"gitlab": {
 				{Path: "ops/infra", Repo: "gitlab/ops/infra", Imported: true, Ahead: ptr(0), Behind: ptr(0), LastSync: &glSynced, LastError: "git fetch: HTTP 401"},
@@ -430,19 +430,19 @@ func TestForgesImportFailureStaysInTheRow(t *testing.T) {
 func TestForgesPushConfirmAndRefusal(t *testing.T) {
 	src := newFakeSource()
 	m := started(t, 116, 20, src)
-	selectRow(t, m, "danielboothcloud/soft-serve")
+	selectRow(t, m, "danielboothcloud/sundae")
 	run(m, keys(m, "p"), 1)
 	if m.confirm == nil {
 		t.Fatal("p did not ask")
 	}
-	if got := ansi.Strip(m.FooterLine(116)); !strings.HasPrefix(got, "Push main of github/danielboothcloud/soft-serve to github?  Fast-forward only, no force.") {
+	if got := ansi.Strip(m.FooterLine(116)); !strings.HasPrefix(got, "Push main of github/danielboothcloud/sundae to github?  Fast-forward only, no force.") {
 		t.Fatalf("confirm %q", got)
 	}
 	run(m, keys(m, "y"), 2)
-	if fmt.Sprint(src.pushes) != "[github/danielboothcloud/soft-serve@main]" {
+	if fmt.Sprint(src.pushes) != "[github/danielboothcloud/sundae@main]" {
 		t.Fatalf("pushes %v", src.pushes)
 	}
-	if !strings.Contains(view(m), "Pushed main of github/danielboothcloud/soft-serve to github: 1111111..2222222.") {
+	if !strings.Contains(view(m), "Pushed main of github/danielboothcloud/sundae to github: 1111111..2222222.") {
 		t.Fatalf("view:\n%s", view(m))
 	}
 
@@ -467,19 +467,19 @@ func TestForgesPushConfirmAndRefusal(t *testing.T) {
 func TestForgesSyncAndOpen(t *testing.T) {
 	src := newFakeSource()
 	m := started(t, 116, 20, src)
-	selectRow(t, m, "danielboothcloud/soft-serve")
+	selectRow(t, m, "danielboothcloud/sundae")
 	run(m, keys(m, "r"), 2)
-	if fmt.Sprint(src.syncs) != "[github:github/danielboothcloud/soft-serve]" {
+	if fmt.Sprint(src.syncs) != "[github:github/danielboothcloud/sundae]" {
 		t.Fatalf("syncs %v", src.syncs)
 	}
-	if !strings.Contains(view(m), "Synced github/danielboothcloud/soft-serve: main fast-forwarded.") {
+	if !strings.Contains(view(m), "Synced github/danielboothcloud/sundae: main fast-forwarded.") {
 		t.Fatalf("view:\n%s", view(m))
 	}
 	cmd := keys(m, "enter")
-	if msg, ok := cmd().(OpenRepoMsg); !ok || msg.Repo != "github/danielboothcloud/soft-serve" {
+	if msg, ok := cmd().(OpenRepoMsg); !ok || msg.Repo != "github/danielboothcloud/sundae" {
 		t.Fatalf("enter: %v", cmd())
 	}
-	if c := keys(m, "c"); c == nil || !strings.Contains(view(m), "git clone ssh://git.example.com/github/danielboothcloud/soft-serve") {
+	if c := keys(m, "c"); c == nil || !strings.Contains(view(m), "git clone ssh://git.example.com/github/danielboothcloud/sundae") {
 		t.Fatalf("copy:\n%s", view(m))
 	}
 	selectRow(t, m, "danielboothcloud/dotfiles")

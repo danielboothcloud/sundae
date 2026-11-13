@@ -15,14 +15,14 @@ import (
 	"time"
 
 	"charm.land/log/v2"
-	gitb "github.com/charmbracelet/soft-serve/git"
-	"github.com/charmbracelet/soft-serve/pkg/access"
-	"github.com/charmbracelet/soft-serve/pkg/backend"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/git"
-	"github.com/charmbracelet/soft-serve/pkg/lfs"
-	"github.com/charmbracelet/soft-serve/pkg/proto"
-	"github.com/charmbracelet/soft-serve/pkg/utils"
+	gitb "github.com/danielboothcloud/sundae/git"
+	"github.com/danielboothcloud/sundae/pkg/access"
+	"github.com/danielboothcloud/sundae/pkg/backend"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/git"
+	"github.com/danielboothcloud/sundae/pkg/lfs"
+	"github.com/danielboothcloud/sundae/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/utils"
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -58,7 +58,7 @@ func (g GitRoute) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 var (
 	//nolint:revive
 	gitHttpReceiveCounter = promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "soft_serve",
+		Namespace: "sundae",
 		Subsystem: "http",
 		Name:      "git_receive_pack_total",
 		Help:      "The total number of git push requests",
@@ -66,7 +66,7 @@ var (
 
 	//nolint:revive
 	gitHttpUploadCounter = promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "soft_serve",
+		Namespace: "sundae",
 		Subsystem: "http",
 		Name:      "git_upload_pack_total",
 		Help:      "The total number of git fetch/pull requests",
@@ -385,7 +385,7 @@ func withAccess(next http.Handler) http.HandlerFunc {
 		}
 
 		// Only advertise the VCS kind once the caller is authorized.
-		w.Header().Set("X-Soft-Serve-VCS", repo.Vcs().String())
+		w.Header().Set("X-Sundae-VCS", repo.Vcs().String())
 
 		next.ServeHTTP(w, r)
 	}
@@ -427,13 +427,13 @@ func serviceRpc(w http.ResponseWriter, r *http.Request) {
 	user := proto.UserFromContext(ctx)
 	cmd.Env = cfg.Environ()
 	cmd.Env = append(cmd.Env, []string{
-		"SOFT_SERVE_REPO_NAME=" + repoName,
-		"SOFT_SERVE_REPO_PATH=" + dir,
-		"SOFT_SERVE_LOG_PATH=" + filepath.Join(cfg.DataPath, "log", "hooks.log"),
+		"SUNDAE_REPO_NAME=" + repoName,
+		"SUNDAE_REPO_PATH=" + dir,
+		"SUNDAE_LOG_PATH=" + filepath.Join(cfg.DataPath, "log", "hooks.log"),
 	}...)
 	if user != nil {
 		cmd.Env = append(cmd.Env, []string{
-			"SOFT_SERVE_USERNAME=" + user.Username(),
+			"SUNDAE_USERNAME=" + user.Username(),
 		}...)
 	}
 	if len(version) != 0 {
@@ -496,13 +496,13 @@ func getInfoRefs(w http.ResponseWriter, r *http.Request) {
 		user := proto.UserFromContext(ctx)
 		cmd.Env = cfg.Environ()
 		cmd.Env = append(cmd.Env, []string{
-			"SOFT_SERVE_REPO_NAME=" + repoName,
-			"SOFT_SERVE_REPO_PATH=" + dir,
-			"SOFT_SERVE_LOG_PATH=" + filepath.Join(cfg.DataPath, "log", "hooks.log"),
+			"SUNDAE_REPO_NAME=" + repoName,
+			"SUNDAE_REPO_PATH=" + dir,
+			"SUNDAE_LOG_PATH=" + filepath.Join(cfg.DataPath, "log", "hooks.log"),
 		}...)
 		if user != nil {
 			cmd.Env = append(cmd.Env, []string{
-				"SOFT_SERVE_USERNAME=" + user.Username(),
+				"SUNDAE_USERNAME=" + user.Username(),
 			}...)
 		}
 		if len(protocol) != 0 {

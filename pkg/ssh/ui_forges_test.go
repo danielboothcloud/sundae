@@ -10,14 +10,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/soft-serve/pkg/backend"
-	"github.com/charmbracelet/soft-serve/pkg/events"
-	"github.com/charmbracelet/soft-serve/pkg/forge"
-	"github.com/charmbracelet/soft-serve/pkg/openshell"
-	"github.com/charmbracelet/soft-serve/pkg/proto"
-	"github.com/charmbracelet/soft-serve/pkg/ui/pages/forges"
-	"github.com/charmbracelet/soft-serve/pkg/ui/pages/selection"
-	"github.com/charmbracelet/soft-serve/pkg/ui/pages/sessions"
+	"github.com/danielboothcloud/sundae/pkg/backend"
+	"github.com/danielboothcloud/sundae/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/forge"
+	"github.com/danielboothcloud/sundae/pkg/openshell"
+	"github.com/danielboothcloud/sundae/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/ui/pages/forges"
+	"github.com/danielboothcloud/sundae/pkg/ui/pages/selection"
+	"github.com/danielboothcloud/sundae/pkg/ui/pages/sessions"
 )
 
 func intp(n int) *int { return &n }
@@ -33,7 +33,7 @@ type fakeForges struct {
 
 func newFakeForges() *fakeForges {
 	return &fakeForges{
-		origins: map[string]forge.Origin{"soft-serve": {Forge: "github", Path: "me/soft-serve", Ahead: intp(3), Behind: intp(0)}},
+		origins: map[string]forge.Origin{"sundae": {Forge: "github", Path: "me/sundae", Ahead: intp(3), Behind: intp(0)}},
 		feed:    &chanFeed{ch: make(chan []events.Event, 4)},
 	}
 }
@@ -47,7 +47,7 @@ func (f *fakeForges) Repos(context.Context, string) ([]forge.RepoStatus, error) 
 	synced := time.Now().Add(-3 * time.Minute)
 	return []forge.RepoStatus{
 		{Path: "me/dotfiles", Repo: "github/me/dotfiles", Listed: true},
-		{Path: "me/soft-serve", Repo: "soft-serve", Listed: true, Imported: true, Ahead: intp(3), Behind: intp(0), LastSync: &synced},
+		{Path: "me/sundae", Repo: "sundae", Listed: true, Imported: true, Ahead: intp(3), Behind: intp(0), LastSync: &synced},
 	}, nil
 }
 func (f *fakeForges) Discover(context.Context, string) error { return nil }
@@ -123,7 +123,7 @@ func richHomeUI(t *testing.T, width, height int) (*UI, *fakeSource, *fakeForges)
 		src.statuses[r.Info.Sandbox] = st
 	}
 	ui := newHomeUI(t, width, height, func(ctx context.Context, be *backend.Backend) context.Context {
-		for i, name := range []string{"soft-serve", "infra", "scratch"} {
+		for i, name := range []string{"sundae", "infra", "scratch"} {
 			r, err := be.CreateRepository(ctx, name, nil, proto.RepositoryOptions{Description: "about " + name})
 			if err != nil {
 				t.Fatal(err)
@@ -149,7 +149,7 @@ func richHomeUI(t *testing.T, width, height int) (*UI, *fakeSource, *fakeForges)
 func titleLines(screen string) string {
 	var out []string
 	for _, l := range strings.Split(screen, "\n") {
-		for _, name := range []string{"soft-serve", "infra", "scratch"} {
+		for _, name := range []string{"sundae", "infra", "scratch"} {
 			if strings.Contains(l, " "+name+" ") || strings.HasSuffix(l, " "+name) {
 				out = append(out, strings.TrimRight(l, " "))
 			}
@@ -177,9 +177,9 @@ func TestRepositoryBadges(t *testing.T) {
 		t.Fatalf("narrow drop at 26:\n%s", got)
 	}
 	// A title too long for the badges drops them on its row only.
-	ui, _, _ = richHomeUI(t, 18, 24)
-	if got := titleLines(screenText(ui)); !strings.Contains(got, "infra   ▲1") || strings.Contains(got, "✓") {
-		t.Fatalf("badges at 18 columns:\n%s", got)
+	ui, _, _ = richHomeUI(t, 17, 24)
+	if got := titleLines(screenText(ui)); !strings.Contains(got, "infra  ▲1") || strings.Contains(got, "✓") {
+		t.Fatalf("badges at 17 columns:\n%s", got)
 	}
 }
 
@@ -191,15 +191,15 @@ func TestRepositoryBadgesLive(t *testing.T) {
 	}
 	// A sync event re-reads that repository's origin only.
 	ff.mu.Lock()
-	ff.origins["soft-serve"] = forge.Origin{Forge: "github", Ahead: intp(0), Behind: intp(2)}
+	ff.origins["sundae"] = forge.Origin{Forge: "github", Ahead: intp(0), Behind: intp(2)}
 	ff.mu.Unlock()
-	ff.feed.ch <- []events.Event{events.ForgeEvent(1, events.ForgeOutcome{Kind: "sync", Forge: "github", Repo: "soft-serve", OK: true})}
+	ff.feed.ch <- []events.Event{events.ForgeEvent(1, events.ForgeOutcome{Kind: "sync", Forge: "github", Repo: "sundae", OK: true})}
 	waitScreen(t, ui, "github ↓2")
 	// A session's status change, as the Monitor reads it, moves the
-	// session badge: soft-serve's done session becomes blocked.
-	st := src.statuses["sb-soft-serve-forge-sync"]
+	// session badge: sundae's done session becomes blocked.
+	st := src.statuses["sb-sundae-forge-sync"]
 	st.Record.State = events.StateBlocked
-	src.statuses["sb-soft-serve-forge-sync"] = st
+	src.statuses["sb-sundae-forge-sync"] = st
 	if got := screenText(ui); !strings.Contains(got, "▲ 2 sessions") {
 		t.Fatalf("session badge not updated:\n%s", titleLines(got))
 	}
@@ -227,7 +227,7 @@ func TestRepositoriesNewSessionKey(t *testing.T) {
 		t.Fatalf("s did not open the form:\n%s", s)
 	}
 	// The repository is the selected one, fixed.
-	if !strings.Contains(s, "Repository   soft-serve") || strings.Contains(s, "‹ soft-serve ›") {
+	if !strings.Contains(s, "Repository   sundae") || strings.Contains(s, "‹ sundae ›") {
 		t.Fatalf("repository not fixed:\n%s", s)
 	}
 	uiKey(ui, "esc", "1")
@@ -250,7 +250,7 @@ func TestHomeForgesTab(t *testing.T) {
 			uiKey(ui, "j", "j", "p")
 			s := screenText(ui)
 			last := s[strings.LastIndex(s, "\n")+1:]
-			if !strings.Contains(last, "Push main of soft-serve to github?") || !strings.HasSuffix(last, "y / N") {
+			if !strings.Contains(last, "Push main of sundae to github?") || !strings.HasSuffix(last, "y / N") {
 				t.Fatalf("confirm %q", last)
 			}
 			// q is an answer, not quit.
@@ -311,7 +311,7 @@ func TestRepoSessionsTab(t *testing.T) {
 	for _, w := range []int{80, 50} {
 		t.Run(fmt.Sprint(w), func(t *testing.T) {
 			ui, _, _ := richHomeUI(t, w, 20)
-			uiKeyDepth(ui, 6, "enter") // soft-serve
+			uiKeyDepth(ui, 6, "enter") // sundae
 			settle(t, ui)
 			for range 5 {
 				uiKey(ui, "tab")
@@ -344,7 +344,7 @@ func TestRepoSessionsKeys(t *testing.T) {
 	}
 	// The end confirm shows in the tab.
 	uiKey(ui, "x")
-	if s := screenText(ui); !strings.Contains(s, "End soft-serve / forge-sync?") {
+	if s := screenText(ui); !strings.Contains(s, "End sundae / forge-sync?") {
 		t.Fatalf("confirm:\n%s", s)
 	}
 	uiKey(ui, "esc")

@@ -263,17 +263,17 @@ func validateClickURL(raw string) error {
 }
 
 // notificationsEnviron returns the notifications section as
-// SOFT_SERVE_NOTIFICATIONS_* environment variables. The token itself is never
+// SUNDAE_NOTIFICATIONS_* environment variables. The token itself is never
 // included, only its file.
 func (c *Config) notificationsEnviron() []string {
 	nc := c.Notifications
 	return []string{
-		"SOFT_SERVE_NOTIFICATIONS_ON=" + strings.Join(nc.On, ","),
-		"SOFT_SERVE_NOTIFICATIONS_DEBOUNCE=" + nc.Debounce.String(),
-		fmt.Sprintf("SOFT_SERVE_NOTIFICATIONS_NTFY_ENABLED=%t", nc.Ntfy.Enabled),
-		"SOFT_SERVE_NOTIFICATIONS_NTFY_URL=" + nc.Ntfy.URL,
-		"SOFT_SERVE_NOTIFICATIONS_NTFY_TOPIC=" + nc.Ntfy.Topic,
-		"SOFT_SERVE_NOTIFICATIONS_NTFY_TOKEN_FILE=" + nc.Ntfy.TokenFile,
-		"SOFT_SERVE_NOTIFICATIONS_NTFY_CLICK_URL=" + nc.Ntfy.ClickURL,
+		"SUNDAE_NOTIFICATIONS_ON=" + strings.Join(nc.On, ","),
+		"SUNDAE_NOTIFICATIONS_DEBOUNCE=" + nc.Debounce.String(),
+		fmt.Sprintf("SUNDAE_NOTIFICATIONS_NTFY_ENABLED=%t", nc.Ntfy.Enabled),
+		"SUNDAE_NOTIFICATIONS_NTFY_URL=" + nc.Ntfy.URL,
+		"SUNDAE_NOTIFICATIONS_NTFY_TOPIC=" + nc.Ntfy.Topic,
+		"SUNDAE_NOTIFICATIONS_NTFY_TOKEN_FILE=" + nc.Ntfy.TokenFile,
+		"SUNDAE_NOTIFICATIONS_NTFY_CLICK_URL=" + nc.Ntfy.ClickURL,
 	}
 }

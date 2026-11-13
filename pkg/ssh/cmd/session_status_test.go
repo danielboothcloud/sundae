@@ -10,11 +10,11 @@ import (
 
 	"charm.land/log/v2"
 	"github.com/NVIDIA/OpenShell/sdk/go/openshell/v1/types"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/events"
-	"github.com/charmbracelet/soft-serve/pkg/openshell"
-	"github.com/charmbracelet/soft-serve/pkg/proto"
-	"github.com/charmbracelet/soft-serve/pkg/sshutils"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/openshell"
+	"github.com/danielboothcloud/sundae/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/sshutils"
 	"github.com/matryer/is"
 )
 
@@ -31,7 +31,7 @@ func withMonitor(ctx context.Context, fc *fakeOpenShell) (context.Context, *open
 func tableRows(out string) []string {
 	var rows []string
 	for _, l := range strings.Split(out, "\n") {
-		if !strings.Contains(l, "soft-alice") {
+		if !strings.Contains(l, "sundae-alice") {
 			continue
 		}
 		cells := strings.FieldsFunc(l, func(r rune) bool { return r == '│' || r == '|' })

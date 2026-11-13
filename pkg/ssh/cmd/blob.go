@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/charmbracelet/soft-serve/git"
-	"github.com/charmbracelet/soft-serve/pkg/backend"
-	"github.com/charmbracelet/soft-serve/pkg/ui/common"
-	"github.com/charmbracelet/soft-serve/pkg/ui/styles"
+	"github.com/danielboothcloud/sundae/git"
+	"github.com/danielboothcloud/sundae/pkg/backend"
+	"github.com/danielboothcloud/sundae/pkg/ui/common"
+	"github.com/danielboothcloud/sundae/pkg/ui/styles"
 	"github.com/spf13/cobra"
 )
 
@@ -17,7 +17,7 @@ func blobCommand() *cobra.Command {
 	var color bool
 	var raw bool
 	var noColor bool
-	if testrun, ok := os.LookupEnv("SOFT_SERVE_NO_COLOR"); ok && testrun == "1" {
+	if testrun, ok := os.LookupEnv("SUNDAE_NO_COLOR"); ok && testrun == "1" {
 		noColor = true
 	}
 

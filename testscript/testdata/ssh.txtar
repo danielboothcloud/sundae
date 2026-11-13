@@ -2,94 +2,94 @@
 
 [windows] dos2unix argserr1.txt argserr2.txt argserr3.txt invalidrepoerr.txt notauthorizederr.txt
 
-# start soft serve
-exec soft serve &
+# start sundae serve
+exec sundae serve &
 # wait for SSH server to start
 ensureserverrunning SSH_PORT
 
 # create a user
-soft user create foo --key "$USER1_AUTHORIZED_KEY"
+sundae user create foo --key "$USER1_AUTHORIZED_KEY"
 
 # create a repo
-soft repo create repo1
-soft repo create repo1p -p
-usoft repo create repo2
-usoft repo create repo2p -p
+sundae repo create repo1
+sundae repo create repo1p -p
+usundae repo create repo2
+usundae repo create repo2p -p
 
 # SSH Git commands as admin
-! soft git-upload-pack
+! sundae git-upload-pack
 cmp stderr argserr1.txt
-! soft git-upload-pack foobar
+! sundae git-upload-pack foobar
 cmp stderr invalidrepoerr.txt
-! soft git-upload-archive
+! sundae git-upload-archive
 cmp stderr argserr1.txt
-! soft git-upload-archive foobar
+! sundae git-upload-archive foobar
 cmp stderr invalidrepoerr.txt
-! soft git-receive-pack
+! sundae git-receive-pack
 cmp stderr argserr1.txt
-! soft git-receive-pack foobar
+! sundae git-receive-pack foobar
 stdout '.*0000 capabilities.*git.*' # git pack response
 stderr '.*something went wrong.*'
-! soft git-lfs-authenticate
+! sundae git-lfs-authenticate
 cmp stderr argserr2.txt
-! soft git-lfs-authenticate foobar
+! sundae git-lfs-authenticate foobar
 cmp stderr argserr3.txt
-! soft git-lfs-authenticate foobar download
+! sundae git-lfs-authenticate foobar download
 cmp stderr invalidrepoerr.txt
-! soft git-lfs-authenticate foobar upload
+! sundae git-lfs-authenticate foobar upload
 cmp stderr invalidrepoerr.txt
-soft git-lfs-authenticate repo1 download
+sundae git-lfs-authenticate repo1 download
 stdout '.*header.*Bearer.*href.*expires_in.*expires_at.*'
-soft git-lfs-authenticate repo1 upload
+sundae git-lfs-authenticate repo1 upload
 stdout '.*header.*Bearer.*href.*expires_in.*expires_at.*'
-soft git-lfs-authenticate repo1p download
+sundae git-lfs-authenticate repo1p download
 stdout '.*header.*Bearer.*href.*expires_in.*expires_at.*'
-soft git-lfs-authenticate repo1p upload
+sundae git-lfs-authenticate repo1p upload
 stdout '.*header.*Bearer.*href.*expires_in.*expires_at.*'
-soft git-lfs-authenticate repo2 download
+sundae git-lfs-authenticate repo2 download
 stdout '.*header.*Bearer.*href.*expires_in.*expires_at.*'
-soft git-lfs-authenticate repo2 upload
+sundae git-lfs-authenticate repo2 upload
 stdout '.*header.*Bearer.*href.*expires_in.*expires_at.*'
-soft git-lfs-authenticate repo2p download
+sundae git-lfs-authenticate repo2p download
 stdout '.*header.*Bearer.*href.*expires_in.*expires_at.*'
-soft git-lfs-authenticate repo2p upload
+sundae git-lfs-authenticate repo2p upload
 stdout '.*header.*Bearer.*href.*expires_in.*expires_at.*'
 
 # SSH Git commands as user
-! usoft git-upload-pack
+! usundae git-upload-pack
 cmp stderr argserr1.txt
-! usoft git-upload-pack foobar
+! usundae git-upload-pack foobar
 cmp stderr invalidrepoerr.txt
-! usoft git-upload-archive
+! usundae git-upload-archive
 cmp stderr argserr1.txt
-! usoft git-upload-archive foobar
+! usundae git-upload-archive foobar
 cmp stderr invalidrepoerr.txt
-! usoft git-receive-pack
+! usundae git-receive-pack
 cmp stderr argserr1.txt
-! usoft git-receive-pack foobar
+! usundae git-receive-pack foobar
 stdout '.*0000 capabilities.*git.*' # git pack response
 stderr '.*something went wrong.*'
-! usoft git-lfs-authenticate
+! usundae git-lfs-authenticate
 cmp stderr argserr2.txt
-! usoft git-lfs-authenticate foobar download
+! usundae git-lfs-authenticate foobar download
 cmp stderr invalidrepoerr.txt
-! usoft git-lfs-authenticate foobar upload
+! usundae git-lfs-authenticate foobar upload
 cmp stderr invalidrepoerr.txt
-usoft git-lfs-authenticate repo1 download
+usundae git-lfs-authenticate repo1 download
 stdout '.*header.*Bearer.*href.*expires_in.*expires_at.*'
-! usoft git-lfs-authenticate repo1 upload
+! usundae git-lfs-authenticate repo1 upload
 cmp stderr notauthorizederr.txt
-! usoft git-lfs-authenticate repo1p download
+! usundae git-lfs-authenticate repo1p download
 cmp stderr notauthorizederr.txt
-! usoft git-lfs-authenticate repo1p upload
+! usundae git-lfs-authenticate repo1p upload
 cmp stderr notauthorizederr.txt
-usoft git-lfs-authenticate repo2 download
+usundae git-lfs-authenticate repo2 download
 stdout '.*header.*Bearer.*href.*expires_in.*expires_at.*'
-usoft git-lfs-authenticate repo2 upload
+usundae git-lfs-authenticate repo2 upload
 stdout '.*header.*Bearer.*href.*expires_in.*expires_at.*'
-usoft git-lfs-authenticate repo2p download
+usundae git-lfs-authenticate repo2p download
 stdout '.*header.*Bearer.*href.*expires_in.*expires_at.*'
-usoft git-lfs-authenticate repo2p upload
+usundae git-lfs-authenticate repo2p upload
 stdout '.*header.*Bearer.*href.*expires_in.*expires_at.*'
 
 # stop the server

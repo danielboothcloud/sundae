@@ -1,10 +1,10 @@
-# Soft Serve next to an NVIDIA OpenShell gateway, on Kubernetes.
+# Sundae next to an NVIDIA OpenShell gateway, on Kubernetes.
 #
 #   1. agent-sandbox  the Agent Sandbox CRDs and controller OpenShell needs
 #   2. openshell      the OpenShell gateway (creates the mTLS secrets)
-#   3. soft-serve     Soft Serve, configured to start sandboxes through 2
+#   3. sundae         Sundae, configured to start sandboxes through 2
 #
-# 2 and 3 share one namespace (`namespace` in environment.yaml) so Soft Serve
+# 2 and 3 share one namespace (`namespace` in environment.yaml) so Sundae
 # can mount the gateway's client TLS secret. See README.md for the commands.
 #
 # This file is plain YAML. Only release fields such as `namespace` and the
@@ -40,7 +40,7 @@ releases:
           name: agent-sandbox-system
 
   # The release name is the gateway's Service name (openshell), which
-  # values/soft-serve.yaml.gotmpl uses for gateway_address.
+  # values/sundae.yaml.gotmpl uses for gateway_address.
   - name: openshell
     namespace: '{{ .Values.namespace }}'
     chart: oci://ghcr.io/nvidia/openshell/helm-chart
@@ -55,16 +55,16 @@ releases:
       - values/passthrough.yaml.gotmpl
 
   # The release name is part of the Service name sandboxes clone from
-  # (soft-serve-http); do not change it without changing
-  # values/soft-serve.yaml.gotmpl.
-  - name: soft-serve
+  # (sundae-http); do not change it without changing
+  # values/sundae.yaml.gotmpl.
+  - name: sundae
     namespace: '{{ .Values.namespace }}'
-    chart: ./helm/soft-serve
+    chart: ./helm/sundae
     labels:
-      values: softServe
+      values: sundae
     needs:
       - '{{ .Values.namespace }}/openshell'
     values:
       - values/required.yaml.gotmpl
-      - values/soft-serve.yaml.gotmpl
+      - values/sundae.yaml.gotmpl
       - values/passthrough.yaml.gotmpl

@@ -23,10 +23,10 @@ import (
 	v1 "github.com/NVIDIA/OpenShell/sdk/go/openshell/v1"
 	"github.com/NVIDIA/OpenShell/sdk/go/openshell/v1/fake"
 	"github.com/NVIDIA/OpenShell/sdk/go/openshell/v1/types"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/events"
-	"github.com/charmbracelet/soft-serve/pkg/s3store"
-	"github.com/charmbracelet/soft-serve/pkg/s3store/s3test"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/s3store"
+	"github.com/danielboothcloud/sundae/pkg/s3store/s3test"
 )
 
 // fakeSnapshotKnobs configures the fake's snapshot scripts.
@@ -293,7 +293,7 @@ func (h *snapHarness) archive(t *testing.T, key string) map[string]string {
 	}
 }
 
-const snapKey = "soft-serve/sessions/1/soft-alice-r.tar.gz"
+const snapKey = "sundae/sessions/1/sundae-alice-r.tar.gz"
 
 // work puts files into the session's sandbox: the checkout, osewa state and
 // credential-like files.
@@ -305,15 +305,15 @@ func work(h *snapHarness, sandbox string) {
 	b.files["/sandbox/.bashrc"] = "# mine\n"
 	b.files["/sandbox/.config/osewa/server.key"] = "server key"
 	b.files["/sandbox/.local/state/osewa/holder.sock"] = "socket"
-	b.files["/sandbox/.config/soft-serve/osewa-session"] = "osewa1\n"
-	b.files["/sandbox/.config/soft-serve/osewa-session.lock"] = ""
-	b.files["/sandbox/.config/soft-serve/osewa-client/client.key"] = "client key"
-	b.files["/sandbox/.local/lib/soft-serve/osewa-0.1.4"] = "binary"
+	b.files["/sandbox/.config/sundae/osewa-session"] = "osewa1\n"
+	b.files["/sandbox/.config/sundae/osewa-session.lock"] = ""
+	b.files["/sandbox/.config/sundae/osewa-client/client.key"] = "client key"
+	b.files["/sandbox/.local/lib/sundae/osewa-0.1.4"] = "binary"
 	b.files["/sandbox/.ssh/id_ed25519"] = "PRIVATE KEY"
 	b.files["/sandbox/.cache/go-build/x"] = "cache"
 	b.files["/sandbox/.claude/.credentials.json"] = "{}"
 	b.files["/sandbox/.claude/settings.json"] = "{}"
-	b.files["/tmp/soft-serve/gitconfig"] = "token"
+	b.files["/tmp/sundae/gitconfig"] = "token"
 }
 
 // freshVolume forgets what the fake kept of a deleted sandbox: the next
@@ -328,10 +328,10 @@ func freshVolume(h *snapHarness, sandbox string) {
 func TestSnapshotKeys(t *testing.T) {
 	h := newSnapHarness(t, func(c *config.Config) { c.Snapshots.S3.Prefix = "team/snaps" }, false)
 	s := h.mgr.snaps
-	if got := s.key(42, "soft-bob-x--1a2b3c4d"); got != "team/snaps/42/soft-bob-x--1a2b3c4d.tar.gz" {
+	if got := s.key(42, "sundae-bob-x--1a2b3c4d"); got != "team/snaps/42/sundae-bob-x--1a2b3c4d.tar.gz" {
 		t.Fatalf("key = %s", got)
 	}
-	if got := s.markerKey(42, "soft-bob-x"); got != "team/snaps/42/soft-bob-x.parked.json" {
+	if got := s.markerKey(42, "sundae-bob-x"); got != "team/snaps/42/sundae-bob-x.parked.json" {
 		t.Fatalf("marker = %s", got)
 	}
 	if got := s.objectURL(s.key(1, "sb")); got != "s3://snapshots/team/snaps/1/sb.tar.gz" {
@@ -386,7 +386,7 @@ func TestEndSnapshotsThenDeletes(t *testing.T) {
 		}
 	}
 	o, _ := h.s3.Object(snapKey)
-	if o.SSE != "AES256" || o.Metadata["soft-serve-repo"] != "r" || o.Metadata["soft-serve-session"] != "main" || o.ContentType != "application/gzip" {
+	if o.SSE != "AES256" || o.Metadata["sundae-repo"] != "r" || o.Metadata["sundae-session"] != "main" || o.ContentType != "application/gzip" {
 		t.Fatalf("object = %+v", o)
 	}
 	// The upload was presigned, the archive went straight from the
@@ -509,7 +509,7 @@ func TestSnapshotTooLarge(t *testing.T) {
 	if !errors.Is(err, ErrSnapshotFailed) {
 		t.Fatalf("end = %v", err)
 	}
-	pack := h.exec.last("soft-alice-r", snapshotPackName)
+	pack := h.exec.last("sundae-alice-r", snapshotPackName)
 	if pack.args()[2] != "5368709120" {
 		t.Fatalf("pack limit = %v", pack.args()[:3])
 	}
@@ -611,7 +611,7 @@ func TestStartRestoreConflict(t *testing.T) {
 	if !errors.As(err, &conflict) || !errors.Is(err, ErrRestoreConflict) {
 		t.Fatalf("start = %v", err)
 	}
-	if strings.Join(conflict.Paths, ",") != "/sandbox/r,/sandbox/.config/soft-serve" || conflict.Snapshot.Size == 0 {
+	if strings.Join(conflict.Paths, ",") != "/sandbox/r,/sandbox/.config/sundae" || conflict.Snapshot.Size == 0 {
 		t.Fatalf("conflict = %+v", conflict)
 	}
 	for _, want := range []string{"--restore", "--fresh", "already holds files"} {
@@ -652,10 +652,10 @@ func TestRestoreFailureDeletesSandbox(t *testing.T) {
 		t.Fatalf("start = %v", err)
 	}
 	// Not half-started: no sandbox, no token, no clone, no osewa.
-	if h.exists(t, "soft-alice-r") {
+	if h.exists(t, "sundae-alice-r") {
 		t.Fatal("sandbox left after a failed restore")
 	}
-	if len(h.tokens.named(TokenName("soft-alice-r"))) != 0 || len(h.exec.clones()) != 0 {
+	if len(h.tokens.named(TokenName("sundae-alice-r"))) != 0 || len(h.exec.clones()) != 0 {
 		t.Fatal("session half-started")
 	}
 	if got := strings.Join(h.lifecycles(), ","); got != "created,failed restore" {
@@ -664,7 +664,7 @@ func TestRestoreFailureDeletesSandbox(t *testing.T) {
 
 	// The store is unreachable while looking the snapshot up: same.
 	h.s3.SetFail(func(*http.Request, string) int { return http.StatusInternalServerError })
-	if _, err := h.mgr.Start(ctx, StartOptions{User: alice, Repo: "r"}); err == nil || h.exists(t, "soft-alice-r") {
+	if _, err := h.mgr.Start(ctx, StartOptions{User: alice, Repo: "r"}); err == nil || h.exists(t, "sundae-alice-r") {
 		t.Fatalf("start with S3 down = %v", err)
 	}
 }
@@ -691,7 +691,7 @@ func TestFallbackParkAndResume(t *testing.T) {
 		t.Fatalf("events = %s", got)
 	}
 	var marker ParkedSnapshot
-	o, ok := h.s3.Object("soft-serve/sessions/1/soft-alice-r.parked.json")
+	o, ok := h.s3.Object("sundae/sessions/1/sundae-alice-r.parked.json")
 	if !ok || json.Unmarshal(o.Body, &marker) != nil {
 		t.Fatalf("marker = %v %s", ok, o.Body)
 	}
@@ -739,7 +739,7 @@ func TestFallbackParkAndResume(t *testing.T) {
 	if sb.Spec.Template.Image != "default-image" {
 		t.Fatalf("image = %v", sb.Spec.Template)
 	}
-	if _, ok := h.s3.Object("soft-serve/sessions/1/soft-alice-r.parked.json"); ok {
+	if _, ok := h.s3.Object("sundae/sessions/1/sundae-alice-r.parked.json"); ok {
 		t.Fatal("marker kept after resume")
 	}
 	if got := strings.Join(h.lifecycles(), ","); got != "created,restored attach,ready" {
@@ -764,7 +764,7 @@ func TestEndParkedSnapshotSession(t *testing.T) {
 	if err != nil || !res.Existed || !res.Parked {
 		t.Fatalf("end = %+v, %v", res, err)
 	}
-	if _, ok := h.s3.Object("soft-serve/sessions/1/soft-alice-r.parked.json"); ok {
+	if _, ok := h.s3.Object("sundae/sessions/1/sundae-alice-r.parked.json"); ok {
 		t.Fatal("marker kept")
 	}
 	if _, ok := h.s3.Object(snapKey); !ok {
@@ -797,7 +797,7 @@ func TestFallbackParkFailureKeepsSandbox(t *testing.T) {
 	if !h.exists(t, s.Sandbox) {
 		t.Fatal("sandbox deleted without a snapshot")
 	}
-	if _, ok := h.s3.Object("soft-serve/sessions/1/soft-alice-r.parked.json"); ok {
+	if _, ok := h.s3.Object("sundae/sessions/1/sundae-alice-r.parked.json"); ok {
 		t.Fatal("marker written without a snapshot")
 	}
 	if got := strings.Join(h.lifecycles(), ","); got != "failed snapshot" {
@@ -812,7 +812,7 @@ func TestFallbackParkFailureKeepsSandbox(t *testing.T) {
 	if _, err := h2.mgr.Park(ctx, alice, "r", ""); !IsSuspendUnsupported(err) || !strings.Contains(err.Error(), "sessions.suspend.fallback: snapshot") {
 		t.Fatalf("park without fallback = %v", err)
 	}
-	if !h2.exists(t, "soft-alice-r") {
+	if !h2.exists(t, "sundae-alice-r") {
 		t.Fatal("sandbox deleted without the fallback")
 	}
 }
@@ -843,7 +843,7 @@ func TestAutoParkFallback(t *testing.T) {
 		t.Fatalf("events = %s", got)
 	}
 	var marker ParkedSnapshot
-	o, _ := h.s3.Object("soft-serve/sessions/1/soft-alice-r.parked.json")
+	o, _ := h.s3.Object("sundae/sessions/1/sundae-alice-r.parked.json")
 	if err := json.Unmarshal(o.Body, &marker); err != nil || marker.Op != ParkAuto || marker.Record.Msg != "waiting" {
 		t.Fatalf("marker = %+v, %v", marker, err)
 	}
@@ -898,8 +898,8 @@ func TestSnapshotsOffTouchNothing(t *testing.T) {
 	if _, err := h.mgr.End(ctx, alice, "r", ""); err != nil {
 		t.Fatal(err)
 	}
-	for _, sc := range h.exec.scripts("soft-alice-r") {
-		if strings.HasPrefix(sc, "soft-serve-snapshot") {
+	for _, sc := range h.exec.scripts("sundae-alice-r") {
+		if strings.HasPrefix(sc, "sundae-snapshot") {
 			t.Fatalf("ran %s with snapshots off", sc)
 		}
 	}
@@ -938,6 +938,6 @@ func s3PutOpts() s3store.PutOptions {
 	return s3store.PutOptions{
 		ContentMD5:  "1B2M2Y8AsgTpgAmY7PhCfg==",
 		ContentType: "application/gzip",
-		Metadata:    snapshotMeta(events.Session{User: "alice", Repo: "r", Name: "main", Sandbox: "soft-alice-r"}),
+		Metadata:    snapshotMeta(events.Session{User: "alice", Repo: "r", Name: "main", Sandbox: "sundae-alice-r"}),
 	}
 }

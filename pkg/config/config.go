@@ -14,13 +14,13 @@ import (
 
 	"github.com/anmitsu/go-shlex"
 	"github.com/caarlos0/env/v11"
-	"github.com/charmbracelet/soft-serve/pkg/access"
-	"github.com/charmbracelet/soft-serve/pkg/sshutils"
+	"github.com/danielboothcloud/sundae/pkg/access"
+	"github.com/danielboothcloud/sundae/pkg/sshutils"
 	"golang.org/x/crypto/ssh"
 	"gopkg.in/yaml.v3"
 )
 
-var binPath = "soft"
+var binPath = "sundae"
 
 // SSHConfig is the configuration for the SSH server.
 type SSHConfig struct {
@@ -199,7 +199,7 @@ type OpenShellConfig struct {
 	Command string `env:"COMMAND" yaml:"command"`
 }
 
-// Config is the configuration for Soft Serve.
+// Config is the configuration for Sundae.
 type Config struct {
 	// Name is the name of the server.
 	Name string `env:"NAME" yaml:"name"`
@@ -241,7 +241,7 @@ type Config struct {
 
 	// Forges are the GitHub and GitLab accounts whose repositories are
 	// discovered, imported and kept in sync. The environment form is
-	// SOFT_SERVE_FORGES_<index>_<KEY>, e.g. SOFT_SERVE_FORGES_0_NAME.
+	// SUNDAE_FORGES_<index>_<KEY>, e.g. SUNDAE_FORGES_0_NAME.
 	Forges []ForgeConfig `envPrefix:"FORGES_" yaml:"forges"`
 
 	// Notifications configures notifications on agent session and forge
@@ -278,14 +278,14 @@ type Config struct {
 	// already exist. Leave empty to disable.
 	DefaultRepo string `env:"DEFAULT_REPO" yaml:"default_repo"`
 
-	// DataPath is the path to the directory where Soft Serve will store its data.
+	// DataPath is the path to the directory where Sundae will store its data.
 	DataPath string `env:"DATA_PATH" yaml:"-"`
 }
 
 // Environ returns the config as a list of environment variables.
 func (c *Config) Environ() []string {
 	envs := []string{
-		fmt.Sprintf("SOFT_SERVE_BIN_PATH=%s", binPath),
+		fmt.Sprintf("SUNDAE_BIN_PATH=%s", binPath),
 	}
 	if c == nil {
 		return envs
@@ -293,54 +293,54 @@ func (c *Config) Environ() []string {
 
 	// TODO: do this dynamically
 	envs = append(envs, []string{
-		fmt.Sprintf("SOFT_SERVE_CONFIG_LOCATION=%s", c.ConfigPath()),
-		fmt.Sprintf("SOFT_SERVE_DATA_PATH=%s", c.DataPath),
-		fmt.Sprintf("SOFT_SERVE_NAME=%s", c.Name),
-		fmt.Sprintf("SOFT_SERVE_INITIAL_ADMIN_KEYS=%s", strings.Join(c.InitialAdminKeys, "\n")),
-		fmt.Sprintf("SOFT_SERVE_DEFAULT_REPO=%s", c.DefaultRepo),
-		fmt.Sprintf("SOFT_SERVE_SSH_ENABLED=%t", c.SSH.Enabled),
-		fmt.Sprintf("SOFT_SERVE_SSH_LISTEN_ADDR=%s", c.SSH.ListenAddr),
-		fmt.Sprintf("SOFT_SERVE_SSH_PUBLIC_URL=%s", c.SSH.PublicURL),
-		fmt.Sprintf("SOFT_SERVE_SSH_KEY_PATH=%s", c.SSH.KeyPath),
-		fmt.Sprintf("SOFT_SERVE_SSH_CLIENT_KEY_PATH=%s", c.SSH.ClientKeyPath),
-		fmt.Sprintf("SOFT_SERVE_SSH_MAX_TIMEOUT=%d", c.SSH.MaxTimeout),
-		fmt.Sprintf("SOFT_SERVE_SSH_IDLE_TIMEOUT=%d", c.SSH.IdleTimeout),
-		fmt.Sprintf("SOFT_SERVE_GIT_ENABLED=%t", c.Git.Enabled),
-		fmt.Sprintf("SOFT_SERVE_GIT_LISTEN_ADDR=%s", c.Git.ListenAddr),
-		fmt.Sprintf("SOFT_SERVE_GIT_PUBLIC_URL=%s", c.Git.PublicURL),
-		fmt.Sprintf("SOFT_SERVE_GIT_MAX_TIMEOUT=%d", c.Git.MaxTimeout),
-		fmt.Sprintf("SOFT_SERVE_GIT_IDLE_TIMEOUT=%d", c.Git.IdleTimeout),
-		fmt.Sprintf("SOFT_SERVE_GIT_MAX_CONNECTIONS=%d", c.Git.MaxConnections),
-		fmt.Sprintf("SOFT_SERVE_HTTP_ENABLED=%t", c.HTTP.Enabled),
-		fmt.Sprintf("SOFT_SERVE_HTTP_LISTEN_ADDR=%s", c.HTTP.ListenAddr),
-		fmt.Sprintf("SOFT_SERVE_HTTP_TLS_KEY_PATH=%s", c.HTTP.TLSKeyPath),
-		fmt.Sprintf("SOFT_SERVE_HTTP_TLS_CERT_PATH=%s", c.HTTP.TLSCertPath),
-		fmt.Sprintf("SOFT_SERVE_HTTP_PUBLIC_URL=%s", c.HTTP.PublicURL),
-		fmt.Sprintf("SOFT_SERVE_HTTP_CORS_ALLOWED_HEADERS=%s", strings.Join(c.HTTP.CORS.AllowedHeaders, ",")),
-		fmt.Sprintf("SOFT_SERVE_HTTP_CORS_ALLOWED_ORIGINS=%s", strings.Join(c.HTTP.CORS.AllowedOrigins, ",")),
-		fmt.Sprintf("SOFT_SERVE_HTTP_CORS_ALLOWED_METHODS=%s", strings.Join(c.HTTP.CORS.AllowedMethods, ",")),
-		fmt.Sprintf("SOFT_SERVE_STATS_ENABLED=%t", c.Stats.Enabled),
-		fmt.Sprintf("SOFT_SERVE_STATS_LISTEN_ADDR=%s", c.Stats.ListenAddr),
-		fmt.Sprintf("SOFT_SERVE_LOG_FORMAT=%s", c.Log.Format),
-		fmt.Sprintf("SOFT_SERVE_LOG_TIME_FORMAT=%s", c.Log.TimeFormat),
-		fmt.Sprintf("SOFT_SERVE_DB_DRIVER=%s", c.DB.Driver),
-		fmt.Sprintf("SOFT_SERVE_DB_DATA_SOURCE=%s", c.DB.DataSource),
-		fmt.Sprintf("SOFT_SERVE_LFS_ENABLED=%t", c.LFS.Enabled),
-		fmt.Sprintf("SOFT_SERVE_LFS_SSH_ENABLED=%t", c.LFS.SSHEnabled),
-		fmt.Sprintf("SOFT_SERVE_JOBS_MIRROR_PULL=%s", c.Jobs.MirrorPull),
-		fmt.Sprintf("SOFT_SERVE_OPENSHELL_ENABLED=%t", c.OpenShell.Enabled),
-		fmt.Sprintf("SOFT_SERVE_OPENSHELL_GATEWAY_ADDRESS=%s", c.OpenShell.GatewayAddress),
-		fmt.Sprintf("SOFT_SERVE_OPENSHELL_WORKSPACE=%s", c.OpenShell.Workspace),
-		fmt.Sprintf("SOFT_SERVE_OPENSHELL_IMAGE=%s", c.OpenShell.Image),
-		fmt.Sprintf("SOFT_SERVE_OPENSHELL_TOKEN_FILE=%s", c.OpenShell.TokenFile),
-		fmt.Sprintf("SOFT_SERVE_OPENSHELL_TLS_CA=%s", c.OpenShell.TLSCA),
-		fmt.Sprintf("SOFT_SERVE_OPENSHELL_TLS_CERT=%s", c.OpenShell.TLSCert),
-		fmt.Sprintf("SOFT_SERVE_OPENSHELL_TLS_KEY=%s", c.OpenShell.TLSKey),
-		fmt.Sprintf("SOFT_SERVE_OPENSHELL_INSECURE=%t", c.OpenShell.Insecure),
-		fmt.Sprintf("SOFT_SERVE_OPENSHELL_CLONE_URL=%s", c.OpenShell.CloneURL),
-		fmt.Sprintf("SOFT_SERVE_OPENSHELL_TOKEN_TTL=%s", c.OpenShell.TokenTTL),
-		fmt.Sprintf("SOFT_SERVE_OPENSHELL_COMMAND=%s", c.OpenShell.Command),
-		// SOFT_SERVE_OPENSHELL_TOKEN is deliberately omitted: these envs are
+		fmt.Sprintf("SUNDAE_CONFIG_LOCATION=%s", c.ConfigPath()),
+		fmt.Sprintf("SUNDAE_DATA_PATH=%s", c.DataPath),
+		fmt.Sprintf("SUNDAE_NAME=%s", c.Name),
+		fmt.Sprintf("SUNDAE_INITIAL_ADMIN_KEYS=%s", strings.Join(c.InitialAdminKeys, "\n")),
+		fmt.Sprintf("SUNDAE_DEFAULT_REPO=%s", c.DefaultRepo),
+		fmt.Sprintf("SUNDAE_SSH_ENABLED=%t", c.SSH.Enabled),
+		fmt.Sprintf("SUNDAE_SSH_LISTEN_ADDR=%s", c.SSH.ListenAddr),
+		fmt.Sprintf("SUNDAE_SSH_PUBLIC_URL=%s", c.SSH.PublicURL),
+		fmt.Sprintf("SUNDAE_SSH_KEY_PATH=%s", c.SSH.KeyPath),
+		fmt.Sprintf("SUNDAE_SSH_CLIENT_KEY_PATH=%s", c.SSH.ClientKeyPath),
+		fmt.Sprintf("SUNDAE_SSH_MAX_TIMEOUT=%d", c.SSH.MaxTimeout),
+		fmt.Sprintf("SUNDAE_SSH_IDLE_TIMEOUT=%d", c.SSH.IdleTimeout),
+		fmt.Sprintf("SUNDAE_GIT_ENABLED=%t", c.Git.Enabled),
+		fmt.Sprintf("SUNDAE_GIT_LISTEN_ADDR=%s", c.Git.ListenAddr),
+		fmt.Sprintf("SUNDAE_GIT_PUBLIC_URL=%s", c.Git.PublicURL),
+		fmt.Sprintf("SUNDAE_GIT_MAX_TIMEOUT=%d", c.Git.MaxTimeout),
+		fmt.Sprintf("SUNDAE_GIT_IDLE_TIMEOUT=%d", c.Git.IdleTimeout),
+		fmt.Sprintf("SUNDAE_GIT_MAX_CONNECTIONS=%d", c.Git.MaxConnections),
+		fmt.Sprintf("SUNDAE_HTTP_ENABLED=%t", c.HTTP.Enabled),
+		fmt.Sprintf("SUNDAE_HTTP_LISTEN_ADDR=%s", c.HTTP.ListenAddr),
+		fmt.Sprintf("SUNDAE_HTTP_TLS_KEY_PATH=%s", c.HTTP.TLSKeyPath),
+		fmt.Sprintf("SUNDAE_HTTP_TLS_CERT_PATH=%s", c.HTTP.TLSCertPath),
+		fmt.Sprintf("SUNDAE_HTTP_PUBLIC_URL=%s", c.HTTP.PublicURL),
+		fmt.Sprintf("SUNDAE_HTTP_CORS_ALLOWED_HEADERS=%s", strings.Join(c.HTTP.CORS.AllowedHeaders, ",")),
+		fmt.Sprintf("SUNDAE_HTTP_CORS_ALLOWED_ORIGINS=%s", strings.Join(c.HTTP.CORS.AllowedOrigins, ",")),
+		fmt.Sprintf("SUNDAE_HTTP_CORS_ALLOWED_METHODS=%s", strings.Join(c.HTTP.CORS.AllowedMethods, ",")),
+		fmt.Sprintf("SUNDAE_STATS_ENABLED=%t", c.Stats.Enabled),
+		fmt.Sprintf("SUNDAE_STATS_LISTEN_ADDR=%s", c.Stats.ListenAddr),
+		fmt.Sprintf("SUNDAE_LOG_FORMAT=%s", c.Log.Format),
+		fmt.Sprintf("SUNDAE_LOG_TIME_FORMAT=%s", c.Log.TimeFormat),
+		fmt.Sprintf("SUNDAE_DB_DRIVER=%s", c.DB.Driver),
+		fmt.Sprintf("SUNDAE_DB_DATA_SOURCE=%s", c.DB.DataSource),
+		fmt.Sprintf("SUNDAE_LFS_ENABLED=%t", c.LFS.Enabled),
+		fmt.Sprintf("SUNDAE_LFS_SSH_ENABLED=%t", c.LFS.SSHEnabled),
+		fmt.Sprintf("SUNDAE_JOBS_MIRROR_PULL=%s", c.Jobs.MirrorPull),
+		fmt.Sprintf("SUNDAE_OPENSHELL_ENABLED=%t", c.OpenShell.Enabled),
+		fmt.Sprintf("SUNDAE_OPENSHELL_GATEWAY_ADDRESS=%s", c.OpenShell.GatewayAddress),
+		fmt.Sprintf("SUNDAE_OPENSHELL_WORKSPACE=%s", c.OpenShell.Workspace),
+		fmt.Sprintf("SUNDAE_OPENSHELL_IMAGE=%s", c.OpenShell.Image),
+		fmt.Sprintf("SUNDAE_OPENSHELL_TOKEN_FILE=%s", c.OpenShell.TokenFile),
+		fmt.Sprintf("SUNDAE_OPENSHELL_TLS_CA=%s", c.OpenShell.TLSCA),
+		fmt.Sprintf("SUNDAE_OPENSHELL_TLS_CERT=%s", c.OpenShell.TLSCert),
+		fmt.Sprintf("SUNDAE_OPENSHELL_TLS_KEY=%s", c.OpenShell.TLSKey),
+		fmt.Sprintf("SUNDAE_OPENSHELL_INSECURE=%t", c.OpenShell.Insecure),
+		fmt.Sprintf("SUNDAE_OPENSHELL_CLONE_URL=%s", c.OpenShell.CloneURL),
+		fmt.Sprintf("SUNDAE_OPENSHELL_TOKEN_TTL=%s", c.OpenShell.TokenTTL),
+		fmt.Sprintf("SUNDAE_OPENSHELL_COMMAND=%s", c.OpenShell.Command),
+		// SUNDAE_OPENSHELL_TOKEN is deliberately omitted: these envs are
 		// handed to hook and git subprocesses, which never need the gateway
 		// credential.
 	}...)
@@ -364,11 +364,11 @@ func (c *Config) Environ() []string {
 	// when explicitly set, so a subprocess parsing these envs sees the same
 	// "unset" state (rather than an empty string coercing to a zero value).
 	if c.AnonAccess != nil {
-		envs = append(envs, fmt.Sprintf("SOFT_SERVE_ANON_ACCESS=%s", c.AnonAccess.String()))
+		envs = append(envs, fmt.Sprintf("SUNDAE_ANON_ACCESS=%s", c.AnonAccess.String()))
 	}
 
 	if c.AllowKeyless != nil {
-		envs = append(envs, fmt.Sprintf("SOFT_SERVE_ALLOW_KEYLESS=%t", *c.AllowKeyless))
+		envs = append(envs, fmt.Sprintf("SUNDAE_ALLOW_KEYLESS=%t", *c.AllowKeyless))
 	}
 
 	return envs
@@ -376,14 +376,14 @@ func (c *Config) Environ() []string {
 
 // IsDebug returns true if the server is running in debug mode.
 func IsDebug() bool {
-	debug, _ := strconv.ParseBool(os.Getenv("SOFT_SERVE_DEBUG"))
+	debug, _ := strconv.ParseBool(os.Getenv("SUNDAE_DEBUG"))
 	return debug
 }
 
 // IsVerbose returns true if the server is running in verbose mode.
 // Verbose mode is only enabled if debug mode is enabled.
 func IsVerbose() bool {
-	verbose, _ := strconv.ParseBool(os.Getenv("SOFT_SERVE_VERBOSE"))
+	verbose, _ := strconv.ParseBool(os.Getenv("SUNDAE_VERBOSE"))
 	return IsDebug() && verbose
 }
 
@@ -523,7 +523,7 @@ func parseEnv(cfg *Config) error {
 	return cfg.Validate()
 }
 
-// applyEnv overrides cfg with the SOFT_SERVE_* environment variables, without
+// applyEnv overrides cfg with the SUNDAE_* environment variables, without
 // validating the result.
 func applyEnv(cfg *Config) error {
 	// Merge initial admin keys from both config file and environment variables.
@@ -531,13 +531,13 @@ func applyEnv(cfg *Config) error {
 
 	// Override with environment variables
 	if err := env.ParseWithOptions(cfg, env.Options{
-		Prefix: "SOFT_SERVE_",
+		Prefix: "SUNDAE_",
 	}); err != nil {
 		return fmt.Errorf("parse environment variables: %w", err)
 	}
 
 	// Merge initial admin keys from environment variables.
-	if initialAdminKeysEnv := os.Getenv("SOFT_SERVE_INITIAL_ADMIN_KEYS"); initialAdminKeysEnv != "" {
+	if initialAdminKeysEnv := os.Getenv("SUNDAE_INITIAL_ADMIN_KEYS"); initialAdminKeysEnv != "" {
 		cfg.InitialAdminKeys = append(cfg.InitialAdminKeys, initialAdminKeys...)
 	}
 
@@ -557,7 +557,7 @@ func (c *Config) Parse() error {
 }
 
 // Load reads the config the way the server does: the YAML file at path, then
-// the SOFT_SERVE_* environment variables as overrides, then Validate on the
+// the SUNDAE_* environment variables as overrides, then Validate on the
 // result. The file must exist; Load never writes it.
 //
 // It reports every problem it finds, joined: unknown keys and bad values in
@@ -598,10 +598,10 @@ func (c *Config) WriteConfig() error {
 }
 
 // DefaultDataPath returns the path to the data directory.
-// It uses the SOFT_SERVE_DATA_PATH environment variable if set, otherwise it
+// It uses the SUNDAE_DATA_PATH environment variable if set, otherwise it
 // uses "data".
 func DefaultDataPath() string {
-	dp := os.Getenv("SOFT_SERVE_DATA_PATH")
+	dp := os.Getenv("SUNDAE_DATA_PATH")
 	if dp == "" {
 		dp = "data"
 	}
@@ -612,7 +612,7 @@ func DefaultDataPath() string {
 // ConfigPath returns the path to the config file.
 func (c *Config) ConfigPath() string { //nolint:revive
 	// If we have a custom config location set, then use that.
-	if path := os.Getenv("SOFT_SERVE_CONFIG_LOCATION"); exist(path) {
+	if path := os.Getenv("SUNDAE_CONFIG_LOCATION"); exist(path) {
 		return path
 	}
 
@@ -635,15 +635,15 @@ func (c *Config) Exist() bool {
 // Use Validate() to validate the config and ensure absolute paths.
 func DefaultConfig() *Config {
 	return &Config{
-		Name: "Soft Serve",
+		Name: "Sundae",
 		// DefaultRepo: "",
 		DataPath: DefaultDataPath(),
 		SSH: SSHConfig{
 			Enabled:       true,
 			ListenAddr:    ":23231",
 			PublicURL:     "ssh://localhost:23231",
-			KeyPath:       filepath.Join("ssh", "soft_serve_host_ed25519"),
-			ClientKeyPath: filepath.Join("ssh", "soft_serve_client_ed25519"),
+			KeyPath:       filepath.Join("ssh", "sundae_host_ed25519"),
+			ClientKeyPath: filepath.Join("ssh", "sundae_client_ed25519"),
 			MaxTimeout:    0,
 			IdleTimeout:   10 * 60, // 10 minutes
 		},
@@ -675,7 +675,7 @@ func DefaultConfig() *Config {
 		},
 		DB: DBConfig{
 			Driver: "sqlite",
-			DataSource: "soft-serve.db" +
+			DataSource: "sundae.db" +
 				"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)",
 		},
 		LFS: LFSConfig{
@@ -728,7 +728,7 @@ func (c *Config) Validate() error {
 	if !filepath.IsAbs(c.DataPath) {
 		dp, err := filepath.Abs(c.DataPath)
 		if err != nil {
-			return fmt.Errorf("data path (SOFT_SERVE_DATA_PATH): %w", err)
+			return fmt.Errorf("data path (SUNDAE_DATA_PATH): %w", err)
 		}
 		c.DataPath = dp
 	}

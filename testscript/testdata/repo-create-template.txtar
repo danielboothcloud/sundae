@@ -1,16 +1,16 @@
 # vi: set ft=conf
 
 # Templates and profiles live in the config file (they have no environment
-# form); the SOFT_SERVE_* variables of the test still apply over it.
+# form); the SUNDAE_* variables of the test still apply over it.
 cp config.yaml $DATA_PATH/config.yaml
 
-# start soft serve
-exec soft serve &
+# start sundae serve
+exec sundae serve &
 # wait for SSH server to start
 ensureserverrunning SSH_PORT
 
 # the template repository: two commits on main
-soft repo create tpl --vcs git
+sundae repo create tpl --vcs git
 git clone ssh://localhost:$SSH_PORT/tpl tpl
 mkfile ./tpl/README.md '# old'
 mkfile ./tpl/old.txt 'only in the first commit'
@@ -26,15 +26,15 @@ git -C tpl commit -m 'second'
 git -C tpl push origin HEAD:refs/heads/main
 
 # create from the template: one commit, the template's tree, by the creator
-soft repo create app --template base
+sundae repo create app --template base
 stderr 'Created repository app'
 stderr 'Initialised from template base'
 stdout 'jj git clone ssh://localhost:'$SSH_PORT'/app.git'
-soft repo tree app
+sundae repo tree app
 stdout 'README.md'
 stdout 'service'
 ! stdout 'old.txt'
-soft repo blob app README.md
+sundae repo blob app README.md
 stdout '# Template'
 git clone ssh://localhost:$SSH_PORT/app app
 git -C app rev-list --count HEAD
@@ -43,65 +43,65 @@ git -C app log --format=%an%x20%s
 stdout '^admin Initial commit from template base$'
 
 # a subdirectory, as a git repository; the template's profile is stored
-soft repo create svc --template service --vcs git
+sundae repo create svc --template service --vcs git
 stderr 'Session profile: claude'
-soft repo tree svc
+sundae repo tree svc
 stdout 'main.go'
 ! stdout 'README.md'
-soft repo profile svc
+sundae repo profile svc
 stdout '^claude$'
 
 # repo profile: get, set, validate, unset
-soft repo profile app
+sundae repo profile app
 stdout '^$'
-soft repo profile app shell
-soft repo profile app
+sundae repo profile app shell
+sundae repo profile app
 stdout '^shell$'
-! soft repo profile app nope
+! sundae repo profile app nope
 stderr 'unknown profile "nope": use one of claude, shell'
-soft repo profile app --unset
-soft repo profile app
+sundae repo profile app --unset
+sundae repo profile app
 stdout '^$'
 
 # --profile on create
-soft repo create other --profile shell
-soft repo profile other
+sundae repo create other --profile shell
+sundae repo profile other
 stdout '^shell$'
-! soft repo create bad --profile nope
+! sundae repo create bad --profile nope
 stderr 'unknown profile "nope"'
-! soft repo info bad
+! sundae repo info bad
 
 # unknown templates and missing template repositories
-! soft repo create x --template nope
+! sundae repo create x --template nope
 stderr 'unknown template "nope": use one of base, missing, secret, service'
-! soft repo create x --template missing
+! sundae repo create x --template missing
 stderr 'template "missing": repository "gone": repository not found'
-! soft repo info x
+! sundae repo info x
 
 # a user needs read access to the template repository
-soft repo create secret-tpl -p --vcs git
+sundae repo create secret-tpl -p --vcs git
 git clone ssh://localhost:$SSH_PORT/secret-tpl secret-tpl
 mkfile ./secret-tpl/README.md '# Secret'
 git -C secret-tpl add -A
 git -C secret-tpl commit -m 'first'
 git -C secret-tpl push origin HEAD:refs/heads/main
-soft user create user1 -k "$USER1_AUTHORIZED_KEY"
-! usoft repo create mine --template secret
+sundae user create user1 -k "$USER1_AUTHORIZED_KEY"
+! usundae repo create mine --template secret
 stderr 'template "secret": unauthorized'
-! usoft repo info mine
-usoft repo create mine --template base
-usoft repo blob mine README.md
+! usundae repo info mine
+usundae repo create mine --template base
+usundae repo blob mine README.md
 stdout '# Template'
 
 # collaborators may set a repository's profile; readers may only read it
-usoft repo profile app
-! usoft repo profile app claude
+usundae repo profile app
+! usundae repo profile app claude
 stderr 'unauthorized'
 
 # --start needs sessions, and creates nothing without them
-! soft repo create started --start
+! sundae repo create started --start
 stderr '--start needs agent sessions'
-! soft repo info started
+! sundae repo info started
 
 # stop the server
 [windows] stopserver

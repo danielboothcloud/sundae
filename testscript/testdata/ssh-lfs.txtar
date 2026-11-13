@@ -3,43 +3,43 @@
 [windows] dos2unix err1.txt err2.txt err3.txt errauth.txt
 
 # enable ssh lfs transfer
-env SOFT_SERVE_LFS_SSH_ENABLED=true
-# start soft serve
-exec soft serve &
+env SUNDAE_LFS_SSH_ENABLED=true
+# start sundae serve
+exec sundae serve &
 # wait for SSH server to start
 ensureserverrunning SSH_PORT
 
 # create a user
-soft user create foo --key "$USER1_AUTHORIZED_KEY"
+sundae user create foo --key "$USER1_AUTHORIZED_KEY"
 
 # create a repo
-soft repo create repo1
-soft repo create repo1p -p
-usoft repo create repo2
-usoft repo create repo2p -p
+sundae repo create repo1
+sundae repo create repo1p -p
+usundae repo create repo2
+usundae repo create repo2p -p
 
 # SSH Git LFS Transfer command
-! soft git-lfs-transfer
+! sundae git-lfs-transfer
 cmp stderr err1.txt
-! soft git-lfs-transfer repo1
+! sundae git-lfs-transfer repo1
 cmp stderr err2.txt
-soft git-lfs-transfer repo1 download
+sundae git-lfs-transfer repo1 download
 stdout '000eversion=1\n000clocking\n0000'
-soft git-lfs-transfer repo1 upload
+sundae git-lfs-transfer repo1 upload
 stdout '000eversion=1\n000clocking\n0000'
-usoft git-lfs-transfer repo1 download
+usundae git-lfs-transfer repo1 download
 stdout '000eversion=1\n000clocking\n0000'
-! usoft git-lfs-transfer repo1 upload
+! usundae git-lfs-transfer repo1 upload
 cmp stderr errauth.txt
 
 # Unauthorized user
-! usoft git-lfs-transfer
+! usundae git-lfs-transfer
 cmp stderr err1.txt
-! usoft git-lfs-transfer repo1p
+! usundae git-lfs-transfer repo1p
 cmp stderr err2.txt
-! usoft git-lfs-transfer repo1p download
+! usundae git-lfs-transfer repo1p download
 cmp stderr errauth.txt
-! usoft git-lfs-transfer repo1p upload
+! usundae git-lfs-transfer repo1p upload
 cmp stderr errauth.txt
 
 # push & create repo with some files, commits, tags...

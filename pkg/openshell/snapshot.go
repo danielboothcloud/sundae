@@ -15,21 +15,21 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/events"
-	"github.com/charmbracelet/soft-serve/pkg/s3store"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/s3store"
 	"github.com/dustin/go-humanize"
 )
 
 // S3 snapshots of /sandbox (snapshots.s3).
 //
-// The archive never passes through Soft Serve and the S3 keys never enter
-// the sandbox: Soft Serve presigns a PUT or GET of the session's object and
+// The archive never passes through Sundae and the S3 keys never enter
+// the sandbox: Sundae presigns a PUT or GET of the session's object and
 // the sandbox moves the archive itself with tar, gzip and curl.
 //
 //   - Snapshot: one exec packs /sandbox into a gzipped tar in
-//     snapshotSpoolDir (outside /sandbox) and prints its size and MD5; Soft
-//     Serve checks the size against s3store.MaxPutSize, presigns a PUT that
+//     snapshotSpoolDir (outside /sandbox) and prints its size and MD5; Sundae
+//     checks the size against s3store.MaxPutSize, presigns a PUT that
 //     signs the MD5 (so S3 refuses a corrupted upload) and the server-side
 //     encryption header; a second exec uploads the file with curl and
 //     deletes it. The archive is spooled rather than streamed because AWS
@@ -59,9 +59,9 @@ const (
 // git credentials, which is checked to be the sandbox user's.
 const snapshotSpoolDir = gitCredentialDir
 
-// softServeStateDir is Soft Serve's state in /sandbox. A newly created
+// sundaeStateDir is Sundae's state in /sandbox. A newly created
 // sandbox has none, unless it holds earlier work.
-var softServeStateDir = path.Join(SandboxRoot, ".config/soft-serve")
+var sundaeStateDir = path.Join(SandboxRoot, ".config/sundae")
 
 // presignTTL is how long a presigned URL is valid. Each is signed just
 // before the exec that uses it, and S3 checks it when the request starts.
@@ -77,22 +77,22 @@ const maxMarkerSize = 64 << 10
 //     (~/.config/osewa), its log and holder sockets (~/.local/state/osewa),
 //     the bridge's client key and the id of the osewa session. Restored
 //     into another sandbox they would pin a server key that no longer
-//     exists and name a session that does not run; without them Soft
-//     Serve enrols the bridge again.
-//   - The osewa build Soft Serve uploads (~/.local/lib/soft-serve): it is
+//     exists and name a session that does not run; without them Sundae
+//     enrols the bridge again.
+//   - The osewa build Sundae uploads (~/.local/lib/sundae): it is
 //     uploaded again, checked against its pinned checksum.
 //   - ~/.cache: the XDG cache directory, which by definition holds nothing
 //     a program cannot rebuild.
 //   - Credentials: SSH and GnuPG keys, netrc and git-credential stores,
 //     cloud and cluster credentials, and the login tokens of gh, glab,
-//     Claude Code and Codex. Soft Serve's own git token is never in
+//     Claude Code and Codex. Sundae's own git token is never in
 //     /sandbox (see gitCredentialFile).
 var SnapshotExcludes = []string{
 	"./.config/osewa",
 	"./.local/state/osewa",
-	"./.config/soft-serve/osewa-client",
-	"./.config/soft-serve/osewa-session*",
-	"./.local/lib/soft-serve",
+	"./.config/sundae/osewa-client",
+	"./.config/sundae/osewa-session*",
+	"./.local/lib/sundae",
 	"./.cache",
 	"./.ssh",
 	"./.gnupg",
@@ -110,7 +110,7 @@ var SnapshotExcludes = []string{
 // Snapshot scripts, run as `sh -c <script> <name> <args...>` like the
 // bootstrap scripts. They need sh, tar, gzip, md5sum, mktemp, wc and curl.
 const (
-	snapshotPackName = "soft-serve-snapshot-pack"
+	snapshotPackName = "sundae-snapshot-pack"
 	// $1: the directory to archive, $2: the spool directory, $3: the
 	// largest archive allowed, then tar --exclude patterns, relative to
 	// $1. Writes the gzipped tar to a new file in the spool directory and
@@ -153,7 +153,7 @@ rm -f "$spool.rc" "$spool.err"
 trap - EXIT
 printf 'spool=%s\nsize=%s\nmd5=%s\nwarning=%s\n' "$spool" "$size" "$sum" "$warning"`
 
-	snapshotUploadName = "soft-serve-snapshot-upload"
+	snapshotUploadName = "sundae-snapshot-upload"
 	// $1: the spooled archive, $2: the presigned PUT URL, then the signed
 	// headers as "Name: value". Uploads the archive and deletes it,
 	// whatever the outcome.
@@ -169,7 +169,7 @@ case $code in
 *) echo "S3 refused the upload: HTTP $code: $(head -c 512 "$out" 2>/dev/null)" >&2; exit 1 ;;
 esac`
 
-	snapshotRestoreName = "soft-serve-snapshot-restore"
+	snapshotRestoreName = "sundae-snapshot-restore"
 	// $1: the presigned GET URL, $2: the directory to extract into, $3: a
 	// directory for the status file. Streams the archive into tar; fails
 	// when the download, gzip or tar does.
@@ -185,7 +185,7 @@ umask 022
 if [ -s "$st" ]; then echo "the restore failed: $(tr '\n' ';' <"$st")" >&2; exit 1; fi
 echo restored`
 
-	snapshotProbeName = "soft-serve-snapshot-probe"
+	snapshotProbeName = "sundae-snapshot-probe"
 	// The paths: prints those that exist.
 	snapshotProbeScript = `for p in "$@"; do if [ -e "$p" ]; then echo "$p"; fi; done`
 )
@@ -241,7 +241,7 @@ type RestoreMode int
 
 const (
 	// RestoreAuto restores the snapshot, unless the new sandbox already
-	// holds earlier work (Soft Serve's state or the checkout): then Start
+	// holds earlier work (Sundae's state or the checkout): then Start
 	// fails with a RestoreConflictError, for the user to choose.
 	RestoreAuto RestoreMode = iota
 	// RestoreOver restores the snapshot whatever the new sandbox holds
@@ -271,7 +271,7 @@ func (i SnapshotInfo) Describe() string {
 
 // ParkedSnapshot marks a session parked to its snapshot: its sandbox was
 // deleted after /sandbox was saved. It is the only record of the session,
-// stored as JSON next to the snapshot: Soft Serve keeps no session state,
+// stored as JSON next to the snapshot: Sundae keeps no session state,
 // and the sandbox that would carry it is gone.
 type ParkedSnapshot struct {
 	UserID  int64  `json:"user_id"`
@@ -357,9 +357,9 @@ func (s *snapshotStore) stat(ctx context.Context, userID int64, sandbox string) 
 // the bucket.
 func snapshotMeta(sess events.Session) map[string]string {
 	return map[string]string{
-		"soft-serve-user":    url.QueryEscape(sess.User),
-		"soft-serve-repo":    url.QueryEscape(sess.Repo),
-		"soft-serve-session": url.QueryEscape(sess.Name),
+		"sundae-user":    url.QueryEscape(sess.User),
+		"sundae-repo":    url.QueryEscape(sess.Repo),
+		"sundae-session": url.QueryEscape(sess.Name),
 	}
 }
 

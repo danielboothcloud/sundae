@@ -1,5 +1,5 @@
 
-    Soft Serve                          ▲1 ✓1 ●2
+    Sundae                              ▲1 ✓1 ●2
 
   ‹ Sessions ›
 
@@ -7,7 +7,7 @@
   ┃   blocked  5m
   ┃   Apply 3 to add, 1 to change, 0 to destroy…
 
-    ✓ soft-serve / forge-sync
+    ✓ sundae / forge-sync
       done  5m
       Implemented GitHub discovery
 
@@ -15,7 +15,7 @@
       working  5m
       bash
 
-    ● soft-serve / tui
+    ● sundae / tui
       working  5m
       Running go test ./pkg/ui/...
 

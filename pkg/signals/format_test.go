@@ -3,7 +3,7 @@ package signals
 import (
 	"testing"
 
-	"github.com/charmbracelet/soft-serve/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/events"
 )
 
 func TestSnapshotLifecycleSignals(t *testing.T) {

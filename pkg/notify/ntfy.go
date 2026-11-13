@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/version"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/version"
 )
 
 // Retry defaults for publishing to ntfy.
@@ -140,7 +140,7 @@ func (p *ntfyPublisher) attempt(ctx context.Context, body []byte) (time.Duration
 		return 0, permanentError{err}
 	}
 	req.Header.Set("Content-Type", "application/json")
-	ua := "soft-serve"
+	ua := "sundae"
 	if version.Version != "" {
 		ua += "/" + version.Version
 	}

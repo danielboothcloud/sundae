@@ -1,12 +1,21 @@
 name: lint
+
 on:
   push:
   pull_request:
 
 jobs:
   lint:
-    uses: charmbracelet/meta/.github/workflows/lint.yml@main
-    with:
-      golangci_path: .golangci.yml
-      golangci_version: latest
-      timeout: 10m
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+      - name: Install Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      # The version the repository is linted with locally
+      # (mise x golangci-lint@2.15.0 -- golangci-lint run ./...).
+      - name: golangci-lint
+        run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 run --timeout 10m ./...

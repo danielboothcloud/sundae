@@ -6,31 +6,31 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/ssh"
 	"charm.land/wish/v2"
-	"github.com/charmbracelet/soft-serve/pkg/access"
-	"github.com/charmbracelet/soft-serve/pkg/backend"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/proto"
-	"github.com/charmbracelet/soft-serve/pkg/ui/common"
-	"github.com/charmbracelet/soft-serve/pkg/ui/pages/sessions"
+	"github.com/danielboothcloud/sundae/pkg/access"
+	"github.com/danielboothcloud/sundae/pkg/backend"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/ui/common"
+	"github.com/danielboothcloud/sundae/pkg/ui/pages/sessions"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 var tuiSessionCounter = promauto.NewCounterVec(prometheus.CounterOpts{
-	Namespace: "soft_serve",
+	Namespace: "sundae",
 	Subsystem: "ssh",
 	Name:      "tui_session_total",
 	Help:      "The total number of TUI sessions",
 }, []string{"repo", "term"})
 
 var tuiSessionDuration = promauto.NewCounterVec(prometheus.CounterOpts{
-	Namespace: "soft_serve",
+	Namespace: "sundae",
 	Subsystem: "ssh",
 	Name:      "tui_session_seconds_total",
 	Help:      "The total time spent in TUI sessions",
 }, []string{"repo", "term"})
 
-// SessionHandler is the soft-serve bubbletea ssh session handler.
+// SessionHandler is the sundae bubbletea ssh session handler.
 // This middleware must be run after the ContextMiddleware. Its TUI cannot
 // attach to agent sessions; TUIMiddleware's can.
 func SessionHandler(s ssh.Session) *tea.Program {

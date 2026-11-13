@@ -2,7 +2,7 @@
   "defaultRecipe": "default",
   "recipes": {
     "default": {
-      "description": "Recipe for Soft Serve",
+      "description": "Recipe for Sundae",
       "model": "anthropic/claude-opus-5-5",
       "thinkingLevel": "high",
       "permissionMode": "auto",

@@ -1,0 +1,30 @@
+# vi: set ft=conf
+
+[windows] skip
+
+# clone repo
+#git clone https://github.com/charmbracelet/wizard-tutorial.git wizard-tutorial
+
+# run sundae browse
+# disable this temporarily
+#ttyin input.txt
+#exec sundae browse ./wizard-tutorial
+
+# cd and run sundae
+# disable this temporarily
+#cd wizard-tutorial
+#ttyin ../input.txt
+#exec sundae
+
+-- input.txt --
+jjkkdduu
+
+jjkkdduu
+
+jjkkdduu
+
+jjkkdduu
+
+jjkkdduu
+
+qqq

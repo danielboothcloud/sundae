@@ -13,14 +13,14 @@ import (
 	"charm.land/wish/v2"
 	rm "charm.land/wish/v2/recover"
 	"github.com/charmbracelet/keygen"
-	"github.com/charmbracelet/soft-serve/pkg/backend"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/db"
-	"github.com/charmbracelet/soft-serve/pkg/events"
-	"github.com/charmbracelet/soft-serve/pkg/forge"
-	"github.com/charmbracelet/soft-serve/pkg/openshell"
-	"github.com/charmbracelet/soft-serve/pkg/signals"
-	"github.com/charmbracelet/soft-serve/pkg/store"
+	"github.com/danielboothcloud/sundae/pkg/backend"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/db"
+	"github.com/danielboothcloud/sundae/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/forge"
+	"github.com/danielboothcloud/sundae/pkg/openshell"
+	"github.com/danielboothcloud/sundae/pkg/signals"
+	"github.com/danielboothcloud/sundae/pkg/store"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	gossh "golang.org/x/crypto/ssh"
@@ -28,14 +28,14 @@ import (
 
 var (
 	publicKeyCounter = promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "soft_serve",
+		Namespace: "sundae",
 		Subsystem: "ssh",
 		Name:      "public_key_auth_total",
 		Help:      "The total number of public key auth requests",
 	}, []string{"allowed"})
 
 	keyboardInteractiveCounter = promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "soft_serve",
+		Namespace: "sundae",
 		Subsystem: "ssh",
 		Name:      "keyboard_interactive_auth_total",
 		Help:      "The total number of keyboard interactive auth requests",

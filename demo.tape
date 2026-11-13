@@ -2,10 +2,10 @@ Set Width 1600
 Set Height 900
 Set FontSize 22
 
-Output soft-serve.gif
-Output soft-serve-frames/
+Output sundae.gif
+Output sundae-frames/
 
-Type "ssh git.charm.sh"
+Type "ssh localhost -p 23231"
 Sleep 1s
 Enter
 Sleep 2s

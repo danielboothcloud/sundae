@@ -16,19 +16,19 @@ import (
 	"charm.land/log/v2"
 	"charm.land/ssh"
 	"charm.land/wish/v2/testsession"
-	"github.com/charmbracelet/soft-serve/pkg/backend"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/db"
-	"github.com/charmbracelet/soft-serve/pkg/db/migrate"
-	"github.com/charmbracelet/soft-serve/pkg/events"
-	"github.com/charmbracelet/soft-serve/pkg/openshell"
-	"github.com/charmbracelet/soft-serve/pkg/sessionctl"
-	"github.com/charmbracelet/soft-serve/pkg/signals"
-	"github.com/charmbracelet/soft-serve/pkg/store"
-	"github.com/charmbracelet/soft-serve/pkg/store/database"
-	"github.com/charmbracelet/soft-serve/pkg/test"
-	"github.com/charmbracelet/soft-serve/pkg/ui/pages/sessions"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/danielboothcloud/sundae/pkg/backend"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/db"
+	"github.com/danielboothcloud/sundae/pkg/db/migrate"
+	"github.com/danielboothcloud/sundae/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/openshell"
+	"github.com/danielboothcloud/sundae/pkg/sessionctl"
+	"github.com/danielboothcloud/sundae/pkg/signals"
+	"github.com/danielboothcloud/sundae/pkg/store"
+	"github.com/danielboothcloud/sundae/pkg/store/database"
+	"github.com/danielboothcloud/sundae/pkg/test"
+	"github.com/danielboothcloud/sundae/pkg/ui/pages/sessions"
 	gossh "golang.org/x/crypto/ssh"
 )
 
@@ -201,8 +201,8 @@ func (s *screen) waitFor(t *testing.T, from int, want string) {
 // newTestBackend returns a backend on a fresh database.
 func newTestBackend(t *testing.T) (*config.Config, *db.DB, store.Store, *backend.Backend) {
 	t.Helper()
-	t.Setenv("SOFT_SERVE_DATA_PATH", t.TempDir())
-	t.Setenv("SOFT_SERVE_SSH_LISTEN_ADDR", fmt.Sprintf(":%d", test.RandomPort()))
+	t.Setenv("SUNDAE_DATA_PATH", t.TempDir())
+	t.Setenv("SUNDAE_SSH_LISTEN_ADDR", fmt.Sprintf(":%d", test.RandomPort()))
 	ctx := context.Background()
 	cfg := config.DefaultConfig()
 	if err := cfg.Validate(); err != nil {
@@ -223,7 +223,7 @@ func newTestBackend(t *testing.T) (*config.Config, *db.DB, store.Store, *backend
 }
 
 // TestTUIAttachRoundTrip drives the real TUI over a charm.land/ssh server
-// with an emulated PTY, as `soft serve` runs it: it attaches to a session
+// with an emulated PTY, as `sundae serve` runs it: it attaches to a session
 // from the Sessions tab, types into the session, resizes the window,
 // detaches with ~., and checks the TUI has its input back.
 func TestTUIAttachRoundTrip(t *testing.T) {

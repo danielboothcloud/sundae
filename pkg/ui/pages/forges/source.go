@@ -5,14 +5,14 @@ import (
 	"errors"
 
 	"charm.land/ssh"
-	"github.com/charmbracelet/soft-serve/pkg/access"
-	"github.com/charmbracelet/soft-serve/pkg/backend"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/events"
-	"github.com/charmbracelet/soft-serve/pkg/forge"
-	"github.com/charmbracelet/soft-serve/pkg/proto"
-	"github.com/charmbracelet/soft-serve/pkg/sshutils"
-	"github.com/charmbracelet/soft-serve/pkg/ui/common"
+	"github.com/danielboothcloud/sundae/pkg/access"
+	"github.com/danielboothcloud/sundae/pkg/backend"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/forge"
+	"github.com/danielboothcloud/sundae/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/sshutils"
+	"github.com/danielboothcloud/sundae/pkg/ui/common"
 )
 
 // Source is where the Forges tab gets its data and does its work. The one
@@ -41,7 +41,7 @@ type Source interface {
 	// Follow returns the forge events published from now on; nil when
 	// there is no event bus.
 	Follow() Feed
-	// CloneCommand is the command that clones a Soft Serve repository.
+	// CloneCommand is the command that clones a Sundae repository.
 	CloneCommand(repo string) string
 }
 

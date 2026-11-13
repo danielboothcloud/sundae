@@ -5,8 +5,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/events"
 )
 
 func TestSanitize(t *testing.T) {
@@ -44,7 +44,7 @@ func progress(p int) *int { return &p }
 
 func TestStatusMessage(t *testing.T) {
 	nc := config.NtfyConfig{ClickURL: "https://git.example.com/{repo}?session={session}&user={user}"}
-	sess := events.Session{User: "alice", Repo: "infra", Name: "claude-1", Sandbox: "soft-alice-infra"}
+	sess := events.Session{User: "alice", Repo: "infra", Name: "claude-1", Sandbox: "sundae-alice-infra"}
 
 	m := statusMessage(events.SessionStatus{
 		Session: sess,
@@ -67,10 +67,10 @@ func TestStatusMessage(t *testing.T) {
 	// done: default priority; the sandbox name stands in for a missing
 	// session name; a child record's id follows it.
 	m = statusMessage(events.SessionStatus{
-		Session: events.Session{User: "alice", Repo: "infra", Sandbox: "soft-alice-infra"},
+		Session: events.Session{User: "alice", Repo: "infra", Sandbox: "sundae-alice-infra"},
 		Record:  events.Record{ID: "build/test", State: events.StateDone, Msg: "Upgraded 12 packages"},
 	}, config.NtfyConfig{})
-	if m.Title != "✓ done · infra / soft-alice-infra/build/test" || m.Body != "Upgraded 12 packages" || m.Priority != priorityDefault || m.Click != "" {
+	if m.Title != "✓ done · infra / sundae-alice-infra/build/test" || m.Body != "Upgraded 12 packages" || m.Priority != priorityDefault || m.Click != "" {
 		t.Fatalf("done = %+v", m)
 	}
 
@@ -123,10 +123,10 @@ func TestStatusMessageUntrusted(t *testing.T) {
 func TestFailureMessages(t *testing.T) {
 	nc := config.NtfyConfig{ClickURL: "https://git.example.com/{repo}"}
 	m := lifecycleFailedMessage(events.SessionLifecycle{
-		Session: events.Session{User: "alice", Repo: "infra", Sandbox: "soft-alice-infra"},
+		Session: events.Session{User: "alice", Repo: "infra", Sandbox: "sundae-alice-infra"},
 		Step:    events.LifecycleFailed, Op: "start", Reason: "openshell: git: exit status 128:\nfatal: boom",
 	}, nc)
-	if m.Title != "✗ session failed · infra / soft-alice-infra" ||
+	if m.Title != "✗ session failed · infra / sundae-alice-infra" ||
 		m.Body != "Could not start the session: openshell: git: exit status 128: fatal: boom" ||
 		m.Priority != priorityDefault || m.Click != "https://git.example.com/infra" {
 		t.Fatalf("lifecycle = %+v", m)

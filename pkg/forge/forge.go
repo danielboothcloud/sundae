@@ -1,5 +1,5 @@
 // Package forge discovers repositories on GitHub and GitLab, imports them
-// into Soft Serve and keeps them in sync without ever rewriting local work.
+// into Sundae and keeps them in sync without ever rewriting local work.
 //
 // # Naming
 //
@@ -14,13 +14,13 @@
 //
 // Upstream branches and tags are fetched into the forge's own namespace,
 // refs/remotes/<forge>/heads/* and refs/remotes/<forge>/tags/*, which is the
-// only place sync prunes. Soft Serve's own refs/heads and refs/tags, which the
+// only place sync prunes. Sundae's own refs/heads and refs/tags, which the
 // TUI and web views list, are only ever created or fast-forwarded (see
 // SyncResult).
 //
 // # Link
 //
-// The link between a Soft Serve repository and its forge repository lives in
+// The link between a Sundae repository and its forge repository lives in
 // the repository's git config, the way mirrors keep their remote: a remote
 // named after the forge (url and fetch refspecs) and a [forge] section with
 // name, path, defaultbranch, lastsync and lasterror. There is no database
@@ -37,9 +37,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/ssrf"
-	"github.com/charmbracelet/soft-serve/pkg/utils"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/ssrf"
+	"github.com/danielboothcloud/sundae/pkg/utils"
 	"github.com/gobwas/glob"
 )
 
@@ -49,7 +49,7 @@ var (
 	// ErrForeignCloneURL is returned when a clone URL is not on the forge's
 	// configured host.
 	ErrForeignCloneURL = errors.New("clone URL is not on the forge host")
-	// ErrInvalidPath is returned for a forge path that cannot be a Soft Serve
+	// ErrInvalidPath is returned for a forge path that cannot be a Sundae
 	// repository name.
 	ErrInvalidPath = errors.New("invalid forge repository path")
 )
@@ -131,7 +131,7 @@ func (f *Forge) Matches(path string) bool {
 // pathSegmentRe matches one segment of a forge path.
 var pathSegmentRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 
-// RepoName returns the Soft Serve repository name for a forge path:
+// RepoName returns the Sundae repository name for a forge path:
 // "<prefix>/<path>". The path must be at least "owner/repo", made of plain
 // segments; anything that would be rewritten by repository name
 // sanitisation (".." segments, a trailing ".git") is refused, so a forge
@@ -229,7 +229,7 @@ func (f *Forge) gitUser() string {
 // The token travels as an Authorization header scoped to the forge's base
 // URL through GIT_CONFIG_* variables, like the OpenShell session clone: it is
 // never written into a URL or the repository's config. Redirects are off, as
-// for every other remote Soft Serve fetches (ssrf.GitEnv), credential
+// for every other remote Sundae fetches (ssrf.GitEnv), credential
 // helpers are reset so nothing stores or substitutes a credential, and git
 // never prompts.
 func (f *Forge) gitEnv() ([]string, error) {

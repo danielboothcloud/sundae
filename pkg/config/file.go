@@ -5,7 +5,7 @@ import (
 	"text/template"
 )
 
-var configFileTmpl = template.Must(template.New("config").Parse(`# Soft Serve Server configurations
+var configFileTmpl = template.Must(template.New("config").Parse(`# Sundae Server configurations
 
 # The name of the server.
 # This is the name that will be displayed in the UI.
@@ -193,7 +193,7 @@ sessions:
     # Loopback port of the osewa server inside each sandbox.
     port: {{ .Sessions.Osewa.Port }}
   status:
-    # How often Soft Serve runs "osewa local ls" in each running session's
+    # How often Sundae runs "osewa local ls" in each running session's
     # sandbox to read its OSC 7501 status (shown by "session ls", sent to
     # notifications). At least 1s.
     poll_interval: "{{ .Sessions.Status.PollInterval }}"
@@ -248,7 +248,7 @@ sessions:
 
 # Projects: how new repositories are initialised (repo create --template NAME,
 # and the TUI's new-repository form, n on Repositories). A template is an
-# existing Soft Serve repository whose tree, at ref and under subdir, becomes
+# existing Sundae repository whose tree, at ref and under subdir, becomes
 # the new repository's single initial commit, authored by its creator; the
 # template's history is not copied, and file contents are copied unchanged.
 # Creating from a template needs read access to the template repository.
@@ -281,9 +281,9 @@ projects:
   #    profile: claude
 {{- end }}
 
-# Forges: GitHub and GitLab accounts whose repositories Soft Serve discovers,
+# Forges: GitHub and GitLab accounts whose repositories Sundae discovers,
 # imports and keeps in sync (ssh <server> forge --help). Sync never rewrites or
-# deletes a Soft Serve branch: upstream refs are fetched into
+# deletes a Sundae branch: upstream refs are fetched into
 # refs/remotes/<name>/heads/* and refs/remotes/<name>/tags/*, branches that are
 # strictly behind are fast-forwarded and missing ones created. Pushing to a
 # forge is always explicit (forge push). Changes take effect on restart.
@@ -320,14 +320,14 @@ forges:
 #forges:
 #  - name: github
 #    kind: github
-#    token_file: /etc/soft-serve/secrets/github-token
+#    token_file: /etc/sundae/secrets/github-token
 #    include: ["me/*"]
 #    exclude: []
 #    sync: 10m
 #  - name: gitlab
 #    kind: gitlab
 #    url: https://gitlab.com
-#    token_file: /etc/soft-serve/secrets/gitlab-token
+#    token_file: /etc/sundae/secrets/gitlab-token
 {{- end }}
 
 # Notifications: agent session status changes, pushed to a phone through ntfy
@@ -368,7 +368,7 @@ notifications:
 # default: while s3.enabled is false nothing in this section is checked.
 # Each session has one object, <prefix>/<user-id>/<sandbox>.tar.gz, replaced
 # by every snapshot. The sandbox uploads and downloads it itself through
-# presigned URLs Soft Serve signs, so the S3 keys never enter a sandbox, but
+# presigned URLs Sundae signs, so the S3 keys never enter a sandbox, but
 # the sandbox network policy must allow the endpoint. Changes take effect on
 # restart.
 snapshots:

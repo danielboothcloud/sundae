@@ -16,9 +16,9 @@ import (
 	"charm.land/ssh"
 	v1 "github.com/NVIDIA/OpenShell/sdk/go/openshell/v1"
 	"github.com/anmitsu/go-shlex"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/events"
-	"github.com/charmbracelet/soft-serve/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/proto"
 )
 
 // SandboxRoot is the directory repositories are cloned into. It is also the
@@ -31,7 +31,7 @@ const tokenPrefix = "openshell:"
 // ErrNoSession is returned when attaching to a session that does not exist.
 var ErrNoSession = errors.New("no such session")
 
-// TokenStore issues and revokes Soft Serve access tokens. It is satisfied by
+// TokenStore issues and revokes Sundae access tokens. It is satisfied by
 // *backend.Backend.
 type TokenStore interface {
 	CreateAccessToken(ctx context.Context, user proto.User, name string, expiresAt time.Time) (string, error)
@@ -514,10 +514,10 @@ func (m *Manager) restoreSnapshot(ctx context.Context, opts StartOptions, op str
 	if opts.Restore == RestoreAuto {
 		// A new sandbox's /sandbox holds what the image put there (the
 		// shell start-up files): the snapshot's versions win over those
-		// without asking. Soft Serve's own state or the checkout can only
+		// without asking. Sundae's own state or the checkout can only
 		// be there from earlier work, e.g. a volume that outlived its
 		// sandbox; replacing that is the user's call.
-		found, err := probePaths(ctx, m.client, s.Sandbox, s.WorkDir, softServeStateDir)
+		found, err := probePaths(ctx, m.client, s.Sandbox, s.WorkDir, sundaeStateDir)
 		if err != nil {
 			return nil, err
 		}
@@ -554,7 +554,7 @@ func (m *Manager) discardSandbox(sandbox string) {
 // Park suspends the sandbox of the user's named session for the repository
 // (`session park`). It reports whether it parked it: a session that is
 // parked already is a successful no-op. It refuses a session with an open
-// bridge, one that is not running, and sandboxes Soft Serve did not create,
+// bridge, one that is not running, and sandboxes Sundae did not create,
 // and publishes parked (Op ParkManual) on success. start and attach resume
 // the session.
 func (m *Manager) Park(ctx context.Context, user proto.User, repo, name string) (bool, error) {
@@ -590,7 +590,7 @@ func (m *Manager) ParkSession(ctx context.Context, user proto.User, repo, name s
 		return false, false, ErrNotOwned
 	}
 	if _, ok := managedSandbox(sb); !ok {
-		return false, false, fmt.Errorf("openshell: sandbox %q was not created by Soft Serve; not parking it", sandbox)
+		return false, false, fmt.Errorf("openshell: sandbox %q was not created by Sundae; not parking it", sandbox)
 	}
 	switch sb.Status.Phase {
 	case v1.SandboxReady:

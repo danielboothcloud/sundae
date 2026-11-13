@@ -49,15 +49,15 @@ func (c *sdkClient) Upload(ctx context.Context, name, localPath, remotePath stri
 // Upload scripts. Each runs as `sh -c <script> <name> <args...>`; the name
 // shows in the sandbox's process list and lets tests tell the steps apart.
 const (
-	uploadBeginName = "soft-serve-upload-begin"
+	uploadBeginName = "sundae-upload-begin"
 	// $1: the base64 staging file. Starts it empty, creating its directory.
 	uploadBeginScript = `set -e; mkdir -p "$(dirname "$1")"; : > "$1"`
 
-	uploadChunkName = "soft-serve-upload-chunk"
+	uploadChunkName = "sundae-upload-chunk"
 	// $1: the staging file, then base64 to append.
 	uploadChunkScript = `set -e; f=$1; shift; for c in "$@"; do printf '%s' "$c"; done >> "$f"`
 
-	uploadEndName = "soft-serve-upload-end"
+	uploadEndName = "sundae-upload-end"
 	// $1: the staging file, $2: the destination. Decodes into a temporary
 	// file next to the destination, then renames it into place.
 	uploadEndScript = `set -e; base64 -d < "$1" > "$2.part"; rm -f "$1"; mv -f "$2.part" "$2"`

@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/soft-serve/pkg/access"
-	"github.com/charmbracelet/soft-serve/pkg/db"
-	"github.com/charmbracelet/soft-serve/pkg/proto"
-	"github.com/charmbracelet/soft-serve/pkg/utils"
+	"github.com/danielboothcloud/sundae/pkg/access"
+	"github.com/danielboothcloud/sundae/pkg/db"
+	"github.com/danielboothcloud/sundae/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/utils"
 	gcfg "github.com/go-git/go-git/v5/plumbing/format/config"
 )
 
@@ -217,7 +217,7 @@ func (d *Backend) seedRepository(ctx context.Context, name string, src *template
 		return err
 	}
 	branch := strings.TrimSpace(head)
-	if _, err := runGit(ctx, dir, nil, nil, "update-ref", "-m", "soft-serve: created from template "+src.name, branch, commit, ""); err != nil {
+	if _, err := runGit(ctx, dir, nil, nil, "update-ref", "-m", "sundae: created from template "+src.name, branch, commit, ""); err != nil {
 		return err
 	}
 
@@ -312,8 +312,8 @@ func shortHash(h string) string {
 	return h
 }
 
-// CommitIdentity returns the name and email of the commits Soft Serve makes
-// on user's behalf. Soft Serve does not know its users' email addresses, so
+// CommitIdentity returns the name and email of the commits Sundae makes
+// on user's behalf. Sundae does not know its users' email addresses, so
 // the address is the username at the host of the server's SSH URL. Without
 // a user (anonymous access), the server itself is the author.
 func (d *Backend) CommitIdentity(user proto.User) (name, email string) {
@@ -329,9 +329,9 @@ func (d *Backend) CommitIdentity(user proto.User) (name, email string) {
 			return r
 		}, d.cfg.Name)
 		if strings.TrimSpace(name) == "" {
-			name = "Soft Serve"
+			name = "Sundae"
 		}
-		return strings.TrimSpace(name), "soft-serve@" + host
+		return strings.TrimSpace(name), "sundae@" + host
 	}
 	return user.Username(), user.Username() + "@" + host
 }

@@ -15,11 +15,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/ssh"
-	"github.com/charmbracelet/soft-serve/pkg/backend"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/proto"
-	"github.com/charmbracelet/soft-serve/pkg/sessionctl"
-	"github.com/charmbracelet/soft-serve/pkg/ui/pages/sessions"
+	"github.com/danielboothcloud/sundae/pkg/backend"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/sessionctl"
+	"github.com/danielboothcloud/sundae/pkg/ui/pages/sessions"
 	gossh "golang.org/x/crypto/ssh"
 )
 

@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/charmbracelet/soft-serve/git"
-	"github.com/charmbracelet/soft-serve/pkg/config"
+	"github.com/danielboothcloud/sundae/git"
+	"github.com/danielboothcloud/sundae/pkg/config"
 )
 
 func TestGenerateHooks(t *testing.T) {
@@ -33,7 +33,7 @@ func TestGenerateHooks(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(repoPath, "hooks", hn)); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := os.Stat(filepath.Join(repoPath, "hooks", hn+".d", "soft-serve")); err != nil {
+		if _, err := os.Stat(filepath.Join(repoPath, "hooks", hn+".d", "sundae")); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -6,7 +6,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/charmbracelet/soft-serve/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/events"
 	"github.com/dustin/go-humanize"
 )
 

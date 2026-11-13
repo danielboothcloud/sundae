@@ -17,7 +17,7 @@ func TestSnapshotsDefaults(t *testing.T) {
 	cfg := DefaultConfig()
 	s := cfg.Snapshots.S3
 	is.True(!s.Enabled)
-	is.Equal(s.Prefix, "soft-serve/sessions")
+	is.Equal(s.Prefix, "sundae/sessions")
 	is.Equal(s.SSE, "")
 	is.Equal(s.On, []string{"end"})
 	is.Equal(cfg.Sessions.Suspend.Fallback, "none")
@@ -249,7 +249,7 @@ func TestSnapshotsEnvironRoundTrip(t *testing.T) {
 		Endpoint:        "http://minio.minio.svc:9000",
 		Region:          "us-east-1",
 		Bucket:          "snaps",
-		Prefix:          "soft/sessions",
+		Prefix:          "sundae/sessions",
 		CredentialsFile: writeTokenFile(t, td, "s3", testS3Creds),
 		SSE:             "",
 		PathStyle:       true,
@@ -259,8 +259,8 @@ func TestSnapshotsEnvironRoundTrip(t *testing.T) {
 	is.NoErr(cfg.Validate())
 
 	environ := cfg.Environ()
-	is.True(slices.Contains(environ, "SOFT_SERVE_SNAPSHOTS_S3_ON=end,park"))
-	is.True(slices.Contains(environ, "SOFT_SERVE_SESSIONS_SUSPEND_FALLBACK=snapshot"))
+	is.True(slices.Contains(environ, "SUNDAE_SNAPSHOTS_S3_ON=end,park"))
+	is.True(slices.Contains(environ, "SUNDAE_SESSIONS_SUSPEND_FALLBACK=snapshot"))
 	for _, e := range environ {
 		is.True(!strings.Contains(e, "wJalrXUtnFEMI")) // no secret in the environment
 		is.True(!strings.Contains(e, "AKIDEXAMPLE"))

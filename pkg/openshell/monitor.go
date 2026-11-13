@@ -14,8 +14,8 @@ import (
 
 	"charm.land/log/v2"
 	v1 "github.com/NVIDIA/OpenShell/sdk/go/openshell/v1"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/events"
 )
 
 // Monitor polling bounds.
@@ -71,17 +71,17 @@ type SessionStatus struct {
 	// Exited reports whether the program exited; ExitCode is its status.
 	Exited   bool `json:"exited"`
 	ExitCode *int `json:"exit_code,omitempty"`
-	// Attached is the number of osewa clients attached, Soft Serve's own
+	// Attached is the number of osewa clients attached, Sundae's own
 	// bridges included.
 	Attached int `json:"attached"`
 	// IdleSeconds is how long osewa has seen no attached client and no
 	// output.
 	IdleSeconds int64 `json:"idle_seconds"`
-	// Bridges is the number of SSH bridges Soft Serve has open on the
+	// Bridges is the number of SSH bridges Sundae has open on the
 	// session, counting start and attach commands still preparing it.
 	Bridges int `json:"bridges"`
-	// Changed is when Record last changed, as far as Soft Serve has seen:
-	// at most a poll interval late, and the first poll after Soft Serve
+	// Changed is when Record last changed, as far as Sundae has seen:
+	// at most a poll interval late, and the first poll after Sundae
 	// started for status that predates it. Zero before the first poll.
 	Changed time.Time `json:"changed"`
 	// Polled is when the status was last read successfully.
@@ -92,7 +92,7 @@ type SessionStatus struct {
 	// failed, or the sandbox is neither running nor parked.
 	Stale bool `json:"stale"`
 	// Unsuspendable is why the gateway refused to suspend the sandbox;
-	// Soft Serve does not try again while it runs.
+	// Sundae does not try again while it runs.
 	Unsuspendable string `json:"unsuspendable,omitempty"`
 }
 
@@ -112,8 +112,8 @@ type entry struct {
 	failing bool
 }
 
-// Monitor follows every session Soft Serve manages. On an interval it lists
-// the sandboxes Soft Serve created and, in each Ready one, runs `osewa local
+// Monitor follows every session Sundae manages. On an interval it lists
+// the sandboxes Sundae created and, in each Ready one, runs `osewa local
 // ls` (one exec each, a bounded number at a time) to read the session's
 // status, publishing changes on the event bus. It counts the SSH bridges
 // open on each session and, when parking is enabled, suspends sessions that
@@ -267,8 +267,8 @@ func (m *Monitor) listFailed(err error) {
 	}
 }
 
-// managedSandbox returns the owner of a sandbox Soft Serve created: one
-// labelled managed, with a numeric owner and a repository. Soft Serve never
+// managedSandbox returns the owner of a sandbox Sundae created: one
+// labelled managed, with a numeric owner and a repository. Sundae never
 // polls or parks any other.
 func managedSandbox(sb *Sandbox) (userID int64, ok bool) {
 	if sb == nil || sb.Labels[LabelManaged] != "true" || sb.Annotations[AnnotationRepo] == "" {
@@ -308,7 +308,7 @@ const (
 	WordParkedSnapshot = "parked (snapshot)"
 )
 
-// PhaseSnapshot is the phase Soft Serve shows for a session parked to its
+// PhaseSnapshot is the phase Sundae shows for a session parked to its
 // S3 snapshot. It is not a sandbox phase: the session has no sandbox.
 const PhaseSnapshot = "Snapshot"
 
@@ -563,7 +563,7 @@ func (m *Monitor) observe(sandbox, id string, ls osewaList, pollErr error) {
 // parkable reports whether a session is due to be parked, and if not, why.
 //
 // A session is parked once, for the whole of `after`, nobody has been
-// attached (no osewa client, no Soft Serve bridge) and it has not reported
+// attached (no osewa client, no Sundae bridge) and it has not reported
 // working. Every other state counts as not working: idle, done, blocked,
 // error, and none. A program that never reported a status (none) must also
 // have been quiet: osewa has seen no output from it for `after`, so a plain
@@ -824,7 +824,7 @@ func (m *Monitor) parkToSnapshot(ctx context.Context, client Client, sandbox, op
 	}
 	userID, ok := managedSandbox(sb)
 	if !ok {
-		return fmt.Errorf("openshell: sandbox %q was not created by Soft Serve; not parking it", sandbox)
+		return fmt.Errorf("openshell: sandbox %q was not created by Sundae; not parking it", sandbox)
 	}
 	if sb.Status.Phase != v1.SandboxReady {
 		return fmt.Errorf("openshell: sandbox %q is %s; only a running session can be parked", sandbox, sb.Status.Phase)

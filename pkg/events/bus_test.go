@@ -22,7 +22,7 @@ func newTestBus(opts ...Option) *Bus {
 
 func statusEvent(user int64, state State) Event {
 	return SessionStatusEvent(user, SessionStatus{
-		Session: Session{User: "alice", Repo: "r", Sandbox: "soft-alice-r"},
+		Session: Session{User: "alice", Repo: "r", Sandbox: "sundae-alice-r"},
 		Record:  Record{State: state},
 	})
 }
@@ -145,7 +145,7 @@ func TestStuckSubscriberDoesNotBlockPublish(t *testing.T) {
 	defer b.Close()
 	stuck := b.Subscribe(Named("test-stuck"), Buffer(2))
 	live := b.Subscribe(Named("test-live"), Buffer(100))
-	before := scrape(t, `soft_serve_events_dropped_total{subscriber="test-stuck"}`)
+	before := scrape(t, `sundae_events_dropped_total{subscriber="test-stuck"}`)
 
 	done := make(chan struct{})
 	go func() {
@@ -163,7 +163,7 @@ func TestStuckSubscriberDoesNotBlockPublish(t *testing.T) {
 	if got := stuck.Dropped(); got != 8 {
 		t.Fatalf("stuck dropped = %d, want 8", got)
 	}
-	if got := scrape(t, `soft_serve_events_dropped_total{subscriber="test-stuck"}`) - before; got != 8 {
+	if got := scrape(t, `sundae_events_dropped_total{subscriber="test-stuck"}`) - before; got != 8 {
 		t.Fatalf("dropped metric delta = %v, want 8", got)
 	}
 	if live.Dropped() != 0 || len(live.C) != 10 {

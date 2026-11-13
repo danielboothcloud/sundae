@@ -3,8 +3,8 @@ package common_test
 import (
 	"testing"
 
-	"github.com/charmbracelet/soft-serve/pkg/proto"
-	"github.com/charmbracelet/soft-serve/pkg/ui/common"
+	"github.com/danielboothcloud/sundae/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/ui/common"
 )
 
 func TestIsFileMarkdown(t *testing.T) {

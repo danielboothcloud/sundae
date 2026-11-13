@@ -5,9 +5,9 @@
 ┃   blocked · permission  Apply 3 to add, 1 t…
   14:02:03 ● infra / claude-1
     working  Planning
-  13:58:30 ✓ soft-serve / forge-sync
+  13:58:30 ✓ sundae / forge-sync
     done  Implemented GitHub discovery
-  13:41:30 ● soft-serve / tui
+  13:41:30 ● sundae / tui
     working  Running go test ./pkg/ui/...
   13:32:30 !
     missed  signals were lost: 2 events arriv…

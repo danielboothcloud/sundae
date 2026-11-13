@@ -27,7 +27,7 @@ import (
 // loopback server. Closing the SSH connection ends only the attach client;
 // the holder and the program keep running.
 //
-// The osewa protocol is a draft that may change until v1, so Soft Serve pins
+// The osewa protocol is a draft that may change until v1, so Sundae pins
 // one release. Change OsewaVersion, the checksums below, the
 // OSEWA_* build arguments in Containerfile and deploy/sandbox/Containerfile
 // together; TestOsewaPinMatchesContainerfiles checks they agree.
@@ -42,23 +42,23 @@ const (
 	OsewaSHA256LinuxARM64 = "5a08537f6ebd2b2b6870a54c2c6a78cb26a16d1426e261ab5b8b896d24967325"
 )
 
-// Where Soft Serve keeps its state in a sandbox. Everything is under the
+// Where Sundae keeps its state in a sandbox. Everything is under the
 // sandbox user's home, SandboxRoot, except the git credentials (see
 // gitCredentialDir).
 var (
-	// osewaInstallDir holds the osewa binary Soft Serve uploads when the
+	// osewaInstallDir holds the osewa binary Sundae uploads when the
 	// image lacks the pinned release. It is versioned, so a pin bump
 	// installs next to the old build instead of replacing a running one.
-	osewaInstallDir = path.Join(SandboxRoot, ".local/lib/soft-serve")
+	osewaInstallDir = path.Join(SandboxRoot, ".local/lib/sundae")
 	// osewaClientDir is the bridge's osewa client state (client.key,
 	// hosts.json), apart from ~/.config/osewa, which holds the server's
 	// (server.key, devices), so nothing of a user's own osewa use is
 	// touched.
-	osewaClientDir = path.Join(SandboxRoot, ".config/soft-serve/osewa-client")
+	osewaClientDir = path.Join(SandboxRoot, ".config/sundae/osewa-client")
 	// osewaSessionFile records the id of the osewa session holding this
 	// sandbox's program. The osewa CLI cannot tag a session, so the id is
-	// how Soft Serve finds it again.
-	osewaSessionFile = path.Join(SandboxRoot, ".config/soft-serve/osewa-session")
+	// how Sundae finds it again.
+	osewaSessionFile = path.Join(SandboxRoot, ".config/sundae/osewa-session")
 )
 
 const (
@@ -66,7 +66,7 @@ const (
 	// hosts.json.
 	osewaHost = "sandbox"
 	// osewaDevice is the device name the bridge client enrols as.
-	osewaDevice = "soft-serve-bridge"
+	osewaDevice = "sundae-bridge"
 )
 
 // osewaPath is where an uploaded osewa binary of the pinned version lives.
@@ -111,7 +111,7 @@ func osewaEnv() map[string]string {
 // the exec environment, base64-encoded, because the gateway refuses
 // environment values with newlines (see execEnvValue).
 const (
-	osewaProbeName = "soft-serve-osewa-probe"
+	osewaProbeName = "sundae-osewa-probe"
 	// $1: pinned version, $2: the uploaded binary's path, $3: the client
 	// directory. Prints key=value lines: osewa (the binary to use, empty
 	// when none is the pinned version), arch (uname -m) and enrolled.
@@ -124,7 +124,7 @@ echo "osewa=$bin"
 echo "arch=$(uname -m)"
 if [ -s "$3/client.key" ] && [ -s "$3/hosts.json" ]; then echo enrolled=yes; else echo enrolled=no; fi`
 
-	osewaInstallName = "soft-serve-osewa-install"
+	osewaInstallName = "sundae-osewa-install"
 	// $1: the uploaded .gz, $2: its pinned SHA-256, $3: the binary's path.
 	// Verifies, unpacks and renames the binary into place.
 	osewaInstallScript = `set -e
@@ -134,39 +134,39 @@ chmod 0755 "$3.part"
 mv -f "$3.part" "$3"
 rm -f "$1"`
 
-	osewaServerName = "soft-serve-osewa-server"
+	osewaServerName = "sundae-osewa-server"
 	// $1: the binary, $2: the listen address. --daemon returns once the
 	// server listens, or at once when one is already running. The server
 	// runs in its own session (setsid), so it outlives this exec.
 	osewaServerScript = `exec "$1" server --daemon --listen "$2" --no-quic --no-forward`
 
-	osewaEnrollName = "soft-serve-osewa-enroll"
+	osewaEnrollName = "sundae-osewa-enroll"
 	// $1: the binary, $2: the client directory, $3: the port, $4: the device
-	// name, $5: the client's public key. SOFT_SERVE_OSEWA_KEY: the client's
+	// name, $5: the client's public key. SUNDAE_OSEWA_KEY: the client's
 	// private key, base64. Writes the key and enrols it with the server;
 	// prints the enrol response.
 	osewaEnrollScript = `set -e
 umask 077
 mkdir -p "$2"
 chmod 0700 "$2"
-printf '%s' "$SOFT_SERVE_OSEWA_KEY" | base64 -d > "$2/client.key.part"
+printf '%s' "$SUNDAE_OSEWA_KEY" | base64 -d > "$2/client.key.part"
 mv -f "$2/client.key.part" "$2/client.key"
 printf '{"name":"%s","key":"%s"}\n' "$4" "$5" | "$1" enroll --port "$3"`
 
-	osewaHostsName = "soft-serve-osewa-hosts"
-	// $1: the client directory. SOFT_SERVE_OSEWA_HOSTS: hosts.json, base64.
+	osewaHostsName = "sundae-osewa-hosts"
+	// $1: the client directory. SUNDAE_OSEWA_HOSTS: hosts.json, base64.
 	osewaHostsScript = `set -e
 umask 077
-printf '%s' "$SOFT_SERVE_OSEWA_HOSTS" | base64 -d > "$1/hosts.json.part"
+printf '%s' "$SUNDAE_OSEWA_HOSTS" | base64 -d > "$1/hosts.json.part"
 mv -f "$1/hosts.json.part" "$1/hosts.json"`
 
-	osewaListName = "soft-serve-osewa-ls"
+	osewaListName = "sundae-osewa-ls"
 	// $1: the binary, $2: the session id file. Prints the recorded id on
 	// the first line, then `osewa local ls` JSON.
 	osewaListScript = `printf '%s\n' "$(cat "$2" 2>/dev/null)"
 exec "$1" local ls`
 
-	osewaStatusName = "soft-serve-osewa-status"
+	osewaStatusName = "sundae-osewa-status"
 	// $1: the uploaded binary's path, $2: the session id file. The status
 	// poll: prints the recorded id on the first line, then, when there is
 	// one, `osewa local ls` JSON. It finds osewa itself (the uploaded build,
@@ -179,7 +179,7 @@ bin=$1
 if [ ! -x "$bin" ]; then bin=$(command -v osewa 2>/dev/null) || { echo "no osewa in the sandbox" >&2; exit 3; }; fi
 exec "$bin" local ls`
 
-	osewaNewName = "soft-serve-osewa-new"
+	osewaNewName = "sundae-osewa-new"
 	// $1: the binary, $2: the session id file, $3: the id the caller saw
 	// there, $4: the working directory, then the program's argv. Creates
 	// the osewa session and records its id, unless someone else recorded a
@@ -192,7 +192,7 @@ mkdir -p "$(dirname "$idf")"
 if command -v flock >/dev/null 2>&1; then exec 9>"$idf.lock"; flock 9; fi
 cur=$(cat "$idf" 2>/dev/null || true)
 if [ "$cur" != "$seen" ]; then echo "existing $cur"; exit 0; fi
-id=$("$bin" new ` + osewaHost + ` -- /bin/sh -lc 'cd "$1" || exit; shift; exec "$@"' soft-serve-session "$dir" "$@")
+id=$("$bin" new ` + osewaHost + ` -- /bin/sh -lc 'cd "$1" || exit; shift; exec "$@"' sundae-session "$dir" "$@")
 printf '%s\n' "$id" > "$idf.part"
 mv -f "$idf.part" "$idf"
 echo "created $id"`
@@ -287,7 +287,7 @@ func (m *Manager) enrollBridge(ctx context.Context, sandbox, bin string) error {
 	}
 
 	out, err := m.script(ctx, sandbox, osewaEnrollName, osewaEnrollScript,
-		map[string]string{"SOFT_SERVE_OSEWA_KEY": execEnvValue(keyPEM)},
+		map[string]string{"SUNDAE_OSEWA_KEY": execEnvValue(keyPEM)},
 		bin, osewaClientDir, strconv.Itoa(m.osewaPort), osewaDevice, pub)
 	if err != nil {
 		return err
@@ -307,7 +307,7 @@ func (m *Manager) enrollBridge(ctx context.Context, sandbox, bin string) error {
 		return fmt.Errorf("openshell: osewa hosts.json: %w", err)
 	}
 	_, err = m.script(ctx, sandbox, osewaHostsName, osewaHostsScript,
-		map[string]string{"SOFT_SERVE_OSEWA_HOSTS": execEnvValue(string(hosts) + "\n")},
+		map[string]string{"SUNDAE_OSEWA_HOSTS": execEnvValue(string(hosts) + "\n")},
 		osewaClientDir)
 	return err
 }
@@ -327,7 +327,7 @@ func newOsewaKey() (pub, keyPEM string, err error) {
 	return base64.StdEncoding.EncodeToString(pk), string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})), nil
 }
 
-// osewaSessionInfo is the part of an `osewa local ls` session Soft Serve
+// osewaSessionInfo is the part of an `osewa local ls` session Sundae
 // reads. In osewa 0.1.4, `osewa local ls` (crates/server/src/local.rs, main)
 // prints one line, a wire::Response with only `id` (0) and `sessions` set;
 // each session is a wire::SessionInfo (crates/wire/src/messages.rs), whose

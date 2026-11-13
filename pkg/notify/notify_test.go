@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"charm.land/log/v2"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/events"
 )
 
 // fakeClock is a Clock whose timers fire only when the test advances it.
@@ -109,7 +109,7 @@ func noRequest(t *testing.T, f *fakeNtfy) {
 
 func status(state events.State, kind events.BlockKind, msg string) events.Event {
 	return events.SessionStatusEvent(1, events.SessionStatus{
-		Session: events.Session{User: "alice", Repo: "infra", Name: "claude-1", Sandbox: "soft-alice-infra"},
+		Session: events.Session{User: "alice", Repo: "infra", Name: "claude-1", Sandbox: "sundae-alice-infra"},
 		Record:  events.Record{State: state, Kind: kind, Msg: msg, App: "claude-code"},
 	})
 }

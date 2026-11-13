@@ -6,7 +6,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/soft-serve/pkg/ui/common"
+	"github.com/danielboothcloud/sundae/pkg/ui/common"
 )
 
 // Selector is a list of items that can be selected.

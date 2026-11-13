@@ -1,15 +1,15 @@
 # vi: set ft=conf
 
-env SOFT_SERVE_DEFAULT_REPO=gitops
+env SUNDAE_DEFAULT_REPO=gitops
 
-# start soft serve, with no prior `repo create` call for the default repo,
+# start sundae serve, with no prior `repo create` call for the default repo,
 # and no anon-access overrides -- just an ordinary seeded admin key
-exec soft serve &
+exec sundae serve &
 # wait for SSH server to start
 ensureserverrunning SSH_PORT
 
 # the default repo must exist and be clonable with zero manual setup
-soft repo list
+sundae repo list
 stdout 'gitops'
 
 git clone ssh://localhost:$SSH_PORT/gitops gitops
@@ -22,10 +22,10 @@ git -C gitops push origin HEAD
 # duplicate, or reset the repo's content
 stopserver
 ensureservernotrunning SSH_PORT
-exec soft serve &
+exec sundae serve &
 ensureserverrunning SSH_PORT
 
-soft repo list
+sundae repo list
 stdout 'gitops'
 
 git clone ssh://localhost:$SSH_PORT/gitops gitops2

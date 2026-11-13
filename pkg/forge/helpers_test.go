@@ -84,7 +84,7 @@ func rev(t *testing.T, dir, ref string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// localClone clones a Soft Serve bare repository into a work tree, for
+// localClone clones a Sundae bare repository into a work tree, for
 // committing "local" work to it.
 func localClone(t *testing.T, bare string) string {
 	t.Helper()

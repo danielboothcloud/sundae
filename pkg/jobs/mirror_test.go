@@ -7,8 +7,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/charmbracelet/soft-serve/git"
-	"github.com/charmbracelet/soft-serve/pkg/ssrf"
+	"github.com/danielboothcloud/sundae/git"
+	"github.com/danielboothcloud/sundae/pkg/ssrf"
 )
 
 // newRepoWithRemotes creates a bare repo with the given name=url remotes.

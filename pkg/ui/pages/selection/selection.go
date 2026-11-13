@@ -11,19 +11,19 @@ import (
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/soft-serve/pkg/access"
-	"github.com/charmbracelet/soft-serve/pkg/backend"
-	"github.com/charmbracelet/soft-serve/pkg/ui/common"
-	"github.com/charmbracelet/soft-serve/pkg/ui/components/code"
-	"github.com/charmbracelet/soft-serve/pkg/ui/components/prompt"
-	"github.com/charmbracelet/soft-serve/pkg/ui/components/selector"
-	"github.com/charmbracelet/soft-serve/pkg/ui/components/tabs"
-	"github.com/charmbracelet/soft-serve/pkg/ui/pages/forges"
-	"github.com/charmbracelet/soft-serve/pkg/ui/pages/sessions"
+	"github.com/danielboothcloud/sundae/pkg/access"
+	"github.com/danielboothcloud/sundae/pkg/backend"
+	"github.com/danielboothcloud/sundae/pkg/ui/common"
+	"github.com/danielboothcloud/sundae/pkg/ui/components/code"
+	"github.com/danielboothcloud/sundae/pkg/ui/components/prompt"
+	"github.com/danielboothcloud/sundae/pkg/ui/components/selector"
+	"github.com/danielboothcloud/sundae/pkg/ui/components/tabs"
+	"github.com/danielboothcloud/sundae/pkg/ui/pages/forges"
+	"github.com/danielboothcloud/sundae/pkg/ui/pages/sessions"
 )
 
 const (
-	defaultNoContent = "No readme found.\n\nCreate a `.soft-serve` repository and add a `README.md` file to display readme."
+	defaultNoContent = "No readme found.\n\nCreate a `.sundae` repository and add a `README.md` file to display readme."
 )
 
 // pane is a tab of the home page.
@@ -465,13 +465,13 @@ func (s *Selection) Init() tea.Cmd {
 	)
 }
 
-// aboutReadme is the README of the .soft-serve repository, which the
+// aboutReadme is the README of the .sundae repository, which the
 // About tab shows.
 type aboutReadme struct{ readme, path string }
 
 // listRepos lists the repositories the user may read, for the Repositories
-// tab, most recently updated first, and the .soft-serve README; nil when
-// there is none. A .soft-serve repository without a README is not listed.
+// tab, most recently updated first, and the .sundae README; nil when
+// there is none. A .sundae repository without a README is not listed.
 func (s *Selection) listRepos() ([]selector.IdentifiableItem, *aboutReadme, error) {
 	ctx := s.common.Context()
 	be := s.common.Backend()
@@ -483,7 +483,7 @@ func (s *Selection) listRepos() ([]selector.IdentifiableItem, *aboutReadme, erro
 	var about *aboutReadme
 	sortedItems := make(Items, 0)
 	for _, r := range repos {
-		if r.Name() == ".soft-serve" {
+		if r.Name() == ".sundae" {
 			readme, path, err := backend.Readme(r, nil)
 			if err != nil {
 				continue

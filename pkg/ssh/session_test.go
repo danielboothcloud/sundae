@@ -12,13 +12,13 @@ import (
 	"charm.land/ssh"
 	bm "charm.land/wish/v2/bubbletea"
 	"charm.land/wish/v2/testsession"
-	"github.com/charmbracelet/soft-serve/pkg/backend"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/db"
-	"github.com/charmbracelet/soft-serve/pkg/db/migrate"
-	"github.com/charmbracelet/soft-serve/pkg/store"
-	"github.com/charmbracelet/soft-serve/pkg/store/database"
-	"github.com/charmbracelet/soft-serve/pkg/test"
+	"github.com/danielboothcloud/sundae/pkg/backend"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/db"
+	"github.com/danielboothcloud/sundae/pkg/db/migrate"
+	"github.com/danielboothcloud/sundae/pkg/store"
+	"github.com/danielboothcloud/sundae/pkg/store/database"
+	"github.com/danielboothcloud/sundae/pkg/test"
 	"github.com/matryer/is"
 	gossh "golang.org/x/crypto/ssh"
 	_ "modernc.org/sqlite" // sqlite driver
@@ -51,13 +51,13 @@ func setup(tb testing.TB) (*gossh.Session, func() error) {
 	tb.Helper()
 	is := is.New(tb)
 	dp := tb.TempDir()
-	is.NoErr(os.Setenv("SOFT_SERVE_DATA_PATH", dp))
-	is.NoErr(os.Setenv("SOFT_SERVE_GIT_LISTEN_ADDR", ":9418"))
-	is.NoErr(os.Setenv("SOFT_SERVE_SSH_LISTEN_ADDR", fmt.Sprintf(":%d", test.RandomPort())))
+	is.NoErr(os.Setenv("SUNDAE_DATA_PATH", dp))
+	is.NoErr(os.Setenv("SUNDAE_GIT_LISTEN_ADDR", ":9418"))
+	is.NoErr(os.Setenv("SUNDAE_SSH_LISTEN_ADDR", fmt.Sprintf(":%d", test.RandomPort())))
 	tb.Cleanup(func() {
-		is.NoErr(os.Unsetenv("SOFT_SERVE_DATA_PATH"))
-		is.NoErr(os.Unsetenv("SOFT_SERVE_GIT_LISTEN_ADDR"))
-		is.NoErr(os.Unsetenv("SOFT_SERVE_SSH_LISTEN_ADDR"))
+		is.NoErr(os.Unsetenv("SUNDAE_DATA_PATH"))
+		is.NoErr(os.Unsetenv("SUNDAE_GIT_LISTEN_ADDR"))
+		is.NoErr(os.Unsetenv("SUNDAE_SSH_LISTEN_ADDR"))
 		is.NoErr(os.RemoveAll(dp))
 	})
 	ctx := context.TODO()

@@ -15,12 +15,12 @@ import (
 	"charm.land/log/v2"
 	"charm.land/ssh"
 	"github.com/NVIDIA/OpenShell/sdk/go/openshell/v1/types"
-	"github.com/charmbracelet/soft-serve/pkg/backend"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/events"
-	"github.com/charmbracelet/soft-serve/pkg/openshell"
-	"github.com/charmbracelet/soft-serve/pkg/proto"
-	"github.com/charmbracelet/soft-serve/pkg/sshutils"
+	"github.com/danielboothcloud/sundae/pkg/backend"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/openshell"
+	"github.com/danielboothcloud/sundae/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/sshutils"
 	"github.com/matryer/is"
 )
 
@@ -203,13 +203,13 @@ func (f *fakeOpenShell) Run(_ context.Context, name string, command []string, _ 
 		f.cloned[name] = true
 	case "sh":
 		switch command[3] {
-		case "soft-serve-osewa-probe":
+		case "sundae-osewa-probe":
 			out = "osewa=/usr/local/bin/osewa\narch=x86_64\nenrolled=yes\n"
-		case "soft-serve-osewa-ls":
+		case "sundae-osewa-ls":
 			id := f.osewa[name]
 			ls, _ := json.Marshal(map[string]any{"sessions": []map[string]any{{"id": id, "exited": false}}})
 			out = id + "\n" + string(ls) + "\n"
-		case "soft-serve-osewa-status":
+		case "sundae-osewa-status":
 			id := f.osewa[name]
 			sessions := []map[string]any{}
 			if id != "" {
@@ -221,7 +221,7 @@ func (f *fakeOpenShell) Run(_ context.Context, name string, command []string, _ 
 			}
 			ls, _ := json.Marshal(map[string]any{"id": 0, "sessions": sessions})
 			out = id + "\n" + string(ls) + "\n"
-		case "soft-serve-osewa-new":
+		case "sundae-osewa-new":
 			f.nextID++
 			f.osewa[name] = "id" + strconv.Itoa(f.nextID)
 			out = "created " + f.osewa[name] + "\n"
@@ -336,7 +336,7 @@ func TestSessionStartPropagatesExitCode(t *testing.T) {
 
 	_, stderr, err := runSessionCmd(t, ctx, "start", "r")
 	is.NoErr(err)
-	is.True(strings.Contains(stderr, "Starting sandbox soft-alice-r"))
+	is.True(strings.Contains(stderr, "Starting sandbox sundae-alice-r"))
 	is.True(strings.Contains(sess.out.String(), "hello from the sandbox"))
 	is.True(sess.exited)
 	is.Equal(sess.exitCode, 3)
@@ -382,7 +382,7 @@ func TestSessionStartDetachAndAttach(t *testing.T) {
 	_, _, err = runSessionCmd(t, withPty, "attach", "r")
 	is.True(err != nil && strings.Contains(err.Error(), "no such session"))
 	is.True(strings.Contains(err.Error(), `"session start r"`))
-	_, ok := fc.sandboxes["soft-alice-r"]
+	_, ok := fc.sandboxes["sundae-alice-r"]
 	is.True(!ok) // attach never creates
 
 	fc.exitCode = 5
@@ -428,19 +428,19 @@ func TestSessionListAndEnd(t *testing.T) {
 
 	stdout, _, err = runSessionCmd(t, ctx, "ls")
 	is.NoErr(err)
-	for _, want := range []string{"Repository", "Name", "Profile", "Sandbox", "Phase", "gone", name, "Ready", "soft-alice-r", "review", "claude"} {
+	for _, want := range []string{"Repository", "Name", "Profile", "Sandbox", "Phase", "gone", name, "Ready", "sundae-alice-r", "review", "claude"} {
 		is.True(strings.Contains(stdout, want)) // missing: want
 	}
 	lines := strings.Split(stdout, "\n")
 	var rows []string
 	for _, l := range lines {
-		if strings.Contains(l, "soft-alice") {
+		if strings.Contains(l, "sundae-alice") {
 			rows = append(rows, strings.Join(strings.Fields(strings.NewReplacer("│", " ", "|", " ").Replace(l)), " "))
 		}
 	}
 	is.Equal(len(rows), 3)
 	is.True(strings.HasPrefix(rows[0], "gone main - "+name))
-	is.True(strings.HasPrefix(rows[1], "r main - soft-alice-r Ready"))
+	is.True(strings.HasPrefix(rows[1], "r main - sundae-alice-r Ready"))
 	is.True(strings.HasPrefix(rows[2], "r review claude "+openshell.SessionSandboxName("alice", "r", "review")))
 
 	// Ending the named session leaves main.
@@ -449,7 +449,7 @@ func TestSessionListAndEnd(t *testing.T) {
 	is.True(strings.Contains(stderr, "Session ended"))
 	_, ok := fc.sandboxes[openshell.SessionSandboxName("alice", "r", "review")]
 	is.True(!ok)
-	_, ok = fc.sandboxes["soft-alice-r"]
+	_, ok = fc.sandboxes["sundae-alice-r"]
 	is.True(ok)
 
 	// The deleted repository's session can still be ended, and ending

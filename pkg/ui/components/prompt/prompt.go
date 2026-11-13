@@ -11,7 +11,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/soft-serve/pkg/ui/common"
+	"github.com/danielboothcloud/sundae/pkg/ui/common"
 )
 
 // Result is what a message did to a prompt.

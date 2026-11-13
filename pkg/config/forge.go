@@ -34,8 +34,8 @@ const (
 	MinForgeSync = time.Minute
 )
 
-// ForgeConfig declares a GitHub or GitLab account whose repositories Soft
-// Serve discovers, imports and keeps in sync.
+// ForgeConfig declares a GitHub or GitLab account whose repositories Sundae
+// discovers, imports and keeps in sync.
 //
 // Forges are only declared here: there is no runtime "add forge". The token
 // is only ever read from TokenFile, so the config file can live in a
@@ -72,7 +72,7 @@ type ForgeConfig struct {
 	// repositories. Defaults to 10m; at least 1m.
 	Sync time.Duration `env:"SYNC" yaml:"sync"`
 
-	// Prefix is the Soft Serve repository namespace imported repositories go
+	// Prefix is the Sundae repository namespace imported repositories go
 	// under: forge path "owner/repo" becomes "<prefix>/owner/repo". Defaults
 	// to Name.
 	Prefix string `env:"PREFIX" yaml:"prefix"`
@@ -262,12 +262,12 @@ func validateRepoPrefix(p string) error {
 	return nil
 }
 
-// forgeEnviron returns the forges as SOFT_SERVE_FORGES_<i>_* environment
+// forgeEnviron returns the forges as SUNDAE_FORGES_<i>_* environment
 // variables. Token values are never included, only token_file paths.
 func (c *Config) forgeEnviron() []string {
 	var envs []string
 	for i, f := range c.Forges {
-		p := fmt.Sprintf("SOFT_SERVE_FORGES_%d_", i)
+		p := fmt.Sprintf("SUNDAE_FORGES_%d_", i)
 		envs = append(envs,
 			p+"NAME="+f.Name,
 			p+"KIND="+f.Kind,

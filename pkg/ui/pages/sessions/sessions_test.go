@@ -14,13 +14,13 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/ssh"
-	"github.com/charmbracelet/soft-serve/pkg/events"
-	"github.com/charmbracelet/soft-serve/pkg/openshell"
-	"github.com/charmbracelet/soft-serve/pkg/sessionctl"
-	"github.com/charmbracelet/soft-serve/pkg/signals"
-	"github.com/charmbracelet/soft-serve/pkg/ui/common"
-	"github.com/charmbracelet/soft-serve/pkg/ui/components/prompt"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/danielboothcloud/sundae/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/openshell"
+	"github.com/danielboothcloud/sundae/pkg/sessionctl"
+	"github.com/danielboothcloud/sundae/pkg/signals"
+	"github.com/danielboothcloud/sundae/pkg/ui/common"
+	"github.com/danielboothcloud/sundae/pkg/ui/components/prompt"
 )
 
 var update = flag.Bool("update", false, "update golden files")
@@ -206,8 +206,8 @@ func mockRows() []sessionctl.Row {
 		row("gateway", "main", events.StateWorking, 2*time.Minute, "", profile("claude")),
 		row("infra", "claude-1", events.StateBlocked, 4*time.Minute, "Apply 3 to add, 1 to change, 0 to destroy?", kind(events.BlockPermission)),
 		row("scratch", "shell", "", 0, "", noStatus),
-		row("soft-serve", "forge-sync", events.StateDone, 12*time.Minute, "Implemented GitHub discovery; 14 tests pass"),
-		row("soft-serve", "tui", events.StateWorking, 10*time.Second, "Running go test ./pkg/ui/...", progress(40)),
+		row("sundae", "forge-sync", events.StateDone, 12*time.Minute, "Implemented GitHub discovery; 14 tests pass"),
+		row("sundae", "tui", events.StateWorking, 10*time.Second, "Running go test ./pkg/ui/...", progress(40)),
 	}
 }
 
@@ -233,9 +233,9 @@ func newModel(t *testing.T, width, height int, src *fakeSource) *Sessions {
 func newFakeSource() *fakeSource {
 	return &fakeSource{
 		rows:     mockRows(),
-		repos:    []string{"dotfiles", "gateway", "infra", "soft-serve"},
+		repos:    []string{"dotfiles", "gateway", "infra", "sundae"},
 		profiles: []Profile{{Name: "claude", Image: "ghcr.io/me/agent-claude:latest", Command: "claude"}, {Name: "shell", Image: "ubuntu", Command: "bash"}},
-		repoProf: map[string]string{"soft-serve": "claude"},
+		repoProf: map[string]string{"sundae": "claude"},
 	}
 }
 
@@ -351,7 +351,7 @@ func visibleKeys(m *Sessions) []string {
 func TestSortOrder(t *testing.T) {
 	m := loaded(t, 76, 30, newFakeSource())
 	got := strings.Join(visibleKeys(m), " ")
-	want := "infra/claude-1 soft-serve/forge-sync soft-serve/tui gateway/main dotfiles/main scratch/shell"
+	want := "infra/claude-1 sundae/forge-sync sundae/tui gateway/main dotfiles/main scratch/shell"
 	if got != want {
 		t.Fatalf("order:\n%s\nwant:\n%s", got, want)
 	}
@@ -430,20 +430,20 @@ func TestFilterSessions(t *testing.T) {
 	if !m.Capturing() {
 		t.Fatal("not capturing while typing the filter")
 	}
-	typeText(m, "soft")
-	if got := strings.Join(visibleKeys(m), " "); got != "soft-serve/forge-sync soft-serve/tui" {
+	typeText(m, "sundae")
+	if got := strings.Join(visibleKeys(m), " "); got != "sundae/forge-sync sundae/tui" {
 		t.Fatalf("filtered: %s", got)
 	}
 	keys(m, "enter")
 	if m.Capturing() {
 		t.Fatal("still capturing after enter")
 	}
-	if !strings.Contains(view(m), "/soft · 2 of 6") {
+	if !strings.Contains(view(m), "/sundae · 2 of 6") {
 		t.Fatalf("filter not shown:\n%s", view(m))
 	}
 	// The filter also matches the message.
 	keys(m, "/")
-	for range 4 {
+	for range 6 {
 		keys(m, "backspace")
 	}
 	typeText(m, "destroy")
@@ -488,11 +488,11 @@ func mockSignals() []signals.Signal {
 	return []signals.Signal{
 		blocked,
 		status(8, 27*time.Second, "infra", "claude-1", events.StateWorking, "Planning"),
-		status(7, 4*time.Minute, "soft-serve", "forge-sync", events.StateDone, "Implemented GitHub discovery"),
-		status(6, 21*time.Minute, "soft-serve", "tui", events.StateWorking, "Running go test ./pkg/ui/..."),
+		status(7, 4*time.Minute, "sundae", "forge-sync", events.StateDone, "Implemented GitHub discovery"),
+		status(6, 21*time.Minute, "sundae", "tui", events.StateWorking, "Running go test ./pkg/ui/..."),
 		gap,
 		life(4, 50*time.Minute, "dotfiles", "main", events.LifecycleParked),
-		life(3, 72*time.Minute, "soft-serve", "tui", events.LifecycleCreated),
+		life(3, 72*time.Minute, "sundae", "tui", events.LifecycleCreated),
 		life(2, 80*time.Minute, "old", "gone", events.LifecycleEnded),
 	}
 }
@@ -566,7 +566,7 @@ func TestSignalsAttentionAndFilter(t *testing.T) {
 		t.Fatalf("header:\n%s", view(m))
 	}
 	keys(m, "a", "/")
-	typeText(m, "soft-serve")
+	typeText(m, "sundae")
 	keys(m, "enter")
 	if got := fmt.Sprint(sigIDs(m)); got != "[7 6 5 3]" {
 		t.Fatalf("filtered: %s (gap markers always show)", got)
@@ -734,13 +734,13 @@ func TestSummary(t *testing.T) {
 func TestNewSessionForm(t *testing.T) {
 	src := newFakeSource()
 	m := loaded(t, 76, 30, src)
-	keys(m, "j") // soft-serve / forge-sync
+	keys(m, "j") // sundae / forge-sync
 	run(m, keys(m, "n"), 1)
 	if m.form == nil || !m.Capturing() {
 		t.Fatal("n did not open the form")
 	}
 	f := m.form
-	if f.Field("repo").Value() != "soft-serve" || f.Field("profile").Value() != "claude" || f.Field("name").Value() != "claude-1" {
+	if f.Field("repo").Value() != "sundae" || f.Field("profile").Value() != "claude" || f.Field("name").Value() != "claude-1" {
 		t.Fatalf("defaults: %s %s %s", f.Field("repo").Value(), f.Field("profile").Value(), f.Field("name").Value())
 	}
 	golden(t, "new-session-80", view(m))
@@ -766,7 +766,7 @@ func TestNewSessionForm(t *testing.T) {
 	}
 	typeText(m, "tui")
 	keys(m, "enter")
-	if m.form == nil || !strings.Contains(view(m), "soft-serve / tui already exists") {
+	if m.form == nil || !strings.Contains(view(m), "sundae / tui already exists") {
 		t.Fatalf("existing name accepted:\n%s", view(m))
 	}
 	keys(m, "backspace")
@@ -782,10 +782,10 @@ func TestNewSessionForm(t *testing.T) {
 		t.Fatalf("prepared %+v", src.prepared)
 	}
 	req := src.prepared[0]
-	if !req.Create || req.Repo != "soft-serve" || req.Name != "tu2" || req.Profile != "shell" {
+	if !req.Create || req.Repo != "sundae" || req.Name != "tu2" || req.Profile != "shell" {
 		t.Fatalf("request %+v", req)
 	}
-	if m.op != nil || src.closed != 1 || !strings.Contains(view(m), "Started soft-serve / tu2.") {
+	if m.op != nil || src.closed != 1 || !strings.Contains(view(m), "Started sundae / tu2.") {
 		t.Fatalf("op %v closed %d:\n%s", m.op, src.closed, view(m))
 	}
 
@@ -805,8 +805,8 @@ func TestNewSessionFormRepoPicker(t *testing.T) {
 	if f.Focused().Key != "repo" {
 		t.Fatalf("focused %s", f.Focused().Key)
 	}
-	typeText(m, "soft")
-	if f.Field("repo").Value() != "soft-serve" || f.Field("profile").Value() != "claude" || f.Field("name").Value() != "claude-1" {
+	typeText(m, "sundae")
+	if f.Field("repo").Value() != "sundae" || f.Field("profile").Value() != "claude" || f.Field("name").Value() != "claude-1" {
 		t.Fatalf("picked %s %s %s", f.Field("repo").Value(), f.Field("profile").Value(), f.Field("name").Value())
 	}
 }
@@ -952,7 +952,7 @@ func TestScopeGolden(t *testing.T) {
 			src.snap = mockSignals()
 			m := loaded(t, w, 12, src)
 			m.Update(followMsg{snap: src.snap, feed: &fakeFeed{ch: make(chan []signals.Signal)}})
-			m.SetScope("soft-serve")
+			m.SetScope("sundae")
 			golden(t, fmt.Sprintf("repo-sessions-%d", w), view(m))
 			keys(m, "e")
 			golden(t, fmt.Sprintf("repo-signals-%d", w), view(m))
@@ -967,8 +967,8 @@ func TestScopeKeys(t *testing.T) {
 	keys(m, "/")
 	typeText(m, "infra")
 	keys(m, "enter")
-	m.SetScope("soft-serve")
-	if got := strings.Join(visibleKeys(m), " "); got != "soft-serve/forge-sync soft-serve/tui" {
+	m.SetScope("sundae")
+	if got := strings.Join(visibleKeys(m), " "); got != "sundae/forge-sync sundae/tui" {
 		t.Fatalf("scoped rows %s", got)
 	}
 	if name, i, n := m.SelectedName(); name != "forge-sync" || i != 1 || n != 2 {
@@ -976,17 +976,17 @@ func TestScopeKeys(t *testing.T) {
 	}
 	// n opens the form for this repository, fixed.
 	run(m, keys(m, "n"), 1)
-	if m.form == nil || m.form.Field("repo").Kind() != prompt.Fixed || m.form.Field("repo").Value() != "soft-serve" {
+	if m.form == nil || m.form.Field("repo").Kind() != prompt.Fixed || m.form.Field("repo").Value() != "sundae" {
 		t.Fatal("n did not open the form for the repository")
 	}
 	keys(m, "esc")
 	// x asks in the tab: the repository page's footer is the help.
 	keys(m, "j", "x")
-	if m.FooterLine(80) != "" || !strings.Contains(view(m), "End soft-serve / tui?") || !strings.Contains(view(m), "y / N") {
+	if m.FooterLine(80) != "" || !strings.Contains(view(m), "End sundae / tui?") || !strings.Contains(view(m), "y / N") {
 		t.Fatalf("confirm:\n%s", view(m))
 	}
 	run(m, keys(m, "y"), 2)
-	if fmt.Sprint(src.ended) != "[soft-serve/tui]" {
+	if fmt.Sprint(src.ended) != "[sundae/tui]" {
 		t.Fatalf("ended %v", src.ended)
 	}
 	// A filter in the repository is its own; esc clears it.
@@ -1000,7 +1000,7 @@ func TestScopeKeys(t *testing.T) {
 	if m.rowQuery != "infra" || len(visibleKeys(m)) != 1 {
 		t.Fatalf("home filter lost: %q %v", m.rowQuery, visibleKeys(m))
 	}
-	m.SetScope("soft-serve")
+	m.SetScope("sundae")
 	if m.rowQuery != "forge" {
 		t.Fatalf("repository filter lost: %q", m.rowQuery)
 	}

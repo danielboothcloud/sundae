@@ -41,7 +41,7 @@ const (
 // Snapshot defaults.
 const (
 	// DefaultSnapshotPrefix is the snapshots.s3.prefix default.
-	DefaultSnapshotPrefix = "soft-serve/sessions"
+	DefaultSnapshotPrefix = "sundae/sessions"
 	// DefaultSnapshotRegion is the region signed for an S3-compatible
 	// endpoint (snapshots.s3.endpoint set) when snapshots.s3.region is
 	// empty. MinIO and Ceph RGW accept it unless configured otherwise.
@@ -350,19 +350,19 @@ func validateS3Endpoint(raw string) error {
 	return nil
 }
 
-// snapshotsEnviron returns the snapshots section as SOFT_SERVE_SNAPSHOTS_*
+// snapshotsEnviron returns the snapshots section as SUNDAE_SNAPSHOTS_*
 // environment variables. The keys never are: only the file holding them.
 func (c *Config) snapshotsEnviron() []string {
 	s := c.Snapshots.S3
 	return []string{
-		fmt.Sprintf("SOFT_SERVE_SNAPSHOTS_S3_ENABLED=%t", s.Enabled),
-		"SOFT_SERVE_SNAPSHOTS_S3_ENDPOINT=" + s.Endpoint,
-		"SOFT_SERVE_SNAPSHOTS_S3_REGION=" + s.Region,
-		"SOFT_SERVE_SNAPSHOTS_S3_BUCKET=" + s.Bucket,
-		"SOFT_SERVE_SNAPSHOTS_S3_PREFIX=" + s.Prefix,
-		"SOFT_SERVE_SNAPSHOTS_S3_CREDENTIALS_FILE=" + s.CredentialsFile,
-		"SOFT_SERVE_SNAPSHOTS_S3_SSE=" + s.SSE,
-		fmt.Sprintf("SOFT_SERVE_SNAPSHOTS_S3_PATH_STYLE=%t", s.PathStyle),
-		"SOFT_SERVE_SNAPSHOTS_S3_ON=" + strings.Join(s.On, ","),
+		fmt.Sprintf("SUNDAE_SNAPSHOTS_S3_ENABLED=%t", s.Enabled),
+		"SUNDAE_SNAPSHOTS_S3_ENDPOINT=" + s.Endpoint,
+		"SUNDAE_SNAPSHOTS_S3_REGION=" + s.Region,
+		"SUNDAE_SNAPSHOTS_S3_BUCKET=" + s.Bucket,
+		"SUNDAE_SNAPSHOTS_S3_PREFIX=" + s.Prefix,
+		"SUNDAE_SNAPSHOTS_S3_CREDENTIALS_FILE=" + s.CredentialsFile,
+		"SUNDAE_SNAPSHOTS_S3_SSE=" + s.SSE,
+		fmt.Sprintf("SUNDAE_SNAPSHOTS_S3_PATH_STYLE=%t", s.PathStyle),
+		"SUNDAE_SNAPSHOTS_S3_ON=" + strings.Join(s.On, ","),
 	}
 }

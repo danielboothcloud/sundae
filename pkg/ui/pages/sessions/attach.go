@@ -9,9 +9,9 @@ import (
 	"sync"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/soft-serve/pkg/openshell"
-	"github.com/charmbracelet/soft-serve/pkg/sessionctl"
-	"github.com/charmbracelet/soft-serve/pkg/signals"
+	"github.com/danielboothcloud/sundae/pkg/openshell"
+	"github.com/danielboothcloud/sundae/pkg/sessionctl"
+	"github.com/danielboothcloud/sundae/pkg/signals"
 )
 
 // Handoff hands the SSH terminal the TUI runs on to an attach, and back.

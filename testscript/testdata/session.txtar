@@ -1,29 +1,29 @@
 # vi: set ft=conf
 
 # OpenShell sessions are off by default: `session` is an unknown command.
-exec soft serve &
+exec sundae serve &
 ensureserverrunning SSH_PORT
 
-soft repo create repo1
+sundae repo create repo1
 
-! soft session start repo1
+! sundae session start repo1
 stderr 'unknown command "session"'
-! soft session ls
+! sundae session ls
 stderr 'unknown command "session"'
 
 stopserver
 ensureservernotrunning SSH_PORT
 
 # Enable OpenShell. The gateway is never contacted by the checks below.
-env SOFT_SERVE_OPENSHELL_ENABLED=true
-env SOFT_SERVE_OPENSHELL_GATEWAY_ADDRESS=http://127.0.0.1:1
-env SOFT_SERVE_OPENSHELL_IMAGE=example/sandbox:latest
+env SUNDAE_OPENSHELL_ENABLED=true
+env SUNDAE_OPENSHELL_GATEWAY_ADDRESS=http://127.0.0.1:1
+env SUNDAE_OPENSHELL_IMAGE=example/sandbox:latest
 
-exec soft serve &
+exec sundae serve &
 ensureserverrunning SSH_PORT
 
 # the command is registered
-soft session --help
+sundae session --help
 stdout 'start'
 stdout 'attach'
 stdout 'ls'
@@ -31,49 +31,49 @@ stdout 'signals'
 stdout 'end'
 
 # start and attach need a terminal (ssh -t); start --detach does not
-! soft session start repo1
+! sundae session start repo1
 stderr 'requires a terminal \(ssh -t\)'
-! soft session attach repo1
+! sundae session attach repo1
 stderr 'requires a terminal \(ssh -t\)'
-! soft session start repo1 --detach
-stderr 'Starting sandbox soft-admin-repo1'
+! sundae session start repo1 --detach
+stderr 'Starting sandbox sundae-admin-repo1'
 
 # the failed start is a signal, with its reason; only its owner sees it
-soft session signals
+sundae session signals
 stdout 'TIME +STATE +SESSION +MESSAGE'
 stdout '✗ failed · start +repo1 / main +could not start the session: '
-soft session signals --json --attention
+sundae session signals --json --attention
 stdout '"type":"lifecycle".*"step":"failed","op":"start"'
-soft session signals --repo other
+sundae session signals --repo other
 stdout 'No signals yet'
-! soft session signals --limit -1
+! sundae session signals --limit -1
 stderr 'must not be negative'
 
 # session names are checked
-! soft session end repo1 --name Bad
+! sundae session end repo1 --name Bad
 stderr 'invalid session name'
 
 # with a terminal, `session` bypasses the TUI and reaches the command;
 # repository access is checked before the gateway is contacted
-! ptysoft session start nope
+! ptysundae session start nope
 stderr 'repository not found'
-! ptysoft session start repo1
-stderr 'Starting sandbox soft-admin-repo1'
+! ptysundae session start repo1
+stderr 'Starting sandbox sundae-admin-repo1'
 
 # users without read access get the same error as other repo commands
-soft user create user1 -k "$USER1_AUTHORIZED_KEY"
-soft repo create private1 -p
-! usoft session end private1
+sundae user create user1 -k "$USER1_AUTHORIZED_KEY"
+sundae repo create private1 -p
+! usundae session end private1
 stderr 'repository not found'
-usoft session signals
+usundae session signals
 stdout 'No signals yet'
 
 # anonymous users cannot use sessions
-! ksoft session ls
+! ksundae session ls
 stderr 'unauthorized'
-! ksoft session signals
+! ksundae session signals
 stderr 'unauthorized'
-! ksoft session end repo1
+! ksundae session end repo1
 stderr 'unauthorized'
 
 # stop the server

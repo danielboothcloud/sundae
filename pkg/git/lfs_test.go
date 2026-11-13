@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/git-lfs-transfer/transfer"
-	"github.com/charmbracelet/soft-serve/pkg/lfs"
+	"github.com/danielboothcloud/sundae/pkg/lfs"
 )
 
 // Object IDs arrive raw off the pktline stream. They must be rejected before
@@ -16,8 +16,8 @@ import (
 func TestLFSTransferRejectsMalformedOid(t *testing.T) {
 	oids := []string{
 		"../../../../../../../../etc/passwd",
-		"../../ssh/soft_serve_host_ed25519",
-		"objects/../../../soft-serve.db",
+		"../../ssh/sundae_host_ed25519",
+		"objects/../../../sundae.db",
 		"/etc/passwd",
 		"",
 		"abc",

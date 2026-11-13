@@ -1,50 +1,50 @@
 # vi: set ft=conf
 
-# start soft serve
-exec soft serve &
+# start sundae serve
+exec sundae serve &
 # wait for SSH server to start
 ensureserverrunning SSH_PORT
 
 # setup
-soft repo import test https://github.com/charmbracelet/wizard-tutorial.git
-soft user create foo --key "$USER1_AUTHORIZED_KEY"
+sundae repo import test https://github.com/charmbracelet/wizard-tutorial.git
+sundae user create foo --key "$USER1_AUTHORIZED_KEY"
 
 # list collabs
-soft repo collab list test
+sundae repo collab list test
 ! stdout .
 
 # add collab
-soft repo collab add test foo
-soft repo collab list test
+sundae repo collab add test foo
+sundae repo collab list test
 stdout 'foo'
 
 # remove collab
-soft repo collab remove test foo
-soft repo collab list test
+sundae repo collab remove test foo
+sundae repo collab list test
 ! stdout .
 
 # create empty repo
-soft repo create empty '-d "empty repo"'
+sundae repo create empty '-d "empty repo"'
 
 # add collab
-soft repo collab add empty foo
+sundae repo collab add empty foo
 # add collab again
-# test issue #464 https://github.com/charmbracelet/soft-serve/issues/464
-! soft repo collab add empty foo
+# test upstream Soft Serve issue #464 https://github.com/charmbracelet/soft-serve/issues/464
+! sundae repo collab add empty foo
 stderr '.*already exists.*'
 # a placeholder to reset stderr
-soft help
+sundae help
 
 # a no-access collaborator cannot read a private repo (GHSA-pmgj-8mr6-9rff)
-soft repo create secret -p
-! usoft repo description secret
+sundae repo create secret -p
+! usundae repo description secret
 stderr '.*repository not found.*'
-soft repo collab add secret foo no-access
-! usoft repo description secret
+sundae repo collab add secret foo no-access
+! usundae repo description secret
 stderr '.*repository not found.*'
-soft repo collab remove secret foo
-soft repo collab add secret foo read-only
-usoft repo description secret
+sundae repo collab remove secret foo
+sundae repo collab add secret foo read-only
+usundae repo description secret
 
 # stop the server
 [windows] stopserver

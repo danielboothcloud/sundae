@@ -10,13 +10,13 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2/table"
-	"github.com/charmbracelet/soft-serve/pkg/backend"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/openshell"
-	"github.com/charmbracelet/soft-serve/pkg/proto"
-	"github.com/charmbracelet/soft-serve/pkg/sessionctl"
-	"github.com/charmbracelet/soft-serve/pkg/signals"
-	"github.com/charmbracelet/soft-serve/pkg/sshutils"
+	"github.com/danielboothcloud/sundae/pkg/backend"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/openshell"
+	"github.com/danielboothcloud/sundae/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/sessionctl"
+	"github.com/danielboothcloud/sundae/pkg/signals"
+	"github.com/danielboothcloud/sundae/pkg/sshutils"
 	"github.com/spf13/cobra"
 )
 
@@ -422,7 +422,7 @@ func sessionListCommand() *cobra.Command {
 		Aliases: []string{"list"},
 		Short:   "List your agent sessions and what their agents are doing",
 		Long: `List your agent sessions: repository, name, profile, sandbox, phase,
-and the agent's status (OSC 7501) as Soft Serve last read it: state, message,
+and the agent's status (OSC 7501) as Sundae last read it: state, message,
 how many clients are attached, and when the state last changed.
 
 Sessions that need you come first: blocked, error, done, working, idle,

@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"charm.land/log/v2"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/proto"
-	"github.com/charmbracelet/soft-serve/pkg/utils"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/utils"
 )
 
 var (
@@ -28,7 +28,7 @@ var (
 	ErrRepoNotImported = errors.New("repository is not imported from this forge")
 )
 
-// Backend is the part of the Soft Serve backend the forge service uses.
+// Backend is the part of the Sundae backend the forge service uses.
 // *backend.Backend implements it.
 type Backend interface {
 	Repositories(ctx context.Context) ([]proto.Repository, error)
@@ -158,7 +158,7 @@ func (s *Service) lock(repo string) func() {
 	return m.Unlock
 }
 
-// Link is a Soft Serve repository's link to its forge repository, read from
+// Link is a Sundae repository's link to its forge repository, read from
 // the repository's git config.
 type Link struct {
 	Forge string
@@ -228,7 +228,7 @@ func (s *Service) links(ctx context.Context, forge string) ([]*Link, error) {
 
 // writeLink records the link in the repository's git config: the remote
 // (url, fetch refspecs into the forge's namespace, no tag following), a
-// receive.hideRefs entry so pushes to Soft Serve cannot write the namespace,
+// receive.hideRefs entry so pushes to Sundae cannot write the namespace,
 // and the [forge] section.
 func writeLink(ctx context.Context, dir string, f *Forge, rr RemoteRepo) error {
 	remote := "remote." + f.Name()
@@ -376,7 +376,7 @@ func (s *Service) Discover(ctx context.Context, name string) (*Listing, error) {
 // RepoStatus is a forge repository as `forge repos` shows it.
 type RepoStatus struct {
 	Path string `json:"path"`
-	// Repo is the Soft Serve repository name: the imported repository, or
+	// Repo is the Sundae repository name: the imported repository, or
 	// the name an import would use.
 	Repo     string `json:"repo"`
 	Imported bool   `json:"imported"`
@@ -502,7 +502,7 @@ func (s *Service) originOf(ctx context.Context, l *Link) Origin {
 }
 
 // Origins returns the origin of every repository imported from a forge,
-// by Soft Serve repository name; repositories not in it are local. It
+// by Sundae repository name; repositories not in it are local. It
 // never calls a forge.
 func (s *Service) Origins(ctx context.Context) (map[string]Origin, error) {
 	links, err := s.links(ctx, "")
@@ -601,7 +601,7 @@ type ImportResult struct {
 	Sync   *SyncResult  `json:"sync,omitempty"`
 }
 
-// Import imports forge repositories as new Soft Serve repositories owned by
+// Import imports forge repositories as new Sundae repositories owned by
 // user. It fails as a whole only when the forge cannot be listed; every
 // repository gets its own result.
 func (s *Service) Import(ctx context.Context, user proto.User, name string, opts ImportOptions) ([]ImportResult, error) {
@@ -825,8 +825,8 @@ func (s *Service) SyncForge(ctx context.Context, name string) ([]RepoSyncResult,
 	return results, nil
 }
 
-// SyncRepo syncs one repository imported from the forge, named by its Soft
-// Serve name or its forge path.
+// SyncRepo syncs one repository imported from the forge, named by its Sundae
+// name or its forge path.
 func (s *Service) SyncRepo(ctx context.Context, name, repo string) (RepoSyncResult, error) {
 	f, err := s.Forge(name)
 	if err != nil {

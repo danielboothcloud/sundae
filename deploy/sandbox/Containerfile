@@ -1,12 +1,12 @@
-# The image the OpenShell sandboxes started by Soft Serve run
-# (openshell.image in Soft Serve's config, openshell.sandboxImage in
+# The image the OpenShell sandboxes started by Sundae run
+# (openshell.image in Sundae's config, openshell.sandboxImage in
 # deploy/environment.yaml).
 #
 # Build it from the repository root. Nothing is copied from the build context.
 # See deploy/README.md for the full build and push commands:
 #
 #   podman build -f deploy/sandbox/Containerfile --platform linux/amd64 \
-#     -t ghcr.io/danielboothcloud/soft-serve-sandbox:<tag> deploy/sandbox
+#     -t ghcr.io/danielboothcloud/sundae-sandbox:<tag> deploy/sandbox
 #
 # What OpenShell 0.1.8 expects of a sandbox image, and what follows from it:
 #
@@ -25,28 +25,28 @@
 #   and git look the current user up by UID (SANDBOX_UID/SANDBOX_GID below).
 # - /sandbox is the workspace and HOME. On Kubernetes it is a volume that
 #   OpenShell seeds from this image's /sandbox on first start (fsGroup makes
-#   it writable); Soft Serve clones each repository into /sandbox/<repo>.
-# - Soft Serve runs each session's program (openshell.command, `bash -l` by
+#   it writable); Sundae clones each repository into /sandbox/<repo>.
+# - Sundae runs each session's program (openshell.command, `bash -l` by
 #   default, or a profile's command) in the checkout, inside an osewa session
 #   (https://github.com/rjyo/osewa), so it keeps running after the SSH client
 #   disconnects. OpenShell starts exec'd commands with HOME=/sandbox and a
 #   cleared environment: image ENV values other than PATH do not reach them.
 #   osewa sessions start with a clean environment too and run the program
 #   through `/bin/sh -l`, so login-shell settings go in /etc/profile.d.
-# - osewa is installed here as /usr/local/bin/osewa, the release Soft Serve
-#   pins. Soft Serve uses it when `osewa version` matches its pin; otherwise
-#   it uploads the pinned build to /sandbox/.local/lib/soft-serve. It starts
+# - osewa is installed here as /usr/local/bin/osewa, the release Sundae
+#   pins. Sundae uses it when `osewa version` matches its pin; otherwise
+#   it uploads the pinned build to /sandbox/.local/lib/sundae. It starts
 #   `osewa server` on 127.0.0.1:7322 (loopback only, QUIC and port forwarding
 #   off) and keeps osewa's state under /sandbox: ~/.config/osewa (server key,
 #   enrolled devices), ~/.local/state/osewa (log, holder sockets) and
-#   ~/.config/soft-serve (the bridge's client identity and session id).
-# - Soft Serve writes the sandbox's short-lived git token to
-#   /tmp/soft-serve/gitconfig (mode 0600) on every session start and attach,
+#   ~/.config/sundae (the bridge's client identity and session id).
+# - Sundae writes the sandbox's short-lived git token to
+#   /tmp/sundae/gitconfig (mode 0600) on every session start and attach,
 #   and ~/.gitconfig includes that file; the token never lands in /sandbox.
 #   The bootstrap uses sh, git, grep, gzip, sha256sum and base64, and flock
 #   when present; all are in this image.
-# - With S3 snapshots on (snapshots.s3), Soft Serve archives /sandbox with GNU
-#   tar and gzip into /tmp/soft-serve, checks it with md5sum and uploads it
+# - With S3 snapshots on (snapshots.s3), Sundae archives /sandbox with GNU
+#   tar and gzip into /tmp/sundae, checks it with md5sum and uploads it
 #   with curl to a presigned URL; a restore streams curl | gzip -d | tar -x.
 #   All are in this image; the sandbox network policy must allow curl to
 #   reach the S3 endpoint.
@@ -70,7 +70,7 @@ ARG JJ_SHA256_ARM64=0f300e1576de8dabe0a9dedf0b87ae44f8accea5cf54d9a342a51061c1fb
 # together, and with them OsewaVersion and the checksums in
 # pkg/openshell/osewa.go and the OSEWA_* arguments of the root Containerfile
 # (TestOsewaPinMatchesContainerfiles checks they agree): the osewa protocol is
-# a draft and Soft Serve drives this exact release.
+# a draft and Sundae drives this exact release.
 ARG OSEWA_VERSION=0.1.4
 ARG OSEWA_SHA256_AMD64=160667bfd60e999b4059b30dfad74fd38c8ab0da413668ec176678a4a0d4bb58
 ARG OSEWA_SHA256_ARM64=5a08537f6ebd2b2b6870a54c2c6a78cb26a16d1426e261ab5b8b896d24967325
@@ -135,7 +135,7 @@ RUN set -eu; \
 # --- sandbox -------------------------------------------------------------------
 FROM ${BASE_IMAGE}
 
-# git, bash:       Soft Serve clones with git (or jj, which runs git) and
+# git, bash:       Sundae clones with git (or jj, which runs git) and
 #                  runs `bash -l` unless a profile names another program.
 # ca-certificates: TLS for git, jj and curl.
 # curl, openssh-client, less, nano, vim-tiny: everyday tools. less is the
@@ -158,7 +158,7 @@ RUN apt-get update \
 COPY --from=jj /out-jj /usr/bin/jj
 
 # The pinned osewa, under /usr (not /opt, which the default sandbox
-# filesystem policy does not expose) and on PATH, where Soft Serve looks for
+# filesystem policy does not expose) and on PATH, where Sundae looks for
 # it.
 COPY --from=osewa /out-osewa /usr/local/bin/osewa
 
@@ -176,10 +176,10 @@ RUN groupadd --gid "${SANDBOX_GID}" sandbox \
 # Read by login shells (`bash -l`, and the `/bin/sh -l` osewa sessions start
 # the program with). Only fills in what the caller did not set.
 RUN printf '%s\n' \
-      '# Soft Serve sandbox defaults.' \
+      '# Sundae sandbox defaults.' \
       ': "${LANG:=C.UTF-8}"; export LANG' \
       ': "${EDITOR:=nano}"; export EDITOR' \
-      > /etc/profile.d/soft-serve-sandbox.sh
+      > /etc/profile.d/sundae-sandbox.sh
 
 WORKDIR /sandbox
 USER ${SANDBOX_UID}:${SANDBOX_GID}

@@ -1,13 +1,17 @@
+# Packages a prebuilt, statically linked sundae binary from the build context
+# (CGO_ENABLED=0 go build -o sundae ./cmd/sundae). The upstream project fed it
+# from goreleaser; Sundae has no release pipeline, so the Containerfile, which
+# builds from source, is the supported image build.
 FROM alpine:latest
 
 # Create directories
-WORKDIR /soft-serve
+WORKDIR /sundae
 # Expose data volume
-VOLUME /soft-serve
+VOLUME /sundae
 
 # Environment variables
-ENV SOFT_SERVE_DATA_PATH "/soft-serve"
-ENV SOFT_SERVE_INITIAL_ADMIN_KEYS ""
+ENV SUNDAE_DATA_PATH "/sundae"
+ENV SUNDAE_INITIAL_ADMIN_KEYS ""
 # workaround to prevent slowness in docker when running with a tty
 ENV CI "1"
 
@@ -22,8 +26,8 @@ EXPOSE 23233/tcp
 EXPOSE 9418/tcp
 
 # Set the default command
-ENTRYPOINT [ "/usr/local/bin/soft", "serve" ]
+ENTRYPOINT [ "/usr/local/bin/sundae", "serve" ]
 
 RUN apk update && apk add --update git bash openssh && rm -rf /var/cache/apk/*
 
-COPY soft /usr/local/bin/soft
+COPY sundae /usr/local/bin/sundae

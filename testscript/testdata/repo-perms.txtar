@@ -3,14 +3,14 @@
 # convert crlf to lf on windows
 [windows] dos2unix info.txt
 
-# start soft serve
-exec soft serve &
+# start sundae serve
+exec sundae serve &
 # wait for SSH server to start
 ensureserverrunning SSH_PORT
 
 # create a repo & user1 with admin
-soft repo create repo1 -p
-soft user create user1 -k "$USER1_AUTHORIZED_KEY"
+sundae repo create repo1 -p
+sundae user create user1 -k "$USER1_AUTHORIZED_KEY"
 
 # setup repo
 git clone ssh://localhost:$SSH_PORT/repo1 repo1
@@ -22,64 +22,64 @@ git -C repo1 push origin HEAD
 git -C repo1 push origin HEAD --tags
 
 # admin can access it
-soft repo tree repo1
-soft repo blob repo1 README.md
-soft repo description repo1 'desc'
-soft repo project-name repo1 'proj'
-soft repo private repo1
-soft repo info repo1
+sundae repo tree repo1
+sundae repo blob repo1 README.md
+sundae repo description repo1 'desc'
+sundae repo project-name repo1 'proj'
+sundae repo private repo1
+sundae repo info repo1
 cmp stdout info.txt
 
 # verify no collab
-soft repo collab list repo1
+sundae repo collab list repo1
 ! stdout .
 
 # regular user can't access it
-! usoft repo info repo1
+! usundae repo info repo1
 stderr 'repository not found'
-! usoft repo tree repo1
+! usundae repo tree repo1
 stderr 'repository not found'
-! usoft repo tag list repo1
+! usundae repo tag list repo1
 stderr 'repository not found'
-! usoft repo tag delete repo1 v1.0.0
+! usundae repo tag delete repo1 v1.0.0
 stderr 'repository not found'
-! usoft repo blob repo1 README.md
+! usundae repo blob repo1 README.md
 stderr 'repository not found'
-! usoft repo description repo1
+! usundae repo description repo1
 stderr 'repository not found'
-! usoft repo description repo1 'new desc'
+! usundae repo description repo1 'new desc'
 stderr 'repository not found'
-! usoft repo project-name repo1
+! usundae repo project-name repo1
 stderr 'repository not found'
-! usoft repo private repo1 true
+! usundae repo private repo1 true
 stderr 'repository not found'
-! usoft repo private repo1
+! usundae repo private repo1
 stderr 'repository not found'
-! usoft repo rename repo1 repo11
+! usundae repo rename repo1 repo11
 stderr 'repository not found'
-! usoft repo branch default repo1
+! usundae repo branch default repo1
 stderr 'repository not found'
-! usoft repo branch default repo1 main
+! usundae repo branch default repo1 main
 stderr 'repository not found'
-! usoft repo delete repo1
+! usundae repo delete repo1
 stderr 'repository not found'
 
 # add user1 as collab
-! soft repo collab add repo1 user1 foobar
+! sundae repo collab add repo1 user1 foobar
 stderr 'invalid access level'
-soft repo collab add repo1 user1 read-write
-soft repo collab list repo1
+sundae repo collab add repo1 user1 read-write
+sundae repo collab list repo1
 stdout user1
-usoft repo collab list repo1
+usundae repo collab list repo1
 stdout user1
 
 # verify user1 has access now
-usoft repo info repo1
+usundae repo info repo1
 cmp stdout info.txt
 
 # delete
-usoft repo delete repo1
-usoft repo list
+usundae repo delete repo1
+usundae repo list
 ! stdout .
 
 # stop the server

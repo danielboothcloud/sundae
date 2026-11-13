@@ -6,8 +6,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/charmbracelet/soft-serve/pkg/db"
-	"github.com/charmbracelet/soft-serve/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/db"
+	"github.com/danielboothcloud/sundae/pkg/proto"
 	"github.com/matryer/is"
 )
 

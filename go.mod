@@ -1,4 +1,4 @@
-module github.com/charmbracelet/soft-serve
+module github.com/danielboothcloud/sundae
 
 go 1.26.6
 

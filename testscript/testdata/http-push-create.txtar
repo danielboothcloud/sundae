@@ -3,12 +3,12 @@
 # FIXME: don't skip windows
 [windows] skip 'curl makes github actions hang'
 
-# start soft serve
-exec soft serve &
+# start sundae serve
+exec sundae serve &
 # wait for SSH server to start
 ensureserverrunning SSH_PORT
 
-soft settings anon-access read-write
+sundae settings anon-access read-write
 
 # bad credentials never create a repository
 curl http://bob:wrong@localhost:$HTTP_PORT/ghost1.git/info/refs?service=git-receive-pack
@@ -19,7 +19,7 @@ curl http://localhost:$HTTP_PORT/ghost2.git/HEAD?service=git-receive-pack
 
 # the push advertisement still creates one
 curl http://localhost:$HTTP_PORT/ghost3.git/info/refs?service=git-receive-pack
-soft repo list
+sundae repo list
 stdout 'ghost3'
 ! stdout 'ghost1'
 ! stdout 'ghost2'

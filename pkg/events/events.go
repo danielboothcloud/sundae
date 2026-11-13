@@ -1,4 +1,4 @@
-// Package events is Soft Serve's in-process event bus: session status
+// Package events is Sundae's in-process event bus: session status
 // changes, session lifecycle and forge outcomes are published once and
 // consumed by any number of subscribers (notifications, the TUI, a CLI feed).
 //
@@ -205,7 +205,7 @@ const (
 	// LifecycleReady: the session is ready to attach to.
 	LifecycleReady Lifecycle = "ready"
 	// LifecycleParked: the sandbox was suspended while idle. Op is "auto"
-	// when Soft Serve parked it, "park" when the user did.
+	// when Sundae parked it, "park" when the user did.
 	LifecycleParked Lifecycle = "parked"
 	// LifecycleExited: the session's program exited; the sandbox is still
 	// there, and the next attach starts the program again. ExitCode is set.
@@ -252,7 +252,7 @@ type ForgeOutcome struct {
 	// Kind is the operation: import, sync, push or discover.
 	Kind  string `json:"kind"`
 	Forge string `json:"forge"`
-	// Repo is the Soft Serve repository; Path the forge path. Both are
+	// Repo is the Sundae repository; Path the forge path. Both are
 	// empty for discover.
 	Repo string `json:"repo,omitempty"`
 	Path string `json:"path,omitempty"`

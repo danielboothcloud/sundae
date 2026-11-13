@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/s3store"
-	"github.com/charmbracelet/soft-serve/pkg/s3store/s3test"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/s3store"
+	"github.com/danielboothcloud/sundae/pkg/s3store/s3test"
 )
 
 func newStore(t *testing.T, mutate ...func(*config.S3SnapshotConfig)) (*s3store.Store, *s3test.Server) {
@@ -112,9 +112,9 @@ func TestPresignedPutAndGet(t *testing.T) {
 	sum := md5.Sum(body) //nolint:gosec
 	md := base64.StdEncoding.EncodeToString(sum[:])
 
-	p, err := st.PresignPut(ctx, "soft-serve/sessions/1/soft-alice-r.tar.gz", time.Hour, s3store.PutOptions{
+	p, err := st.PresignPut(ctx, "sundae/sessions/1/sundae-alice-r.tar.gz", time.Hour, s3store.PutOptions{
 		ContentMD5: md,
-		Metadata:   map[string]string{"Soft-Serve-Repo": "r"},
+		Metadata:   map[string]string{"Sundae-Repo": "r"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -127,7 +127,7 @@ func TestPresignedPutAndGet(t *testing.T) {
 		t.Fatal("secret in URL")
 	}
 	lines := p.HeaderLines()
-	want := []string{"Content-Md5: " + md, "X-Amz-Meta-Soft-Serve-Repo: r", "X-Amz-Server-Side-Encryption: aws:kms"}
+	want := []string{"Content-Md5: " + md, "X-Amz-Meta-Sundae-Repo: r", "X-Amz-Server-Side-Encryption: aws:kms"}
 	if strings.Join(lines, "|") != strings.Join(want, "|") {
 		t.Fatalf("headers = %q, want %q", lines, want)
 	}
@@ -155,12 +155,12 @@ func TestPresignedPutAndGet(t *testing.T) {
 	if code := put(body, lines); code != http.StatusOK {
 		t.Fatalf("put: %d", code)
 	}
-	o, _ := srv.Object("soft-serve/sessions/1/soft-alice-r.tar.gz")
-	if !bytes.Equal(o.Body, body) || o.SSE != "aws:kms" || o.Metadata["soft-serve-repo"] != "r" {
+	o, _ := srv.Object("sundae/sessions/1/sundae-alice-r.tar.gz")
+	if !bytes.Equal(o.Body, body) || o.SSE != "aws:kms" || o.Metadata["sundae-repo"] != "r" {
 		t.Fatalf("object = %+v", o)
 	}
 
-	g, err := st.PresignGet(ctx, "soft-serve/sessions/1/soft-alice-r.tar.gz", time.Hour)
+	g, err := st.PresignGet(ctx, "sundae/sessions/1/sundae-alice-r.tar.gz", time.Hour)
 	if err != nil || len(g.HeaderLines()) != 0 {
 		t.Fatalf("presign get: %v %v", g, err)
 	}

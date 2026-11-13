@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/soft-serve/pkg/events"
-	"github.com/charmbracelet/soft-serve/pkg/openshell"
+	"github.com/danielboothcloud/sundae/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/openshell"
 )
 
 func TestAttachCommand(t *testing.T) {
@@ -14,7 +14,7 @@ func TestAttachCommand(t *testing.T) {
 	}{
 		{"ssh://git.example.com", "infra", "claude-1", "ssh -t git.example.com session attach infra -n claude-1"},
 		{"ssh://git.example.com:22", "infra", "", "ssh -t git.example.com session attach infra -n main"},
-		{"ssh://localhost:23231", "soft-serve", "tui", "ssh -t -p 23231 localhost session attach soft-serve -n tui"},
+		{"ssh://localhost:23231", "sundae", "tui", "ssh -t -p 23231 localhost session attach sundae -n tui"},
 		{"ssh://me@host:2222", "r", "x", "ssh -t -p 2222 me@host session attach r -n x"},
 		{"git.example.com", "r", "x", "ssh -t git.example.com session attach r -n x"},
 	} {

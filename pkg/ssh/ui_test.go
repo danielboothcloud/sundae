@@ -12,14 +12,14 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/soft-serve/pkg/backend"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/events"
-	"github.com/charmbracelet/soft-serve/pkg/openshell"
-	"github.com/charmbracelet/soft-serve/pkg/sessionctl"
-	"github.com/charmbracelet/soft-serve/pkg/ui/common"
-	"github.com/charmbracelet/soft-serve/pkg/ui/pages/sessions"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/danielboothcloud/sundae/pkg/backend"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/events"
+	"github.com/danielboothcloud/sundae/pkg/openshell"
+	"github.com/danielboothcloud/sundae/pkg/sessionctl"
+	"github.com/danielboothcloud/sundae/pkg/ui/common"
+	"github.com/danielboothcloud/sundae/pkg/ui/pages/sessions"
 )
 
 var updateGolden = flag.Bool("update", false, "update golden files")
@@ -34,8 +34,8 @@ func frameRows() []sessionctl.Row {
 	}
 	return []sessionctl.Row{
 		{Info: info("infra", "claude-1"), Status: st(events.StateBlocked, "Apply 3 to add, 1 to change, 0 to destroy?")},
-		{Info: info("soft-serve", "forge-sync"), Status: st(events.StateDone, "Implemented GitHub discovery")},
-		{Info: info("soft-serve", "tui"), Status: st(events.StateWorking, "Running go test ./pkg/ui/...")},
+		{Info: info("sundae", "forge-sync"), Status: st(events.StateDone, "Implemented GitHub discovery")},
+		{Info: info("sundae", "tui"), Status: st(events.StateWorking, "Running go test ./pkg/ui/...")},
 		{Info: info("gateway", "main"), Status: st(events.StateWorking, "")},
 		{Info: info("dotfiles", "main"), Status: st(events.StateIdle, "")},
 	}
@@ -58,7 +58,7 @@ func newTestUI(t *testing.T, width, height int, src sessions.Source) *UI {
 func newHomeUI(t *testing.T, width, height int, setup func(ctx context.Context, be *backend.Backend) context.Context) *UI {
 	t.Helper()
 	cfg, _, _, be := newTestBackend(t)
-	cfg.Name = "Soft Serve"
+	cfg.Name = "Sundae"
 	ctx := backend.WithContext(config.WithContext(context.Background(), cfg), be)
 	ctx = setup(ctx, be)
 	c := common.NewCommon(ctx, width, height)

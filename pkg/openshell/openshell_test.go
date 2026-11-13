@@ -13,7 +13,7 @@ import (
 	v1 "github.com/NVIDIA/OpenShell/sdk/go/openshell/v1"
 	"github.com/NVIDIA/OpenShell/sdk/go/openshell/v1/fake"
 	"github.com/NVIDIA/OpenShell/sdk/go/openshell/v1/types"
-	"github.com/charmbracelet/soft-serve/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/config"
 )
 
 var dnsLabel = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
@@ -23,9 +23,9 @@ func TestSandboxName(t *testing.T) {
 		user, repo string
 		want       string // exact name, or "" to only require a hashed name
 	}{
-		{"alice", "repo", "soft-alice-repo"},
-		{"alice", "my-repo", "soft-alice-my-repo"},
-		{"alice", "r2", "soft-alice-r2"},
+		{"alice", "repo", "sundae-alice-repo"},
+		{"alice", "my-repo", "sundae-alice-my-repo"},
+		{"alice", "r2", "sundae-alice-r2"},
 		{"alice", "org/repo", ""},
 		{"alice", "Repo", ""},
 		{"alice", "my_repo", ""},
@@ -38,8 +38,8 @@ func TestSandboxName(t *testing.T) {
 		if len(got) > maxNameLen || !dnsLabel.MatchString(got) {
 			t.Errorf("SandboxName(%q, %q) = %q: not a DNS label of <= 63 chars", tc.user, tc.repo, got)
 		}
-		if !strings.HasPrefix(got, "soft-") {
-			t.Errorf("SandboxName(%q, %q) = %q: missing soft- prefix", tc.user, tc.repo, got)
+		if !strings.HasPrefix(got, "sundae-") {
+			t.Errorf("SandboxName(%q, %q) = %q: missing sundae- prefix", tc.user, tc.repo, got)
 		}
 		if tc.want != "" && got != tc.want {
 			t.Errorf("SandboxName(%q, %q) = %q, want %q", tc.user, tc.repo, got, tc.want)
@@ -77,7 +77,7 @@ func TestSandboxNamePlainCannotForgeHashed(t *testing.T) {
 	if !strings.Contains(victim, "--") {
 		t.Fatalf("hashed name %q lacks the -- separator", victim)
 	}
-	forged := strings.TrimPrefix(victim, "soft-al-")
+	forged := strings.TrimPrefix(victim, "sundae-al-")
 	for _, repo := range []string{forged, strings.ReplaceAll(forged, "--", "-")} {
 		if got := SandboxName("al", repo); got == victim {
 			t.Errorf("SandboxName(al, %q) = %q forges the victim's name", repo, got)
@@ -97,14 +97,14 @@ func TestSessionSandboxName(t *testing.T) {
 		}
 	}
 
-	hashed := regexp.MustCompile(`^soft-[a-z0-9-]*[a-z0-9]--[0-9a-f]{8}$`)
+	hashed := regexp.MustCompile(`^sundae-[a-z0-9-]*[a-z0-9]--[0-9a-f]{8}$`)
 	cases := []struct {
 		user, repo, name string
 		prefix           string // the readable part before the hash
 	}{
-		{"alice", "repo", "review", "soft-alice-repo-review"},
-		{"alice", "org/repo", "b2", "soft-alice-org-repo-b2"},
-		{"al-ice", "repo", "x", "soft-al-ice-repo-x"},
+		{"alice", "repo", "review", "sundae-alice-repo-review"},
+		{"alice", "org/repo", "b2", "sundae-alice-org-repo-b2"},
+		{"al-ice", "repo", "x", "sundae-al-ice-repo-x"},
 		// Long user and repository parts are cut; the session name stays.
 		{"alice", strings.Repeat("r", 80), strings.Repeat("s", 32), ""},
 		{strings.Repeat("u", 70), strings.Repeat("r", 70), "review", ""},
@@ -124,7 +124,7 @@ func TestSessionSandboxName(t *testing.T) {
 			t.Errorf("not deterministic: %q vs %q", got, again)
 		}
 	}
-	if got := SessionSandboxName("alice", "repo", "review"); got != "soft-alice-repo-review--"+mustHash("alice\x00repo\x00review") {
+	if got := SessionSandboxName("alice", "repo", "review"); got != "sundae-alice-repo-review--"+mustHash("alice\x00repo\x00review") {
 		t.Errorf("hash = %q", got)
 	}
 }
@@ -178,19 +178,19 @@ func TestResumeSandbox(t *testing.T) {
 	c := newSDKClient("default", fc.Sandboxes(), nil, nil, nil)
 	labels := map[string]string{LabelUserID: "1"}
 
-	if _, err := c.ResumeSandbox(ctx, "soft-a-r", labels); !IsNotFound(err) {
+	if _, err := c.ResumeSandbox(ctx, "sundae-a-r", labels); !IsNotFound(err) {
 		t.Fatalf("absent: err = %v", err)
 	}
-	if _, err := fc.Sandboxes().Get(ctx, "default", "soft-a-r"); !IsNotFound(err) {
+	if _, err := fc.Sandboxes().Get(ctx, "default", "sundae-a-r"); !IsNotFound(err) {
 		t.Fatal("ResumeSandbox created a sandbox")
 	}
 
-	fc.AddSandbox("default", &types.Sandbox{Name: "soft-a-r", Labels: labels, Status: types.SandboxStatus{Phase: types.SandboxStopped}})
-	sb, err := c.ResumeSandbox(ctx, "soft-a-r", labels)
+	fc.AddSandbox("default", &types.Sandbox{Name: "sundae-a-r", Labels: labels, Status: types.SandboxStatus{Phase: types.SandboxStopped}})
+	sb, err := c.ResumeSandbox(ctx, "sundae-a-r", labels)
 	if err != nil || sb.Status.Phase != types.SandboxReady {
 		t.Fatalf("stopped: sb=%v err=%v", sb, err)
 	}
-	if _, err := c.ResumeSandbox(ctx, "soft-a-r", map[string]string{LabelUserID: "2"}); err != ErrNotOwned {
+	if _, err := c.ResumeSandbox(ctx, "sundae-a-r", map[string]string{LabelUserID: "2"}); err != ErrNotOwned {
 		t.Fatalf("foreign: err = %v", err)
 	}
 }
@@ -216,18 +216,18 @@ func TestEnsureSandboxLostCreateRace(t *testing.T) {
 	req := SandboxRequest{Image: "img", Labels: map[string]string{LabelUserID: "1"}}
 	// The winner's sandbox already exists; this start's Get misses it.
 	fc.AddSandbox("default", &types.Sandbox{
-		Name:   "soft-a-r",
+		Name:   "sundae-a-r",
 		Labels: map[string]string{LabelUserID: "1"},
 		Status: types.SandboxStatus{Phase: types.SandboxReady},
 	})
 	c := newSDKClient("default", &raceGet{SandboxInterface: fc.Sandboxes(), missing: 1}, nil, nil, nil)
 
-	sb, created, err := c.EnsureSandbox(ctx, "soft-a-r", req)
+	sb, created, err := c.EnsureSandbox(ctx, "sundae-a-r", req)
 	if err != nil || created || sb.Status.Phase != types.SandboxReady {
 		t.Fatalf("race: sb=%v created=%v err=%v", sb, created, err)
 	}
 	// The loser must not delete the winner's sandbox.
-	if _, err := fc.Sandboxes().Get(ctx, "default", "soft-a-r"); err != nil {
+	if _, err := fc.Sandboxes().Get(ctx, "default", "sundae-a-r"); err != nil {
 		t.Fatalf("winner's sandbox deleted: %v", err)
 	}
 }
@@ -235,11 +235,11 @@ func TestEnsureSandboxLostCreateRace(t *testing.T) {
 func TestEnsureSandboxInconsistentGatewayDoesNotLoop(t *testing.T) {
 	ctx := context.Background()
 	fc := fake.NewClient()
-	fc.AddSandbox("default", &types.Sandbox{Name: "soft-a-r", Status: types.SandboxStatus{Phase: types.SandboxReady}})
+	fc.AddSandbox("default", &types.Sandbox{Name: "sundae-a-r", Status: types.SandboxStatus{Phase: types.SandboxReady}})
 	// Get always says NotFound while Create says AlreadyExists.
 	c := newSDKClient("default", &raceGet{SandboxInterface: fc.Sandboxes(), missing: 1 << 30}, nil, nil, nil)
 
-	if _, _, err := c.EnsureSandbox(ctx, "soft-a-r", SandboxRequest{}); err == nil {
+	if _, _, err := c.EnsureSandbox(ctx, "sundae-a-r", SandboxRequest{}); err == nil {
 		t.Fatal("expected an error, not a resumed sandbox")
 	}
 }
@@ -258,10 +258,10 @@ func TestEnsureSandboxDeletesHalfMadeSandbox(t *testing.T) {
 	fc := fake.NewClient()
 	c := newSDKClient("default", failingWait{fc.Sandboxes()}, nil, nil, nil)
 
-	if _, _, err := c.EnsureSandbox(ctx, "soft-a-r", SandboxRequest{Image: "img"}); err == nil {
+	if _, _, err := c.EnsureSandbox(ctx, "sundae-a-r", SandboxRequest{Image: "img"}); err == nil {
 		t.Fatal("expected ready-wait failure")
 	}
-	if _, err := fc.Sandboxes().Get(ctx, "default", "soft-a-r"); !IsNotFound(err) {
+	if _, err := fc.Sandboxes().Get(ctx, "default", "sundae-a-r"); !IsNotFound(err) {
 		t.Fatalf("half-made sandbox not deleted: err=%v", err)
 	}
 }
@@ -273,7 +273,7 @@ func TestEnsureSandboxStates(t *testing.T) {
 	req := SandboxRequest{Image: "img", Labels: map[string]string{LabelUserID: "1"}}
 
 	// New.
-	sb, created, err := c.EnsureSandbox(ctx, "soft-a-r", req)
+	sb, created, err := c.EnsureSandbox(ctx, "sundae-a-r", req)
 	if err != nil || !created || sb.Status.Phase != types.SandboxReady {
 		t.Fatalf("new: sb=%v created=%v err=%v", sb, created, err)
 	}
@@ -282,22 +282,22 @@ func TestEnsureSandboxStates(t *testing.T) {
 	}
 
 	// Ready → resumed as is.
-	if _, created, err := c.EnsureSandbox(ctx, "soft-a-r", req); err != nil || created {
+	if _, created, err := c.EnsureSandbox(ctx, "sundae-a-r", req); err != nil || created {
 		t.Fatalf("ready: created=%v err=%v", created, err)
 	}
 
 	// Stopped → started.
-	if _, err := fc.Sandboxes().Stop(ctx, "default", "soft-a-r"); err != nil {
+	if _, err := fc.Sandboxes().Stop(ctx, "default", "sundae-a-r"); err != nil {
 		t.Fatal(err)
 	}
-	sb, created, err = c.EnsureSandbox(ctx, "soft-a-r", req)
+	sb, created, err = c.EnsureSandbox(ctx, "sundae-a-r", req)
 	if err != nil || created || sb.Status.Phase != types.SandboxReady {
 		t.Fatalf("stopped: sb=%v created=%v err=%v", sb, created, err)
 	}
 
 	// Still provisioning (e.g. created by a concurrent start) → waited on.
 	for _, phase := range []types.SandboxPhase{types.SandboxProvisioning, types.SandboxStarting, ""} {
-		name := "soft-a-prov" + strings.ToLower(string(phase))
+		name := "sundae-a-prov" + strings.ToLower(string(phase))
 		fc.AddSandbox("default", &types.Sandbox{
 			Name:   name,
 			Labels: map[string]string{LabelUserID: "1"},
@@ -311,17 +311,17 @@ func TestEnsureSandboxStates(t *testing.T) {
 
 	// Owned by someone else.
 	other := SandboxRequest{Labels: map[string]string{LabelUserID: "2"}}
-	if _, _, err := c.EnsureSandbox(ctx, "soft-a-r", other); err != ErrNotOwned {
+	if _, _, err := c.EnsureSandbox(ctx, "sundae-a-r", other); err != ErrNotOwned {
 		t.Fatalf("foreign: err=%v, want ErrNotOwned", err)
 	}
 
 	// Error phase is surfaced, not papered over.
 	fc.AddSandbox("default", &types.Sandbox{
-		Name:   "soft-a-broken",
+		Name:   "sundae-a-broken",
 		Labels: map[string]string{LabelUserID: "1"},
 		Status: types.SandboxStatus{Phase: types.SandboxError},
 	})
-	if _, _, err := c.EnsureSandbox(ctx, "soft-a-broken", req); err == nil {
+	if _, _, err := c.EnsureSandbox(ctx, "sundae-a-broken", req); err == nil {
 		t.Fatal("error phase: expected error")
 	}
 }

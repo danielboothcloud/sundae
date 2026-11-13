@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/charmbracelet/soft-serve/pkg/access"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/db"
-	"github.com/charmbracelet/soft-serve/pkg/sshutils"
+	"github.com/danielboothcloud/sundae/pkg/access"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/db"
+	"github.com/danielboothcloud/sundae/pkg/sshutils"
 )
 
 const (
@@ -26,7 +26,7 @@ var createTables = Migration{
 		insert := "INSERT "
 
 		// Alter old tables (if exist)
-		// This is to support prior versions of Soft Serve v0.6
+		// This is to support prior versions of Sundae v0.6
 		switch tx.DriverName() {
 		case "sqlite3", "sqlite":
 			insert += "OR IGNORE "

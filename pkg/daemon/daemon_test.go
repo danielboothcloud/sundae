@@ -10,14 +10,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/soft-serve/pkg/backend"
-	"github.com/charmbracelet/soft-serve/pkg/config"
-	"github.com/charmbracelet/soft-serve/pkg/db"
-	"github.com/charmbracelet/soft-serve/pkg/db/migrate"
-	"github.com/charmbracelet/soft-serve/pkg/git"
-	"github.com/charmbracelet/soft-serve/pkg/store"
-	"github.com/charmbracelet/soft-serve/pkg/store/database"
-	"github.com/charmbracelet/soft-serve/pkg/test"
+	"github.com/danielboothcloud/sundae/pkg/backend"
+	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/db"
+	"github.com/danielboothcloud/sundae/pkg/db/migrate"
+	"github.com/danielboothcloud/sundae/pkg/git"
+	"github.com/danielboothcloud/sundae/pkg/store"
+	"github.com/danielboothcloud/sundae/pkg/store/database"
+	"github.com/danielboothcloud/sundae/pkg/test"
 	"github.com/go-git/go-git/v5/plumbing/format/pktline"
 	_ "modernc.org/sqlite" // sqlite driver
 )
@@ -25,7 +25,7 @@ import (
 var testDaemon *GitDaemon
 
 func TestMain(m *testing.M) {
-	tmp, err := os.MkdirTemp("", "soft-serve-test")
+	tmp, err := os.MkdirTemp("", "sundae-test")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -60,11 +60,11 @@ func TestMain(m *testing.M) {
 	testDaemon = d
 	go d.ListenAndServe() //nolint:errcheck
 	code := m.Run()
-	os.Unsetenv("SOFT_SERVE_DATA_PATH")
-	os.Unsetenv("SOFT_SERVE_GIT_MAX_CONNECTIONS")
-	os.Unsetenv("SOFT_SERVE_GIT_MAX_TIMEOUT")
-	os.Unsetenv("SOFT_SERVE_GIT_IDLE_TIMEOUT")
-	os.Unsetenv("SOFT_SERVE_GIT_LISTEN_ADDR")
+	os.Unsetenv("SUNDAE_DATA_PATH")
+	os.Unsetenv("SUNDAE_GIT_MAX_CONNECTIONS")
+	os.Unsetenv("SUNDAE_GIT_MAX_TIMEOUT")
+	os.Unsetenv("SUNDAE_GIT_IDLE_TIMEOUT")
+	os.Unsetenv("SUNDAE_GIT_LISTEN_ADDR")
 	_ = d.Close()
 	_ = dbx.Close()
 	os.Exit(code)

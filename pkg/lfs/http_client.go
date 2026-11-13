@@ -9,7 +9,7 @@ import (
 	"net/http"
 
 	"charm.land/log/v2"
-	"github.com/charmbracelet/soft-serve/pkg/ssrf"
+	"github.com/danielboothcloud/sundae/pkg/ssrf"
 )
 
 // httpClient is a Git LFS client to communicate with a LFS source API.

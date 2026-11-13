@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/soft-serve/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/config"
 )
 
 // ErrNoToken is returned when discovery is attempted without a token.
@@ -317,7 +317,7 @@ func decodeGitLab(r io.Reader) ([]RemoteRepo, error) {
 			Path:          g.PathWithNamespace,
 			CloneURL:      g.HTTPURLToRepo,
 			DefaultBranch: g.DefaultBranch,
-			// Anything not explicitly public stays private on Soft Serve.
+			// Anything not explicitly public stays private on Sundae.
 			Private:     g.Visibility != "public",
 			Archived:    g.Archived,
 			Description: g.Description,

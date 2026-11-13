@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// newLocal creates an empty Soft Serve side bare repository.
+// newLocal creates an empty Sundae side bare repository.
 func newLocal(t *testing.T) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "local.git")
@@ -96,7 +96,7 @@ func TestSyncRepo(t *testing.T) {
 		t.Error("namespace did not follow upstream")
 	}
 
-	// A branch only on Soft Serve is never touched.
+	// A branch only on Sundae is never touched.
 	localOnly := commitAndPush(t, work, "mine", "only here")
 	// Upstream deletes feature: pruned from the namespace only.
 	git(t, up.work, "push", "--quiet", "origin", "--delete", "feature")

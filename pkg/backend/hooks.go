@@ -6,11 +6,11 @@ import (
 	"os"
 	"sync"
 
-	"github.com/charmbracelet/soft-serve/git"
-	"github.com/charmbracelet/soft-serve/pkg/hooks"
-	"github.com/charmbracelet/soft-serve/pkg/proto"
-	"github.com/charmbracelet/soft-serve/pkg/sshutils"
-	"github.com/charmbracelet/soft-serve/pkg/webhook"
+	"github.com/danielboothcloud/sundae/git"
+	"github.com/danielboothcloud/sundae/pkg/hooks"
+	"github.com/danielboothcloud/sundae/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/sshutils"
+	"github.com/danielboothcloud/sundae/pkg/webhook"
 )
 
 var _ hooks.Hooks = (*Backend)(nil)
@@ -37,7 +37,7 @@ func (d *Backend) Update(ctx context.Context, _ io.Writer, _ io.Writer, repo str
 
 	// Find user
 	var user proto.User
-	if pubkey := os.Getenv("SOFT_SERVE_PUBLIC_KEY"); pubkey != "" {
+	if pubkey := os.Getenv("SUNDAE_PUBLIC_KEY"); pubkey != "" {
 		pk, _, err := sshutils.ParseAuthorizedKey(pubkey)
 		if err != nil {
 			d.logger.Error("error parsing public key", "err", err)
@@ -49,7 +49,7 @@ func (d *Backend) Update(ctx context.Context, _ io.Writer, _ io.Writer, repo str
 			d.logger.Error("error finding user from public key", "key", pubkey, "err", err)
 			return
 		}
-	} else if username := os.Getenv("SOFT_SERVE_USERNAME"); username != "" {
+	} else if username := os.Getenv("SUNDAE_USERNAME"); username != "" {
 		var err error
 		user, err = d.User(ctx, username)
 		if err != nil {

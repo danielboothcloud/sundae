@@ -2,10 +2,10 @@ Set Width 1600
 Set Height 900
 Set FontSize 22
 
-Output soft-serve-browse.gif
-Output soft-serve-frames/
+Output sundae-browse.gif
+Output sundae-frames/
 
-Type@300ms "soft"
+Type@300ms "sundae"
 Enter
 Sleep 2s
 Type@1s "ddd"

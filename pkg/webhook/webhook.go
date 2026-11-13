@@ -12,14 +12,14 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/charmbracelet/soft-serve/git"
-	"github.com/charmbracelet/soft-serve/pkg/db"
-	"github.com/charmbracelet/soft-serve/pkg/db/models"
-	"github.com/charmbracelet/soft-serve/pkg/proto"
-	"github.com/charmbracelet/soft-serve/pkg/ssrf"
-	"github.com/charmbracelet/soft-serve/pkg/store"
-	"github.com/charmbracelet/soft-serve/pkg/utils"
-	"github.com/charmbracelet/soft-serve/pkg/version"
+	"github.com/danielboothcloud/sundae/git"
+	"github.com/danielboothcloud/sundae/pkg/db"
+	"github.com/danielboothcloud/sundae/pkg/db/models"
+	"github.com/danielboothcloud/sundae/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/ssrf"
+	"github.com/danielboothcloud/sundae/pkg/store"
+	"github.com/danielboothcloud/sundae/pkg/utils"
+	"github.com/danielboothcloud/sundae/pkg/version"
 	"github.com/google/go-querystring/query"
 	"github.com/google/uuid"
 )
@@ -81,21 +81,21 @@ func SendWebhook(ctx context.Context, w models.Webhook, event Event, payload int
 
 	headers := http.Header{}
 	headers.Add("Content-Type", contentType.String())
-	headers.Add("User-Agent", "SoftServe/"+version.Version)
-	headers.Add("X-SoftServe-Event", event.String())
+	headers.Add("User-Agent", "Sundae/"+version.Version)
+	headers.Add("X-Sundae-Event", event.String())
 
 	id, err := uuid.NewUUID()
 	if err != nil {
 		return err
 	}
 
-	headers.Add("X-SoftServe-Delivery", id.String())
+	headers.Add("X-Sundae-Delivery", id.String())
 
 	reqBody := buf.String()
 	if w.Secret != "" {
 		sig := hmac.New(sha256.New, []byte(w.Secret))
 		sig.Write([]byte(reqBody)) //nolint: errcheck
-		headers.Add("X-SoftServe-Signature", "sha256="+hex.EncodeToString(sig.Sum(nil)))
+		headers.Add("X-Sundae-Signature", "sha256="+hex.EncodeToString(sig.Sum(nil)))
 	}
 
 	res, reqErr := do(ctx, w.URL, http.MethodPost, headers, &buf)

@@ -1,9 +1,9 @@
-cmd/soft/soft
-./soft
+cmd/sundae/sundae
+./sundae
 .ssh
 .repos
 dist
 data/
 completions/
 manpages/
-soft_serve_ed25519*
+sundae_ed25519*

@@ -1,12 +1,12 @@
-# Soft Serve: git hub + dev server roadmap
+# Sundae: git hub + dev server roadmap
 
-Status: open decisions settled on their leanings 2026-11-12; build-out in progress (local CLI parked). Last updated 2026-11-12 (rev 12).
+Status: open decisions settled on their leanings 2026-11-12; build-out in progress (local CLI parked). Renamed from Soft Serve to Sundae on 2026-11-13 (module `github.com/danielboothcloud/sundae`, binary `sundae`, `SUNDAE_*` env); the specs under `implementation-artifacts/` keep the old names. Last updated 2026-11-13 (rev 13).
 
 This is a working document. Nothing here is frozen. Each workstream becomes its own spec under `_bmad-output/implementation-artifacts/` once its open questions are settled.
 
 ## 1. What this is for
 
-Soft Serve becomes two things on one server, running in Kubernetes:
+Sundae becomes two things on one server, running in Kubernetes:
 
 1. **A home for my git repos.** It sees my repositories on GitHub and GitLab and replicates them, so I can keep work on a different origin without pushing everything to a forge.
 2. **A dev server.** It spawns agent or shell sessions as separate pods. Sessions keep running unattended after I disconnect. I can see them in a session pane and reach them from a local CLI. When an agent's state changes, I get a notification on my phone.
@@ -22,11 +22,11 @@ Soft Serve becomes two things on one server, running in Kubernetes:
 | Session persistence across detach | Not started | — |
 | Session status | Not started | — |
 | Notifications on status change | Not started. Repo webhooks exist (push, branch/tag, collaborator, repository events) but are per-repo and have no session events. | `pkg/webhook/` |
-| Local session CLI | Not started (`soft` has `serve`, `hook`, `admin`, `browse` only) | `cmd/soft/main.go` |
+| Local session CLI | Not started (`sundae` has `serve`, `hook`, `admin`, `browse` only) | `cmd/sundae/main.go` |
 | TUI session pane | Not started (selection page has two panes: repos, readme) | `pkg/ui/pages/selection/selection.go` |
 | S3 snapshot of `/sandbox` | Not started; planned as opt-in, off by default (D12). Seams marked in code | `pkg/openshell/session.go` (`Start`, `End`) |
 | Project-init options | Deferred | `deferred-work.md` |
-| Deployment | No `openshell` or `soft-serve` namespace in `omni-ops-microcloud-k8s`; no mention in the `microcloud` repo. Prod cluster not checked. | — |
+| Deployment | No `openshell` or `sundae` namespace in `omni-ops-microcloud-k8s`; no mention in the `microcloud` repo. Prod cluster not checked. | — |
 
 ### Build-out status (2026-11-13)
 
@@ -41,28 +41,28 @@ The sandbox pod stays up, but `openshell.Bridge` cancels the interactive exec wh
 It runs a server in the host (port 7322, TCP and UDP), keeps one holder process per session with the PTY and screen, and survives client disconnects. Something else still has to create the pod and pick the image. It covers what the zellij and herdr todo items were reaching for.
 
 **F3. osewa already keeps OSC 7501 status per session, and exposes it as JSON.**
-Each holder keeps the session's latest root OSC 7501 record (`state`, `kind`, `app`, `title`, `msg`, `progress`). `osewa local ls`, run on the host, prints the session list as JSON without needing the server or an enrolled device. Soft Serve can exec that in the pod. Only the root record is kept; child records (`id=build/test`) are not listed.
+Each holder keeps the session's latest root OSC 7501 record (`state`, `kind`, `app`, `title`, `msg`, `progress`). `osewa local ls`, run on the host, prints the session list as JSON without needing the server or an enrolled device. Sundae can exec that in the pod. Only the root record is kept; child records (`id=build/test`) are not listed.
 
 **F4. Current mirrors would delete local-only work.**
-Mirror imports use `git clone --mirror`, and the job runs `fetch --prune` and `remote update --prune`. A branch pushed only to Soft Serve is removed on the next sync. "Different origins" needs upstream refs kept apart from local ones.
+Mirror imports use `git clone --mirror`, and the job runs `fetch --prune` and `remote update --prune`. A branch pushed only to Sundae is removed on the next sync. "Different origins" needs upstream refs kept apart from local ones.
 
 **F5. Three session behaviours are unverified against a real gateway.**
 Listed in `deferred-work.md`: the EmulatePty line-feed rewrite garbling raw-mode TUIs, resuming a Stopped sandbox, and the Stopping/Suspended phases being treated as fatal.
 
 **F6. osewa facts that shape the design** (from its docs and `docs/PROTOCOL.md`, read 2026-11-12).
-- **No sshd needed to enroll.** `osewa enroll` takes `{"name","key"}` on stdin, appends to `~/.config/osewa/devices`, and prints `{"server_key","port","version"}`. Soft Serve can run it by exec and hand the server key to the CLI, which writes the laptop's `hosts.json`.
+- **No sshd needed to enroll.** `osewa enroll` takes `{"name","key"}` on stdin, appends to `~/.config/osewa/devices`, and prints `{"server_key","port","version"}`. Sundae can run it by exec and hand the server key to the CLI, which writes the laptop's `hosts.json`.
 - **Injectable.** Linux builds are static musl, amd64 and arm64, so the binary can be copied into any base image from an init container or volume.
 - **Status changes are pushed, but only to attached clients.** The protocol streams `status` events on an attached stream. There is no CLI hook or watch command. Getting a push means speaking the wire protocol (to the server, or to the holder's Unix socket in the pod).
 - **The protocol is a draft.** "Breaking changes are allowed until v1." Anything that speaks it directly must be pinned to an osewa version. `osewa local ls` and `osewa ls` are the stable-looking surfaces.
 - **Sessions are reaped.** A running session ends after 24 hours with nobody attached and no output. An agent blocked on me over a long weekend is killed.
 - **Clean environment.** Sessions do not inherit the server's environment. Git credentials, which today travel as `GIT_CONFIG_*` env on the exec, must be passed in the session-create `env`.
-- **Tags fit named sessions** (correction 2026-11-12: the osewa 0.1.4 CLI cannot set a tag; Soft Serve records the session id in the sandbox instead). A tagged create from the same client returns the existing session of that tag. Several clients can attach to one session: one owner, the rest read-only viewers.
+- **Tags fit named sessions** (correction 2026-11-12: the osewa 0.1.4 CLI cannot set a tag; Sundae records the session id in the sandbox instead). A tagged create from the same client returns the existing session of that tag. Several clients can attach to one session: one owner, the rest read-only viewers.
 - **Phone client exists.** Moshi (iOS and Android) has osewa as an experimental transport.
 
 **F8. OSC 7501 lifetimes decide what a notification means.**
 `working` and `blocked` are dropped at process exit or the next shell prompt; `done` and `error` survive both. A session that goes from `blocked` to no status has been unblocked or has exited, and the two need telling apart. The spec asks terminals to rate-limit anything a record causes outside the terminal, which is the debounce in H3.
 
-**F7. Notifications need Soft Serve to see status while nobody is attached.**
+**F7. Notifications need Sundae to see status while nobody is attached.**
 A phone notification matters most when I am away, so status cannot come from parsing a bridged terminal stream. It has to be collected from the pod (D5 option a or b). Polling delays a notification by up to the poll interval; a push from the pod does not.
 
 **F9. Agent Substrate does not fit this design as it stands** (from its README and docs, not tested).
@@ -82,19 +82,19 @@ A phone notification matters most when I am away, so status cannot come from par
 | Exec, one-shot and interactive PTY | `Exec()` | Used today: clone, attach. Would also run `osewa enroll` and `osewa local ls` |
 | TCP tunnel into a sandbox port | `TCP().Forward` / `Listen`, `SSH().Tunnel` | Reach osewa's 7322 through the gateway. TCP only: nothing for UDP, so no QUIC |
 | File upload and download | `Files()` | Not usable: the Go SDK (v0.1.6 and v0.1.8) reports its transport unavailable. osewa is baked into the sandbox image; other images get it by chunked exec upload |
-| Suspend and resume with memory kept | `SandboxSuspendResume()` | Park idle sessions. Explicit calls only: the SDK has no idle policy, so Soft Serve decides when. Needs a compute driver and isolation backend that retain memory. Where the state is kept is not stated. Reduces workstream F but does not replace it, see F1 there |
+| Suspend and resume with memory kept | `SandboxSuspendResume()` | Park idle sessions. Explicit calls only: the SDK has no idle policy, so Sundae decides when. Needs a compute driver and isolation backend that retain memory. Where the state is kept is not stated. Reduces workstream F but does not replace it, see F1 there |
 | HTTP service exposure | `Services().Expose` | The "web server" idea: publish a dev server from a session |
 | Egress policy with a review flow | `Policy()` drafts, approve, reject | Agent asks for network access, I approve. Could surface as `blocked` in the menu |
 | AI provider credentials | `Providers()` | Model keys held by the gateway, not typed into the sandbox |
 
-Costs: a gateway to deploy and keep running, three unverified lifecycle behaviours (F5), and no direct laptop-to-pod path, so osewa attach would go laptop → Soft Serve → gateway tunnel → pod.
+Costs: a gateway to deploy and keep running, three unverified lifecycle behaviours (F5), and no direct laptop-to-pod path, so osewa attach would go laptop → Sundae → gateway tunnel → pod.
 
 ## 4. Target shape
 
 ```
  laptop / phone                      Kubernetes
 ┌──────────────────┐        ┌──────────────────────────────────────┐
-│ soft session …   │──ssh──▶│ Soft Serve (control plane)           │
+│ sundae session … │──ssh──▶│ Sundae (control plane)               │
 │ osewa attach …   │──ws───▶│  repos, forge sync, session registry │
 │                  │        │  status aggregation, TUI pane        │
 │                  │        │  session event bus ──▶ ntfy ──▶ phone│
@@ -112,37 +112,37 @@ Costs: a gateway to deploy and keep running, three unverified lifecycle behaviou
                             └──────────────────────────────────────┘
 ```
 
-- **Soft Serve** owns identity, repos, forge credentials, and the session lifecycle. It stays the single place to ask "what is running".
+- **Sundae** owns identity, repos, forge credentials, and the session lifecycle. It stays the single place to ask "what is running".
 - **Session pods** run my image. An osewa session inside owns the agent's terminal.
-- **Local CLI** asks Soft Serve for the list and status, then attaches either directly with osewa or through the existing SSH bridge.
+- **Local CLI** asks Sundae for the list and status, then attaches either directly with osewa or through the existing SSH bridge.
 
 Where osewa runs:
 
 | Place | Role | Needed |
 |-------|------|--------|
 | Session pod | `osewa server` plus one holder per session | Always |
-| Laptop / phone | osewa client, dialling Soft Serve, which relays to the sandbox through the gateway | Only for osewa attach (D2) |
-| Soft Serve pod | No server. Carries the pinned binary to copy into session pods; drives `osewa enroll` and `osewa local ls` by exec in the pod | Binary only |
+| Laptop / phone | osewa client, dialling Sundae, which relays to the sandbox through the gateway | Only for osewa attach (D2) |
+| Sundae pod | No server. Carries the pinned binary to copy into session pods; drives `osewa enroll` and `osewa local ls` by exec in the pod | Binary only |
 
-The SSH bridge fallback needs an osewa client somewhere. Leaning: exec `osewa attach` inside the session pod against its own server, so Soft Serve never speaks the draft protocol. Unverified: that a pod can enrol itself and attach over loopback.
+The SSH bridge fallback needs an osewa client somewhere. Leaning: exec `osewa attach` inside the session pod against its own server, so Sundae never speaks the draft protocol. Unverified: that a pod can enrol itself and attach over loopback.
 
 ## 5. Decisions
 
 | # | Decision | Options | Leaning | Status |
 |---|----------|---------|---------|--------|
 | D1 | Pod runtime | (a) OpenShell sandboxes; (b) plain pods through the Kubernetes API; (c) Agent Substrate actors | **(a) OpenShell.** Chosen for suspend/resume, gateway tunnels, egress approval and file push (F10), and because the integration is already written. Keep the `Client` interface narrow so the choice stays reversible. | **Decided 2026-11-12** |
-| D2 | How I reach a session | (a) osewa through an OpenShell TCP tunnel relayed by Soft Serve (WebSocket carrier, no QUIC); (b) Soft Serve's SSH bridge into an in-pod `osewa attach`; (c) both | (c), (b) first because the bridge exists. Follows from D1: there is no direct laptop-to-pod path, so everything enters through Soft Serve. | **Decided 2026-11-12: leaning adopted** |
+| D2 | How I reach a session | (a) osewa through an OpenShell TCP tunnel relayed by Sundae (WebSocket carrier, no QUIC); (b) Sundae's SSH bridge into an in-pod `osewa attach`; (c) both | (c), (b) first because the bridge exists. Follows from D1: there is no direct laptop-to-pod path, so everything enters through Sundae. | **Decided 2026-11-12: leaning adopted** |
 | D3 | Forge sync semantics | (a) strict mirror as today; (b) upstream refs under a per-forge namespace, local refs never pruned, push to forge is explicit | (b) | **Decided 2026-11-12: leaning adopted** |
 | D4 | Session identity | (a) one per (user, repo) as today; (b) several named sessions per repo | (b), so two agents can work on one repo | **Decided 2026-11-12: leaning adopted** |
-| D5 | How session status reaches Soft Serve | (a) Soft Serve execs `osewa local ls` in each pod on an interval; (b) a small watcher in the pod attaches to the holder as a viewer and pushes `status` events to Soft Serve; (c) Soft Serve parses OSC 7501 itself from the bridged stream | (a) first for the status column and ntfy, then (b): the Signals pane wants every report, and polling misses changes between polls and all child records. (b) depends on the draft osewa protocol, so pin the version. (c) only sees status while someone is attached. | **Decided 2026-11-12: leaning adopted** |
-| D7 | Shape of the pub/sub | (a) in-process event bus in Soft Serve with pluggable subscribers (ntfy, TUI pane, CLI watch, webhooks); (b) an external broker such as NATS; (c) no bus, the status collector calls ntfy directly | (a). One process and one user: a broker is more to run than the problem needs, and (c) leaves the TUI pane and CLI without live updates. | **Decided 2026-11-12: leaning adopted** |
+| D5 | How session status reaches Sundae | (a) Sundae execs `osewa local ls` in each pod on an interval; (b) a small watcher in the pod attaches to the holder as a viewer and pushes `status` events to Sundae; (c) Sundae parses OSC 7501 itself from the bridged stream | (a) first for the status column and ntfy, then (b): the Signals pane wants every report, and polling misses changes between polls and all child records. (b) depends on the draft osewa protocol, so pin the version. (c) only sees status while someone is attached. | **Decided 2026-11-12: leaning adopted** |
+| D7 | Shape of the pub/sub | (a) in-process event bus in Sundae with pluggable subscribers (ntfy, TUI pane, CLI watch, webhooks); (b) an external broker such as NATS; (c) no bus, the status collector calls ntfy directly | (a). One process and one user: a broker is more to run than the problem needs, and (c) leaves the TUI pane and CLI without live updates. | **Decided 2026-11-12: leaning adopted** |
 | D8 | How ntfy is fed | (a) native ntfy publisher (topic, title, priority, tags, click action); (b) extend the existing webhook system with session events and point it at ntfy | (a) first, (b) later if other consumers appear. Webhooks today are per-repo and send JSON that ntfy would need a template for. | **Decided 2026-11-12: leaning adopted** |
 | D9 | Which transitions notify | (a) every change; (b) only `blocked`, `done`, `error`; (c) configurable | (b) as the default, (c) as config. `working` and `idle` are noise on a phone. | **Decided 2026-11-12: leaning adopted** |
 | D10 | Where settings live | (a) everything in the mounted YAML, DB holds only runtime data; (b) YAML for server settings, DB for things changed at runtime (forge connections, per-repo defaults); (c) YAML seeds the DB on start | (a). It suits GitOps and one user. Costs: changing a forge or default means editing the ConfigMap, and secrets must be file references, never inline. | **Decided 2026-11-12: leaning adopted** |
 | D11 | Applying config changes | (a) restart the pod (Reloader is already in the cluster); (b) watch the file and reload | (a) | **Decided 2026-11-12: leaning adopted** |
 | D12 | S3 snapshots | (a) drop; (b) build, always on; (c) build, switched on in the config file, off by default | **(c).** Suspend is the main way to pause and come back; S3 is the opt-in backup for what suspend cannot cover. | **Decided 2026-11-12** |
-| D13 | Deployment tooling | (a) Helmfile with a local Soft Serve chart and the upstream OpenShell chart; (b) ArgoCD Applications; (c) raw manifests | **(a).** One `helmfile apply` brings up both. ArgoCD can wrap it later. | **Decided 2026-11-12** |
-| D14 | Namespaces | (a) Soft Serve and the gateway in one namespace; (b) separate namespaces with the client TLS secret copied across | (a), so Soft Serve mounts `openshell-client-tls` directly. Namespace name is a helmfile value. | **Decided 2026-11-12: leaning adopted** |
+| D13 | Deployment tooling | (a) Helmfile with a local Sundae chart and the upstream OpenShell chart; (b) ArgoCD Applications; (c) raw manifests | **(a).** One `helmfile apply` brings up both. ArgoCD can wrap it later. | **Decided 2026-11-12** |
+| D14 | Namespaces | (a) Sundae and the gateway in one namespace; (b) separate namespaces with the client TLS secret copied across | (a), so Sundae mounts `openshell-client-tls` directly. Namespace name is a helmfile value. | **Decided 2026-11-12: leaning adopted** |
 | D6 | Session state in the DB | (a) stay stateless, gateway and labels are the truth; (b) add a sessions table | (a) until named sessions or status history force it | **Decided 2026-11-12: leaning adopted** |
 
 ## 6. Open questions
@@ -152,7 +152,7 @@ Things only a spike can answer. Questions 2, 3, 5 and 9 were answered from the o
 1. Does osewa's WebSocket carrier work through OpenShell's `TCP().Forward` tunnel, and does a long-lived `osewa server` survive in a sandbox? (UDP has no SDK path, so QUIC is assumed out.)
 4. Which of my agents emit OSC 7501 themselves, and which need a wrapper or hook?
 6. Does the EmulatePty line-feed rewrite garble full-screen programs over the SSH bridge? (F5)
-7. How does the laptop's osewa client reach a session through Soft Serve: a per-session port or hostname on Soft Serve relayed to `TCP().Forward`, or a local `soft session forward` that the client dials?
+7. How does the laptop's osewa client reach a session through Sundae: a per-session port or hostname on Sundae relayed to `TCP().Forward`, or a local `sundae session forward` that the client dials?
 8. Is there an OpenShell gateway install path that fits the microcloud GitOps setup (ArgoCD is present)?
 11. Can osewa's 24-hour reaping of silent, unattached sessions be turned off or lengthened? If not, something must keep long-blocked sessions alive.
 12. Does `osewa local ls` JSON carry the full status record (kind, msg, progress) or only the state? The protocol says full; confirm on a real build.
@@ -160,14 +160,14 @@ Things only a spike can answer. Questions 2, 3, 5 and 9 were answered from the o
 16. OpenShell suspend: which driver and backend does it need, where is the memory state stored (node disk or object store), and does it survive a node drain?
 17. Does SDK v0.1.6 work against gateway 0.1.8, or must the two be pinned to the same version?
 14. Can a pod enrol itself as a device and `osewa attach` to its own server over loopback? The SSH bridge fallback depends on it.
-15. If pods are not directly reachable, can osewa's `--via-ssh` mode go through Soft Serve's SSH server, which is not a real sshd?
+15. If pods are not directly reachable, can osewa's `--via-ssh` mode go through Sundae's SSH server, which is not a real sshd?
 
 ## 7. Workstreams
 
 Ordered by dependency, not by priority. A and E do not depend on each other.
 
 ### A. Prove the session foundation
-- A1. Using workstream J, deploy Soft Serve and an OpenShell gateway to `omni-ops-microcloud-k8s` with a driver that supports suspend (question 16). Settle the three unverified items in F5.
+- A1. Using workstream J, deploy Sundae and an OpenShell gateway to `omni-ops-microcloud-k8s` with a driver that supports suspend (question 16). Settle the three unverified items in F5.
 - A2. Spike osewa in a sandbox: push the static binary with `Files()`, enroll a device by exec, read `osewa local ls`, attach over `TCP().Forward`, suspend and resume with an agent running. Answer questions 1, 7, 11, 12, 14 and 16.
 - A3. Decide D2. Write the result as an architecture doc.
 
@@ -192,36 +192,36 @@ Facts checked 2026-11-12:
 
 Items:
 - J1. `Containerfile`: multi-stage build from source, non-root runtime image. **Written; image not yet built** (no container engine was running).
-- J2. `deploy/helm/soft-serve`: StatefulSet with a PVC, config as a read-only ConfigMap mount (I1), secrets as file mounts (I2), Services for SSH, HTTP and stats. **Written; lints and renders.**
-- J3. `deploy/helmfile.yaml` with `deploy/environment.yaml`: Agent Sandbox v1.0.10 (upstream chart, skippable), OpenShell 0.1.8, Soft Serve, in one namespace. **Written; renders end to end. Never installed.**
+- J2. `deploy/helm/sundae`: StatefulSet with a PVC, config as a read-only ConfigMap mount (I1), secrets as file mounts (I2), Services for SSH, HTTP and stats. **Written; lints and renders.**
+- J3. `deploy/helmfile.yaml` with `deploy/environment.yaml`: Agent Sandbox v1.0.10 (upstream chart, skippable), OpenShell 0.1.8, Sundae, in one namespace. **Written; renders end to end. Never installed.**
 - J4. `deploy/README.md`. **Written.**
 - J5. Build and push the image, apply to `omni-ops-microcloud-k8s`, run A1. Next.
 
 Found while building it:
 - The gateway Service is `openshell`, gRPC on port 8080. The example in the top-level `README.md` (`openshell-gateway.openshell.svc:8443`) does not match this chart.
-- Sandboxes are created in the same namespace and are also given the client TLS credentials, so the certificate Soft Serve presents is not exclusive to it.
-- A read-only config mount is safe: Soft Serve only writes a default config when the file is missing (closes I3 for the mounted case).
+- Sandboxes are created in the same namespace and are also given the client TLS credentials, so the certificate Sundae presents is not exclusive to it.
+- A read-only config mount is safe: Sundae only writes a default config when the file is missing (closes I3 for the mounted case).
 - There is no token-file option for the gateway token; the chart refuses an inline `openshell.token` and takes it from a Secret through an env var (I2 still open in code).
-- Two required values have no default: the sandbox image and the Soft Serve image tag.
+- Two required values have no default: the sandbox image and the Sundae image tag.
 
 ### H. Events and notifications
 Depends on C1.
-- H1. Session event bus inside Soft Serve: status changes and lifecycle events (created, ready, ended, failed), published once and consumed by many. (D7)
+- H1. Session event bus inside Sundae: status changes and lifecycle events (created, ready, ended, failed), published once and consumed by many. (D7)
 - H2. ntfy subscriber, optional and off by default. Server URL (self-hosted or ntfy.sh), topic, token file and optional click URL in config. `blocked` goes out at high priority with `kind` and `msg` in the body; `done` and `error` at default priority. Each message names the repo and session. (D8, D9)
 - H3. Debounce and dedupe, so a flapping agent does not send a burst.
-- H4. Signals feed: a capped in-memory log of session events on the bus, shown in the TUI Signals pane and by `soft session signals [--follow]` in the local CLI.
+- H4. Signals feed: a capped in-memory log of session events on the bus, shown in the TUI Signals pane and by `sundae session signals [--follow]` in the local CLI.
 - H5. Optional: session events as a new webhook event type.
 
 ### I. Configuration
 Cuts across every workstream: each one adds its section here, none invents its own settings store.
-- I1. One mounted, read-only YAML holds all settings (see section 9). Soft Serve already reads `SOFT_SERVE_CONFIG_LOCATION` and `SOFT_SERVE_*` env; keep env as an override.
+- I1. One mounted, read-only YAML holds all settings (see section 9). Sundae already reads `SUNDAE_CONFIG_LOCATION` and `SUNDAE_*` env; keep env as an override.
 - I2. Secrets by file reference only (`*_file`), so the YAML can live in a ConfigMap and git. `openshell.token` is inline today and needs a `token_file`.
-- I3. `soft serve` writes a default config when none exists. With a read-only mount it must not try to.
-- I4. Validate on start and fail loudly, naming the bad key. Add `soft config check` for use in CI.
+- I3. `sundae serve` writes a default config when none exists. With a read-only mount it must not try to.
+- I4. Validate on start and fail loudly, naming the bad key. Add `sundae config check` for use in CI.
 - I5. The Helm chart in J2 mounts the ConfigMap and the secrets.
 
 ### D. Local CLI (parked 2026-11-12, after the build-out)
-- D1. `soft session ls|new|attach|end` on the laptop, talking to Soft Serve over SSH. `--json` on `ls`.
+- D1. `sundae session ls|new|attach|end` on the laptop, talking to Sundae over SSH. `--json` on `ls`.
 - D2. `attach` hands off to `osewa attach` when direct access is available, and falls back to the SSH bridge.
 
 ### E. Forge sync
@@ -291,19 +291,19 @@ sessions:
 
 openshell:
   gateway_address: https://openshell-gateway.openshell.svc:8443
-  token_file: /etc/soft-serve/secrets/openshell-token
+  token_file: /etc/sundae/secrets/openshell-token
 
 forges:
   - name: github
     kind: github
-    token_file: /etc/soft-serve/secrets/github-token
+    token_file: /etc/sundae/secrets/github-token
     include: ["danielboothcloud/*"]
     exclude: []
     sync: 10m
   - name: gitlab
     kind: gitlab
     url: https://gitlab.com
-    token_file: /etc/soft-serve/secrets/gitlab-token
+    token_file: /etc/sundae/secrets/gitlab-token
 
 notifications:
   on: [blocked, done, error]    # D9
@@ -312,7 +312,7 @@ notifications:
     enabled: false
     url: https://ntfy.example.internal
     topic: agents
-    token_file: /etc/soft-serve/secrets/ntfy-token
+    token_file: /etc/sundae/secrets/ntfy-token
     click_url: ""               # optional template, e.g. a deep link to the session
 
 snapshots:                      # workstream F, D12
@@ -321,8 +321,8 @@ snapshots:                      # workstream F, D12
     endpoint: ""                # empty for AWS; set for MinIO, Ceph RGW, etc.
     region: ""
     bucket: ""
-    prefix: soft-serve/sessions
-    credentials_file: /etc/soft-serve/secrets/s3-credentials
+    prefix: sundae/sessions
+    credentials_file: /etc/sundae/secrets/s3-credentials
     sse: AES256                 # or aws:kms, or "" for none
     on: [end]                   # add "suspend" to snapshot before each park
 ```
@@ -345,7 +345,7 @@ Inside a repository, add a **Sessions** tab beside Readme, Files, Commits, Branc
 Rules that keep it one menu:
 - Every tab is a full-width list like today's home, with the same filter (`/`), copy and help keys. There is no detail pane; Sessions uses two-line rows.
 - One status vocabulary everywhere: the OSC 7501 states, with one glyph and colour each, used in the TUI, `session ls` and ntfy titles.
-- CLI nouns mirror the tabs: `soft repo`, `soft session` (with `soft session signals` for the feed), `soft forge`.
+- CLI nouns mirror the tabs: `sundae repo`, `sundae session` (with `sundae session signals` for the feed), `sundae forge`.
 - Tabs for features that are off in the config are hidden, not greyed out.
 
 ## 11. Not placed yet

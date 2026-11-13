@@ -15,14 +15,14 @@ import (
 
 // Session defaults.
 const (
-	// DefaultOsewaBinaryDir is where the Soft Serve image keeps the pinned
+	// DefaultOsewaBinaryDir is where the Sundae image keeps the pinned
 	// osewa release builds it uploads to sandboxes (see the root
 	// Containerfile).
-	DefaultOsewaBinaryDir = "/usr/local/share/soft-serve/osewa"
+	DefaultOsewaBinaryDir = "/usr/local/share/sundae/osewa"
 	// DefaultOsewaPort is the loopback port of the osewa server in each
 	// sandbox. It is osewa's own default.
 	DefaultOsewaPort = 7322
-	// DefaultStatusPollInterval is how often Soft Serve reads each running
+	// DefaultStatusPollInterval is how often Sundae reads each running
 	// session's status by default.
 	DefaultStatusPollInterval = 10 * time.Second
 	// MinStatusPollInterval is the shortest sessions.status.poll_interval:
@@ -32,7 +32,7 @@ const (
 	// working before it is parked, by default.
 	DefaultSuspendAfter = 30 * time.Minute
 	// DefaultSignalsKeep is how many signals (session status reports and
-	// lifecycle events) Soft Serve keeps in memory by default.
+	// lifecycle events) Sundae keeps in memory by default.
 	DefaultSignalsKeep = 1000
 	// MaxSignalsKeep is the largest sessions.signals.keep. A signal can
 	// carry a few KB of program output.
@@ -50,7 +50,7 @@ type SessionsConfig struct {
 	// after the SSH client disconnects.
 	Osewa OsewaConfig `envPrefix:"OSEWA_" yaml:"osewa"`
 
-	// Status configures how Soft Serve collects each session's OSC 7501
+	// Status configures how Sundae collects each session's OSC 7501
 	// status from its sandbox.
 	Status SessionStatusConfig `envPrefix:"STATUS_" yaml:"status"`
 
@@ -59,7 +59,7 @@ type SessionsConfig struct {
 	Suspend SessionSuspendConfig `envPrefix:"SUSPEND_" yaml:"suspend"`
 
 	// Signals configures the signals feed: the session status reports and
-	// lifecycle events Soft Serve keeps in memory for `session signals`
+	// lifecycle events Sundae keeps in memory for `session signals`
 	// and the TUI.
 	Signals SessionSignalsConfig `envPrefix:"SIGNALS_" yaml:"signals"`
 
@@ -78,7 +78,7 @@ type SessionsConfig struct {
 // OsewaConfig configures osewa in the sandboxes.
 type OsewaConfig struct {
 	// BinaryDir holds the pinned osewa Linux release builds as published,
-	// osewa-linux-amd64.gz and osewa-linux-arm64.gz. Soft Serve verifies one
+	// osewa-linux-amd64.gz and osewa-linux-arm64.gz. Sundae verifies one
 	// against its pinned checksum and uploads it to a sandbox whose image
 	// does not provide the pinned osewa. Relative paths are resolved
 	// against the data path.
@@ -91,7 +91,7 @@ type OsewaConfig struct {
 
 // SessionStatusConfig configures status collection.
 type SessionStatusConfig struct {
-	// PollInterval is how often Soft Serve runs `osewa local ls` in every
+	// PollInterval is how often Sundae runs `osewa local ls` in every
 	// running session's sandbox to read its status. 0 means
 	// DefaultStatusPollInterval; at least MinStatusPollInterval otherwise.
 	PollInterval time.Duration `env:"POLL_INTERVAL" yaml:"poll_interval"`
@@ -317,17 +317,17 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
-// sessionsEnviron returns the sessions section as SOFT_SERVE_SESSIONS_*
+// sessionsEnviron returns the sessions section as SUNDAE_SESSIONS_*
 // environment variables. Profiles and repos have no environment form; hook
 // subprocesses read them from the config file.
 func (c *Config) sessionsEnviron() []string {
 	return []string{
-		"SOFT_SERVE_SESSIONS_OSEWA_BINARY_DIR=" + c.Sessions.Osewa.BinaryDir,
-		fmt.Sprintf("SOFT_SERVE_SESSIONS_OSEWA_PORT=%d", c.Sessions.Osewa.Port),
-		"SOFT_SERVE_SESSIONS_STATUS_POLL_INTERVAL=" + c.Sessions.Status.PollInterval.String(),
-		fmt.Sprintf("SOFT_SERVE_SESSIONS_SUSPEND_ENABLED=%t", c.Sessions.Suspend.Enabled),
-		"SOFT_SERVE_SESSIONS_SUSPEND_AFTER=" + c.Sessions.Suspend.After.String(),
-		"SOFT_SERVE_SESSIONS_SUSPEND_FALLBACK=" + c.Sessions.Suspend.Fallback,
-		fmt.Sprintf("SOFT_SERVE_SESSIONS_SIGNALS_KEEP=%d", c.Sessions.Signals.Keep),
+		"SUNDAE_SESSIONS_OSEWA_BINARY_DIR=" + c.Sessions.Osewa.BinaryDir,
+		fmt.Sprintf("SUNDAE_SESSIONS_OSEWA_PORT=%d", c.Sessions.Osewa.Port),
+		"SUNDAE_SESSIONS_STATUS_POLL_INTERVAL=" + c.Sessions.Status.PollInterval.String(),
+		fmt.Sprintf("SUNDAE_SESSIONS_SUSPEND_ENABLED=%t", c.Sessions.Suspend.Enabled),
+		"SUNDAE_SESSIONS_SUSPEND_AFTER=" + c.Sessions.Suspend.After.String(),
+		"SUNDAE_SESSIONS_SUSPEND_FALLBACK=" + c.Sessions.Suspend.Fallback,
+		fmt.Sprintf("SUNDAE_SESSIONS_SIGNALS_KEEP=%d", c.Sessions.Signals.Keep),
 	}
 }

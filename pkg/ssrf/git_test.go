@@ -26,7 +26,7 @@ func TestValidateGitRemote(t *testing.T) {
 
 		// SSH is reachability-governed by the operator's client key.
 		{"ssh url", "ssh://git@10.0.0.1/x.git", GitTransportSSH, nil},
-		{"bare ssh", "git@github.com:charmbracelet/soft-serve.git", GitTransportSSH, nil},
+		{"bare ssh", "git@github.com:charmbracelet/sundae.git", GitTransportSSH, nil},
 		{"git+ssh", "git+ssh://git@example.com/x.git", GitTransportSSH, nil},
 		{"ssh+git", "ssh+git://git@example.com/x.git", GitTransportSSH, nil},
 
@@ -92,7 +92,7 @@ func TestValidateGitRemoteResolvesHostnames(t *testing.T) {
 		t.Skip("requires DNS")
 	}
 
-	v, err := ValidateGitRemote("https://github.com/charmbracelet/soft-serve.git")
+	v, err := ValidateGitRemote("https://github.com/danielboothcloud/sundae.git")
 	if err != nil {
 		t.Fatalf("public hostname rejected: %v", err)
 	}

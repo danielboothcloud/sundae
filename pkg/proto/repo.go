@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/soft-serve/git"
+	"github.com/danielboothcloud/sundae/git"
 )
 
 // VCS is the kind of version control system a repository is presented as.

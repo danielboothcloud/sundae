@@ -17,14 +17,14 @@ const DefaultBuffer = 256
 
 var (
 	publishedCounter = promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "soft_serve",
+		Namespace: "sundae",
 		Subsystem: "events",
 		Name:      "published_total",
 		Help:      "Events published on the event bus, by kind.",
 	}, []string{"kind"})
 
 	droppedCounter = promauto.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "soft_serve",
+		Namespace: "sundae",
 		Subsystem: "events",
 		Name:      "dropped_total",
 		Help:      "Events a subscriber lost because its buffer was full, by subscriber name.",
@@ -86,7 +86,7 @@ func New(opts ...Option) *Bus {
 // Publish stamps ev with an ID, and with the current time when ev.Time is
 // zero, and delivers it to every subscriber whose filter accepts it. It
 // never blocks: a subscriber whose buffer is full loses the event, which is
-// counted on the subscription and in soft_serve_events_dropped_total.
+// counted on the subscription and in sundae_events_dropped_total.
 // Publishes are serialised, so every subscriber receives events in ID
 // order.
 //

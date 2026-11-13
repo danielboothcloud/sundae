@@ -1,6 +1,6 @@
-// Package s3store is the small part of the S3 API Soft Serve's session
+// Package s3store is the small part of the S3 API Sundae's session
 // snapshots need: presigned PUT and GET URLs for the sandboxes, which move
-// the archives themselves, and a few signed requests Soft Serve makes with
+// the archives themselves, and a few signed requests Sundae makes with
 // small or no bodies (HEAD, GET and PUT of small objects, DELETE, LIST).
 //
 // Requests are signed with AWS Signature Version 4 by the signer of
@@ -27,7 +27,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
-	"github.com/charmbracelet/soft-serve/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/config"
 )
 
 // ErrNotFound is returned for an object that does not exist.
@@ -63,7 +63,7 @@ type Store struct {
 // Option configures a Store.
 type Option func(*Store)
 
-// WithHTTPClient sets the HTTP client of Soft Serve's own requests.
+// WithHTTPClient sets the HTTP client of Sundae's own requests.
 func WithHTTPClient(c *http.Client) Option { return func(s *Store) { s.client = c } }
 
 // WithClock sets the signing clock.

@@ -1,43 +1,43 @@
 # vi: set ft=conf
 
-# start soft serve
-exec soft serve &
+# start sundae serve
+exec sundae serve &
 # wait for SSH server to start
 ensureserverrunning SSH_PORT
 
 # check default allow-keyless
-soft settings allow-keyless true
-soft settings allow-keyless
+sundae settings allow-keyless true
+sundae settings allow-keyless
 stdout 'true.*'
 
 # change allow-keyless and check
-soft settings allow-keyless false
-soft settings allow-keyless
+sundae settings allow-keyless false
+sundae settings allow-keyless
 stdout 'false.*'
 
 # check default anon-access
-soft settings anon-access
+sundae settings anon-access
 stdout 'read-only.*'
 
 # change anon-access to all available options, and check them
-soft settings anon-access no-access
-soft settings anon-access
+sundae settings anon-access no-access
+sundae settings anon-access
 stdout 'no-access.*'
 
-soft settings anon-access read-only
-soft settings anon-access
+sundae settings anon-access read-only
+sundae settings anon-access
 stdout 'read-only.*'
 
-soft settings anon-access read-write
-soft settings anon-access
+sundae settings anon-access read-write
+sundae settings anon-access
 stdout 'read-write.*'
 
-soft settings anon-access admin-access
-soft settings anon-access
+sundae settings anon-access admin-access
+sundae settings anon-access
 stdout 'admin-access.*'
 
 # try to set a bad access
-! soft settings anon-access nope
+! sundae settings anon-access nope
 ! stdout .
 stderr .
 

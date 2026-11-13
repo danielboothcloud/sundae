@@ -3,13 +3,13 @@
 # convert crlf to lf on windows
 [windows] dos2unix blob1.txt blob2.txt blob3.txt
 
-# start soft serve
-exec soft serve &
+# start sundae serve
+exec sundae serve &
 # wait for SSH server to start
 ensureserverrunning SSH_PORT
 
 # create a repo
-soft repo create repo1
+sundae repo create repo1
 
 # clone repo
 git clone ssh://localhost:$SSH_PORT/repo1 repo1
@@ -26,25 +26,25 @@ git -C repo1 commit -m 'first'
 git -C repo1 push origin HEAD
 
 # print root blob
-soft repo blob repo1 README.md
+sundae repo blob repo1 README.md
 cmp stdout blob1.txt
 
 # print file blob with revision with line numbers and colors
-soft repo blob repo1 master main.go -l -c
+sundae repo blob repo1 master main.go -l -c
 cmp stdout blob2.txt
 
 
 # print file blob with revision within folder with lineno
-soft repo blob repo1 master folder/lib.c -l
+sundae repo blob repo1 master folder/lib.c -l
 cmp stdout blob3.txt
 
 # print blob of folder that does not exist
-! soft repo blob repo1 folder/nope.txt
+! sundae repo blob repo1 folder/nope.txt
 ! stdout .
 stderr 'revision does not exist'
 
 # print blob of bad revision
-! soft repo blob repo1 badrev README.md
+! sundae repo blob repo1 badrev README.md
 ! stdout .
 stderr 'revision does not exist'
 

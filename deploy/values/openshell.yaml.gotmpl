@@ -1,7 +1,7 @@
 # Values for the OpenShell chart (oci://ghcr.io/nvidia/openshell/helm-chart).
 #
 # Everything here is already the chart's default in 0.1.8. It is spelled out
-# because values/soft-serve.yaml.gotmpl depends on it: the gateway Service is
+# because values/sundae.yaml.gotmpl depends on it: the gateway Service is
 # "openshell" on port 8080, it serves TLS and requires a client certificate,
 # and the client certificate is in the Secret "openshell-client-tls".
 
@@ -17,7 +17,7 @@ server:
   tls:
     enableMtls: true
     # Created by the chart's certgen hook Job with the keys ca.crt, tls.crt and
-    # tls.key. Soft Serve mounts it.
+    # tls.key. Sundae mounts it.
     clientTlsSecretName: openshell-client-tls
 
 # The hook Job that creates the TLS Secrets. Its server certificate covers

@@ -3,11 +3,11 @@
     blocked · permission  4m
     Apply 3 to add, 1 to change, 0 to destroy…
 
-┃ ✓ soft-serve / forge-sync
+┃ ✓ sundae / forge-sync
 ┃   done  12m
 ┃   Implemented GitHub discovery; 14 tests pa…
 
-  ● soft-serve / tui
+  ● sundae / tui
     working 40%  now
     Running go test ./pkg/ui/...
 

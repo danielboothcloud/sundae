@@ -1,64 +1,64 @@
 # vi: set ft=conf
 
 # Without forges in the config, `forge` is an unknown command.
-exec soft serve &
+exec sundae serve &
 ensureserverrunning SSH_PORT
 
-! soft forge ls
+! sundae forge ls
 stderr 'unknown command "forge"'
 
 stopserver
 ensureservernotrunning SSH_PORT
 
 # Declare a forge. Its URL is never contacted by the checks below.
-env SOFT_SERVE_FORGES_0_NAME=gh
-env SOFT_SERVE_FORGES_0_KIND=github
-env SOFT_SERVE_FORGES_0_URL=http://127.0.0.1:1
+env SUNDAE_FORGES_0_NAME=gh
+env SUNDAE_FORGES_0_KIND=github
+env SUNDAE_FORGES_0_URL=http://127.0.0.1:1
 
-exec soft serve &
+exec sundae serve &
 ensureserverrunning SSH_PORT
 
 # the command is registered
-soft forge --help
+sundae forge --help
 stdout 'import'
 stdout 'push'
 stdout 'sync'
 
 # admins can list forges
-soft forge ls
+sundae forge ls
 stdout 'gh'
 stdout 'github'
-soft forge ls --json
+sundae forge ls --json
 stdout '"name": "gh"'
 stdout '"imported": 0'
 
 # non-admins cannot list, import or sync
-soft user create user1 -k "$USER1_AUTHORIZED_KEY"
-! usoft forge ls
+sundae user create user1 -k "$USER1_AUTHORIZED_KEY"
+! usundae forge ls
 stderr 'unauthorized'
-! usoft forge repos gh --json
+! usundae forge repos gh --json
 stderr 'unauthorized'
-! usoft forge import gh me/repo
+! usundae forge import gh me/repo
 stderr 'unauthorized'
-! usoft forge import gh --all
+! usundae forge import gh --all
 stderr 'unauthorized'
-! usoft forge sync
+! usundae forge sync
 stderr 'unauthorized'
-! usoft forge sync gh me/repo
+! usundae forge sync gh me/repo
 stderr 'unauthorized'
 
 # pushing needs write access to the repository
-soft repo create repo1
-! usoft forge push repo1
+sundae repo create repo1
+! usundae forge push repo1
 stderr 'unauthorized'
-soft repo collab add repo1 user1
-! usoft forge push repo1
+sundae repo collab add repo1 user1
+! usundae forge push repo1
 stderr 'not linked to a forge'
 
 # anonymous users get nothing either
-! ksoft forge ls
+! ksundae forge ls
 stderr 'unauthorized'
-! ksoft forge push repo1
+! ksundae forge push repo1
 stderr 'unauthorized'
 
 # stop the server

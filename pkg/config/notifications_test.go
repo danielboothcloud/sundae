@@ -161,7 +161,7 @@ func TestValidateNotificationsNormalises(t *testing.T) {
 func TestExpandClickURL(t *testing.T) {
 	is := is.New(t)
 	n := NtfyConfig{ClickURL: "https://git.example.com/{repo}?s={session}&u={user}"}
-	is.Equal(n.ExpandClickURL("infra/net", "claude 1", "soft-alice-infra", "alice"),
+	is.Equal(n.ExpandClickURL("infra/net", "claude 1", "sundae-alice-infra", "alice"),
 		"https://git.example.com/infra/net?s=claude%201&u=alice")
 	// Query metacharacters in a value cannot add parameters.
 	is.Equal(n.ExpandClickURL("r", "a&b=c#d", "", "alice"), "https://git.example.com/r?s=a%26b%3Dc%23d&u=alice")
@@ -229,7 +229,7 @@ func TestNotificationsEnvironRoundTrip(t *testing.T) {
 	is.NoErr(cfg.Validate())
 
 	environ := cfg.Environ()
-	is.True(slices.Contains(environ, "SOFT_SERVE_NOTIFICATIONS_ON=blocked,forge_failed"))
+	is.True(slices.Contains(environ, "SUNDAE_NOTIFICATIONS_ON=blocked,forge_failed"))
 	for _, e := range environ {
 		is.True(!strings.Contains(e, "tk_secret"))
 		k, v, _ := strings.Cut(e, "=")
