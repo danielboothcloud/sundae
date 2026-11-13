@@ -28,6 +28,12 @@ Nothing here has been deployed to a cluster yet. See
 
 ## 1. Build and push the images
 
+CI builds both images for linux/amd64 on every push to `main` or `develop`
+(`.github/workflows/images.yml`) and pushes them to
+`ghcr.io/danielboothcloud/sundae` and `ghcr.io/danielboothcloud/sundae-sandbox`,
+tagged with the short commit sha and the branch name. Build by hand only when
+you need another registry or architecture:
+
 Run from the repository root. Build for the architecture of the cluster nodes.
 
 ### Sundae
