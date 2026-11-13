@@ -246,6 +246,7 @@ func TestOpenShellDisabledByDefault(t *testing.T) {
 	is.Equal(cfg.OpenShell.Enabled, false)
 	is.Equal(cfg.OpenShell.Workspace, "default")
 	is.Equal(cfg.OpenShell.TokenTTL, 24*time.Hour)
+	is.Equal(cfg.OpenShell.ReadyTimeout, 15*time.Minute)
 	is.Equal(cfg.OpenShell.Command, "bash -l")
 	// Disabled needs no address or image.
 	cfg.DataPath = t.TempDir()
@@ -268,6 +269,7 @@ func TestParseOpenShellEnv(t *testing.T) {
 		"SUNDAE_OPENSHELL_INSECURE":        "true",
 		"SUNDAE_OPENSHELL_CLONE_URL":       "http://sundae.sundae.svc:23232/",
 		"SUNDAE_OPENSHELL_TOKEN_TTL":       "2h",
+		"SUNDAE_OPENSHELL_READY_TIMEOUT":   "20m",
 		"SUNDAE_OPENSHELL_COMMAND":         "claude",
 	}
 	for k, v := range envs {
@@ -288,6 +290,7 @@ func TestParseOpenShellEnv(t *testing.T) {
 	is.Equal(oc.CloneURL, "http://sundae.sundae.svc:23232")
 	is.Equal(cfg.OpenShellCloneURL(), "http://sundae.sundae.svc:23232")
 	is.Equal(oc.TokenTTL, 2*time.Hour)
+	is.Equal(oc.ReadyTimeout, 20*time.Minute)
 	is.Equal(oc.Command, "claude")
 
 	// The gateway token never leaks into subprocess environments.
@@ -316,13 +319,15 @@ func TestValidateOpenShell(t *testing.T) {
 		mutate func(*Config)
 		err    string
 	}{
-		"valid":            {mutate: func(*Config) {}},
-		"missing address":  {mutate: func(c *Config) { c.OpenShell.GatewayAddress = "" }, err: "gateway_address"},
-		"missing image":    {mutate: func(c *Config) { c.OpenShell.Image = "" }, err: "image"},
-		"cert without key": {mutate: func(c *Config) { c.OpenShell.TLSCert = "c.crt" }, err: "tls_cert and tls_key"},
-		"zero ttl":         {mutate: func(c *Config) { c.OpenShell.TokenTTL = 0 }, err: "token_ttl"},
-		"empty command":    {mutate: func(c *Config) { c.OpenShell.Command = " " }, err: "command"},
-		"blank workspace":  {mutate: func(c *Config) { c.OpenShell.Workspace = " " }, err: "workspace"},
+		"valid":               {mutate: func(*Config) {}},
+		"missing address":     {mutate: func(c *Config) { c.OpenShell.GatewayAddress = "" }, err: "gateway_address"},
+		"missing image":       {mutate: func(c *Config) { c.OpenShell.Image = "" }, err: "image"},
+		"cert without key":    {mutate: func(c *Config) { c.OpenShell.TLSCert = "c.crt" }, err: "tls_cert and tls_key"},
+		"zero ttl":            {mutate: func(c *Config) { c.OpenShell.TokenTTL = 0 }, err: "token_ttl"},
+		"short ready timeout": {mutate: func(c *Config) { c.OpenShell.ReadyTimeout = time.Second }, err: "openshell: ready_timeout 1s is too short: use at least 30s"},
+		"unset ready timeout": {mutate: func(c *Config) { c.OpenShell.ReadyTimeout = 0 }},
+		"empty command":       {mutate: func(c *Config) { c.OpenShell.Command = " " }, err: "command"},
+		"blank workspace":     {mutate: func(c *Config) { c.OpenShell.Workspace = " " }, err: "workspace"},
 		"every problem reported": {mutate: func(c *Config) {
 			c.OpenShell.GatewayAddress = ""
 			c.OpenShell.Image = ""
@@ -461,6 +466,7 @@ func TestOpenShellConfigFileRoundTrip(t *testing.T) {
 	cfg.OpenShell.Image = "sandbox:latest"
 	cfg.OpenShell.TokenFile = writeTokenFile(t, cfg.DataPath, "gw-token", "gw-secret\n")
 	cfg.OpenShell.TokenTTL = 90 * time.Minute
+	cfg.OpenShell.ReadyTimeout = 25 * time.Minute
 	cfg.OpenShell.Command = `bash -lc "echo hi"`
 	is.NoErr(cfg.WriteConfig())
 
@@ -471,6 +477,7 @@ func TestOpenShellConfigFileRoundTrip(t *testing.T) {
 	is.Equal(got.OpenShell.Image, "sandbox:latest")
 	is.Equal(got.OpenShell.Workspace, "default")
 	is.Equal(got.OpenShell.TokenTTL, 90*time.Minute)
+	is.Equal(got.OpenShell.ReadyTimeout, 25*time.Minute)
 	is.Equal(got.OpenShell.Command, `bash -lc "echo hi"`)
 	is.Equal(got.OpenShell.TokenFile, filepath.Join(cfg.DataPath, "gw-token"))
 	is.Equal(got.OpenShell.Token, "")

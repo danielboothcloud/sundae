@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"github.com/danielboothcloud/sundae/pkg/access"
 	"github.com/danielboothcloud/sundae/pkg/backend"
@@ -206,6 +207,37 @@ func (s *Selection) reloadRepos(selected string) tea.Cmd {
 		}
 	}
 	return cmd
+}
+
+// refreshRepos lists the repositories again after a change made
+// elsewhere, such as an import. It keeps the selected repository and the
+// user's filter.
+func (s *Selection) refreshRepos() tea.Cmd {
+	items, err := s.repoItems()
+	if err != nil {
+		s.common.Logger.Debug("ui: cannot list repositories", "err", err)
+		return nil
+	}
+	selected := s.SelectedRepo()
+	cmd := s.selector.SetItems(items)
+	if s.FilterState() == list.Unfiltered {
+		for i, it := range items {
+			if it.ID() == selected {
+				s.selector.Select(i)
+			}
+		}
+	}
+	return cmd
+}
+
+// listed reports whether the Repositories tab lists the repository.
+func (s *Selection) listed(repo string) bool {
+	for _, it := range s.selector.Items() {
+		if it, ok := it.(Item); ok && it.ID() == repo {
+			return true
+		}
+	}
+	return false
 }
 
 // profileInfo is a configured session profile, as the form offers it.

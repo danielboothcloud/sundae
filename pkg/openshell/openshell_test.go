@@ -2,11 +2,13 @@ package openshell
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	v1 "github.com/NVIDIA/OpenShell/sdk/go/openshell/v1"
 	"github.com/NVIDIA/OpenShell/sdk/go/openshell/v1/fake"
@@ -262,4 +264,43 @@ func TestNewReadsTokenFile(t *testing.T) {
 		t.Fatalf("token file present: %v", err)
 	}
 	_ = c.Close()
+}
+
+// blockingWait wraps a sandbox client so WaitReady waits until its context
+// ends, as for a sandbox that never becomes ready.
+type blockingWait struct {
+	v1.SandboxInterface
+}
+
+func (blockingWait) WaitReady(ctx context.Context, _, _ string, _ ...v1.WaitOptions) (*types.Sandbox, error) {
+	<-ctx.Done()
+	return nil, &types.StatusError{Code: types.ErrorDeadlineExceeded, Message: ctx.Err().Error()}
+}
+
+// TestEnsureSandboxReadyTimeout: a sandbox not ready within the configured
+// timeout fails with ErrReadyTimeout, names the setting, and is deleted.
+func TestEnsureSandboxReadyTimeout(t *testing.T) {
+	ctx := context.Background()
+	fc := fake.NewClient()
+	c := newSDKClient("default", blockingWait{fc.Sandboxes()}, nil, nil, nil)
+	if c.readyTimeout != config.DefaultReadyTimeout {
+		t.Fatalf("default ready timeout = %s", c.readyTimeout)
+	}
+	c.readyTimeout = 20 * time.Millisecond
+
+	_, _, err := c.EnsureSandbox(ctx, "sundae-a-r", SandboxRequest{Image: "img"})
+	if !errors.Is(err, ErrReadyTimeout) || !strings.Contains(err.Error(), "openshell.ready_timeout") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := fc.Sandboxes().Get(ctx, "default", "sundae-a-r"); !IsNotFound(err) {
+		t.Fatalf("timed-out sandbox not deleted: err=%v", err)
+	}
+
+	// The caller's own deadline is not reported as the ready timeout.
+	c.readyTimeout = time.Hour
+	cctx, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
+	defer cancel()
+	if _, _, err := c.EnsureSandbox(cctx, "sundae-a-s", SandboxRequest{Image: "img"}); err == nil || errors.Is(err, ErrReadyTimeout) {
+		t.Fatalf("caller deadline: err = %v", err)
+	}
 }

@@ -142,7 +142,7 @@ type (
 // to the home page while a repository is shown.
 func IsMsg(msg tea.Msg) bool {
 	switch msg.(type) {
-	case originsMsg, originMsg, originFeedMsg, originFeedEndMsg, repoCreatedMsg:
+	case originsMsg, originMsg, originFeedMsg, originFeedEndMsg, repoCreatedMsg, forges.ReposChangedMsg:
 		return true
 	}
 	return sessions.IsMsg(msg) || forges.IsMsg(msg)
@@ -208,14 +208,23 @@ func (s *Selection) onBadgeMsg(msg tea.Msg) tea.Cmd {
 	case originFeedMsg:
 		// An import, sync or push changes one repository: read just
 		// its origin again.
+		// An import from elsewhere (the CLI, another session) adds a
+		// repository: list the repositories again.
 		seen := map[string]bool{}
 		var cmds []tea.Cmd
+		added := false
 		for _, ev := range msg.evs {
 			if ev.Forge == nil || ev.Forge.Repo == "" || seen[ev.Forge.Repo] {
 				continue
 			}
 			seen[ev.Forge.Repo] = true
 			cmds = append(cmds, s.originCmd(ev.Forge.Repo))
+			if ev.Forge.Kind == "import" && ev.Forge.OK && !s.listed(ev.Forge.Repo) {
+				added = true
+			}
+		}
+		if added {
+			cmds = append(cmds, s.refreshRepos())
 		}
 		return tea.Batch(append(cmds, s.originNextCmd())...)
 	case originFeedEndMsg:

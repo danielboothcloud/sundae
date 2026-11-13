@@ -460,6 +460,10 @@ openshell:
   clone_url: "http://sundae-http.sundae.svc.cluster.local:23232"
   # Lifetime of the git token in a sandbox; renewed on every start and attach.
   token_ttl: "24h"
+  # How long a session start waits for its sandbox to become ready. A first
+  # start pulls the image and copies its /sandbox into the new workspace
+  # volume. At least 30s.
+  ready_timeout: "15m"
   # The program a session runs when no profile sets one, in /sandbox/<repo>.
   command: "bash -l"
   # OpenShell providers Sundae creates and keeps up to date on the gateway

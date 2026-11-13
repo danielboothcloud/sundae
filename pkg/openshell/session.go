@@ -481,6 +481,7 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 			return nil, m.missingProviderError(profile, missing)
 		}
 		if err != nil {
+			m.logger.Warn("cannot start sandbox", "sandbox", sandbox, "user", opts.User.Username(), "image", image, "err", err)
 			return nil, err
 		}
 	} else {
@@ -490,6 +491,7 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 			return nil, fmt.Errorf("%w: %q; create it with \"session new %s --repo <repository>\"", ErrNoSession, name, name)
 		}
 		if err != nil {
+			m.logger.Warn("cannot resume sandbox", "sandbox", sandbox, "user", opts.User.Username(), "err", err)
 			return nil, err
 		}
 	}

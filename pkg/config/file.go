@@ -177,6 +177,11 @@ openshell:
   # on every "session start" and "session attach"; an agent left running
   # longer than this without anyone attaching loses git access until then.
   token_ttl: "{{ .OpenShell.TokenTTL }}"
+  # How long a session start waits for its sandbox to become ready. The
+  # first start of a sandbox pulls the image and copies its /sandbox into
+  # the new workspace volume, which takes minutes for a large image. At
+  # least 30s.
+  ready_timeout: "{{ .OpenShell.ReadyTimeout }}"
   # The program a session runs when no profile sets one, in
   # /sandbox/<repo>. It runs inside an osewa session, so it keeps running
   # after the SSH client disconnects.

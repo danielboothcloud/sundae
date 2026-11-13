@@ -27,7 +27,7 @@ const (
 	DefaultPollTimeout = 15 * time.Second
 	// parkTimeout bounds one park: the suspend call and the wait for the
 	// sandbox to be Suspended.
-	parkTimeout = readyTimeout
+	parkTimeout = suspendTimeout
 )
 
 // Who parked a session: the Op of a LifecycleParked event.

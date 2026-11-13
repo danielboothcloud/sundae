@@ -559,6 +559,8 @@ func (s *Selection) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 		return s, s.onRepoCreated(msg)
 	case repoDeletedMsg:
 		return s, s.onRepoDeleted(msg)
+	case forges.ReposChangedMsg:
+		return s, s.refreshRepos()
 	case tea.KeyPressMsg:
 		if s.activePane == selectorPane {
 			s.repoNotice = ""

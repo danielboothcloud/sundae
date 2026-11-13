@@ -619,3 +619,51 @@ func TestForgesListErrorStaysInTheHeader(t *testing.T) {
 	}
 	golden(t, "forges-list-error-100", view(m))
 }
+
+// TestForgesImportTellsHomeToReload: a successful import asks the home page
+// to list the repositories again; a failed one does not.
+func TestForgesImportTellsHomeToReload(t *testing.T) {
+	for _, tc := range []struct {
+		path string
+		want bool
+	}{
+		{"danielboothcloud/dotfiles", true},
+		{"me/broken", false},
+	} {
+		m := started(t, 80, 20, newFakeSource())
+		cmd := m.importCmd("github", []forge.RepoStatus{{Path: tc.path}}, proto.VCSJJ)
+		op, ok := cmd().(opMsg)
+		if !ok {
+			t.Fatalf("%s: import did not end with an opMsg", tc.path)
+		}
+		_, next := m.Update(op)
+		if got := emits[ReposChangedMsg](next); got != tc.want {
+			t.Fatalf("%s: ReposChangedMsg = %v, want %v", tc.path, got, tc.want)
+		}
+	}
+}
+
+// emits reports whether cmd, or a command of its batch, returns a T. The
+// commands that block (the event feed) are left after a short wait.
+func emits[T any](cmd tea.Cmd) bool {
+	if cmd == nil {
+		return false
+	}
+	done := make(chan tea.Msg, 1)
+	go func() { done <- cmd() }()
+	select {
+	case msg := <-done:
+		if b, ok := msg.(tea.BatchMsg); ok {
+			for _, c := range b {
+				if emits[T](c) {
+					return true
+				}
+			}
+			return false
+		}
+		_, ok := msg.(T)
+		return ok
+	case <-time.After(200 * time.Millisecond):
+		return false
+	}
+}

@@ -66,11 +66,18 @@ const (
 	// none can be derived from a repository.
 	DefaultSessionName = "main"
 
-	// readyTimeout bounds how long Ensure waits for a sandbox to become ready.
-	readyTimeout = 5 * time.Minute
+	// suspendTimeout bounds how long a park waits for a sandbox to be
+	// Suspended.
+	suspendTimeout = 5 * time.Minute
 	// cleanupTimeout bounds best-effort cleanup calls.
 	cleanupTimeout = 30 * time.Second
 )
+
+// ErrReadyTimeout is returned when a sandbox does not become ready within
+// openshell.ready_timeout. A first start pulls the image and seeds the
+// workspace volume from the image's /sandbox; a large image or /sandbox
+// can need a longer timeout.
+var ErrReadyTimeout = errors.New("ready timeout")
 
 // ErrNotOwned is returned when a sandbox with the expected name exists but
 // belongs to someone else.
@@ -243,6 +250,9 @@ func New(cfg config.OpenShellConfig) (Client, error) {
 
 	sc := newSDKClient(cfg.Workspace, c.Sandboxes(), c.Exec(), c.Files(), c)
 	sc.suspender = c.SandboxSuspendResume()
+	if cfg.ReadyTimeout > 0 {
+		sc.readyTimeout = cfg.ReadyTimeout
+	}
 	return sc, nil
 }
 
@@ -294,6 +304,9 @@ type sdkClient struct {
 	exec      v1.ExecInterface
 	files     v1.FileInterface
 	closer    io.Closer
+	// readyTimeout bounds how long a start waits for a sandbox to become
+	// ready (openshell.ready_timeout).
+	readyTimeout time.Duration
 }
 
 var _ Client = (*sdkClient)(nil)
@@ -306,7 +319,10 @@ func newSDKClient(workspace string, sandboxes v1.SandboxInterface, exec v1.ExecI
 		workspace = "default"
 	}
 	sr, _ := sandboxes.(v1.SandboxSuspendResumeInterface)
-	return &sdkClient{workspace: workspace, sandboxes: sandboxes, suspender: sr, exec: exec, files: files, closer: closer}
+	return &sdkClient{
+		workspace: workspace, sandboxes: sandboxes, suspender: sr, exec: exec, files: files, closer: closer,
+		readyTimeout: config.DefaultReadyTimeout,
+	}
 }
 
 func (c *sdkClient) EnsureSandbox(ctx context.Context, name string, req SandboxRequest) (*Sandbox, bool, error) {
@@ -406,7 +422,7 @@ func (c *sdkClient) waitSuspended(ctx context.Context, name string) (*Sandbox, e
 	if c.suspender == nil {
 		return nil, fmt.Errorf("openshell: wait for sandbox %q to suspend: %w", name, ErrSuspendUnsupported)
 	}
-	ctx, cancel := context.WithTimeout(ctx, readyTimeout)
+	ctx, cancel := context.WithTimeout(ctx, suspendTimeout)
 	defer cancel()
 	sb, err := c.suspender.WaitSuspended(ctx, c.workspace, name)
 	if err != nil {
@@ -426,10 +442,14 @@ func (c *sdkClient) SuspendSandbox(ctx context.Context, name string) (*Sandbox, 
 }
 
 func (c *sdkClient) waitReady(ctx context.Context, name string) (*Sandbox, error) {
-	ctx, cancel := context.WithTimeout(ctx, readyTimeout)
+	wctx, cancel := context.WithTimeout(ctx, c.readyTimeout)
 	defer cancel()
-	sb, err := c.sandboxes.WaitReady(ctx, c.workspace, name)
+	sb, err := c.sandboxes.WaitReady(wctx, c.workspace, name)
 	if err != nil {
+		if ctx.Err() == nil && errors.Is(wctx.Err(), context.DeadlineExceeded) {
+			// Our bound, not the caller's: say which setting it is.
+			return nil, fmt.Errorf("openshell: sandbox %q not ready after %s (a large image can need a longer openshell.ready_timeout): %w", name, c.readyTimeout, ErrReadyTimeout)
+		}
 		return nil, fmt.Errorf("openshell: wait for sandbox %q: %w", name, err)
 	}
 	return sb, nil

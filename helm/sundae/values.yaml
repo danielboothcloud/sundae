@@ -196,6 +196,11 @@ config:
     # Lifetime of the git token in a sandbox. Renewed on every session start
     # and attach.
     token_ttl: "24h"
+    # How long a session start waits for its sandbox to become ready. The
+    # first start of a sandbox pulls the image and copies the image's
+    # /sandbox into the new workspace volume, which takes minutes for a large
+    # image. At least 30s.
+    ready_timeout: "15m"
     # The program a session runs when no profile sets one. It runs in an osewa
     # session in the sandbox, so it outlives the SSH connection.
     command: "bash -l"

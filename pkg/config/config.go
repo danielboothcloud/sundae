@@ -193,6 +193,12 @@ type OpenShellConfig struct {
 	// TokenTTL is the lifetime of the access token issued to a sandbox.
 	TokenTTL time.Duration `env:"TOKEN_TTL" yaml:"token_ttl"`
 
+	// ReadyTimeout bounds how long a session start waits for its sandbox
+	// to become ready: the image pull, the workspace volume and its first
+	// seeding from the image's /sandbox included. Defaults to
+	// DefaultReadyTimeout.
+	ReadyTimeout time.Duration `env:"READY_TIMEOUT" yaml:"ready_timeout"`
+
 	// Command is the program a session runs when no profile sets one. It
 	// runs inside an osewa session, so it keeps running after the SSH client
 	// disconnects.
@@ -369,6 +375,7 @@ func (c *Config) Environ() []string {
 		fmt.Sprintf("SUNDAE_OPENSHELL_INSECURE=%t", c.OpenShell.Insecure),
 		fmt.Sprintf("SUNDAE_OPENSHELL_CLONE_URL=%s", c.OpenShell.CloneURL),
 		fmt.Sprintf("SUNDAE_OPENSHELL_TOKEN_TTL=%s", c.OpenShell.TokenTTL),
+		fmt.Sprintf("SUNDAE_OPENSHELL_READY_TIMEOUT=%s", c.OpenShell.ReadyTimeout),
 		fmt.Sprintf("SUNDAE_OPENSHELL_COMMAND=%s", c.OpenShell.Command),
 		// SUNDAE_OPENSHELL_TOKEN is deliberately omitted: these envs are
 		// handed to hook and git subprocesses, which never need the gateway
@@ -724,6 +731,7 @@ func DefaultConfig() *Config {
 			Enabled:       false,
 			Workspace:     "default",
 			TokenTTL:      24 * time.Hour,
+			ReadyTimeout:  DefaultReadyTimeout,
 			Command:       "bash -l",
 			ProvidersSync: DefaultProvidersSync,
 			SandboxPolicy: SandboxPolicySundae,
@@ -841,6 +849,12 @@ func (c *Config) validateOpenShell() error {
 	}
 	if oc.TokenTTL <= 0 {
 		errs = append(errs, errors.New("openshell: token_ttl must be positive"))
+	}
+	switch {
+	case oc.ReadyTimeout == 0:
+		oc.ReadyTimeout = DefaultReadyTimeout
+	case oc.ReadyTimeout < MinReadyTimeout:
+		errs = append(errs, fmt.Errorf("openshell: ready_timeout %s is too short: use at least %s", oc.ReadyTimeout, MinReadyTimeout))
 	}
 	if strings.TrimSpace(oc.Command) == "" {
 		errs = append(errs, errors.New("openshell: command must not be empty"))

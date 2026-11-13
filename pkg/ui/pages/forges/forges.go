@@ -65,6 +65,10 @@ func DefaultKeyMap() KeyMap {
 // OpenRepoMsg asks the frame to open an imported repository.
 type OpenRepoMsg struct{ Repo string }
 
+// ReposChangedMsg tells the home page that an operation of the tab added
+// repositories, so that it lists them again.
+type ReposChangedMsg struct{}
+
 // Messages.
 type (
 	// loadMsg is a read of the forges' status and of some forges'
@@ -91,6 +95,8 @@ type (
 		rows map[string]result
 		// notice is the line shown at the bottom.
 		notice notice
+		// reposChanged reports whether the operation added repositories.
+		reposChanged bool
 	}
 	branchMsg struct {
 		forge, path, repo, branch string
@@ -758,6 +764,7 @@ func (m *Forges) importCmd(forgeName string, repos []forge.RepoStatus, vcs proto
 			rk := rowKey(forgeName, r.Path)
 			switch r.Status {
 			case forge.ImportImported:
+				out.reposChanged = true
 				out.rows[rk] = result{short: "✓ imported", detail: r.Path + " imported as " + r.Repo + " (" + r.Sync.Summary() + ")"}
 			case forge.ImportExists:
 				out.rows[rk] = result{short: "✓ imported", detail: r.Path + " is already imported as " + r.Repo}
@@ -939,6 +946,9 @@ func (m *Forges) onOp(msg opMsg) tea.Cmd {
 		m.results[k] = r
 	}
 	m.notice = msg.notice
+	if msg.reposChanged {
+		return tea.Batch(m.loadCmd(msg.forge), func() tea.Msg { return ReposChangedMsg{} })
+	}
 	return m.loadCmd(msg.forge)
 }
 

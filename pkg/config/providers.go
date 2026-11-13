@@ -19,6 +19,13 @@ const (
 	// DefaultProvidersSync is how often declared providers are synced to
 	// the gateway when openshell.providers_sync is not set.
 	DefaultProvidersSync = time.Minute
+	// DefaultReadyTimeout is how long a session start waits for its
+	// sandbox to become ready when openshell.ready_timeout is unset. The
+	// first start of a large image pulls it and seeds the workspace
+	// volume from its /sandbox, which can take several minutes.
+	DefaultReadyTimeout = 15 * time.Minute
+	// MinReadyTimeout is the shortest openshell.ready_timeout accepted.
+	MinReadyTimeout = 30 * time.Second
 	// MinProvidersSync is the shortest openshell.providers_sync accepted.
 	MinProvidersSync = 10 * time.Second
 
