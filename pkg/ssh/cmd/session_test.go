@@ -92,9 +92,19 @@ func (f *fakeOpenShell) EnsureSandbox(_ context.Context, name string, req opensh
 		return sb, false, nil
 	}
 	sb := &openshell.Sandbox{Name: name, Labels: req.Labels, Annotations: req.Annotations}
+	sb.Spec.Providers = req.Providers
 	sb.Status.Phase = types.SandboxReady
 	f.sandboxes[name] = sb
 	return sb, true, nil
+}
+
+func (f *fakeOpenShell) SyncProviders(_ context.Context, sb *openshell.Sandbox, want []string) (openshell.ProviderChanges, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if cur, ok := f.sandboxes[sb.Name]; ok {
+		cur.Spec.Providers = want
+	}
+	return openshell.ProviderChanges{}, nil
 }
 
 func (f *fakeOpenShell) ResumeSandbox(_ context.Context, name string, labels map[string]string) (*openshell.Sandbox, error) {

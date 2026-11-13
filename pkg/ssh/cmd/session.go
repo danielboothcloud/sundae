@@ -336,9 +336,12 @@ type sessionJSON struct {
 	Repo    string `json:"repo"`
 	Name    string `json:"name"`
 	Profile string `json:"profile,omitempty"`
-	Sandbox string `json:"sandbox"`
-	Phase   string `json:"phase"`
-	Parked  bool   `json:"parked"`
+	// Providers are the OpenShell providers attached to the session's
+	// sandbox.
+	Providers []string `json:"providers,omitempty"`
+	Sandbox   string   `json:"sandbox"`
+	Phase     string   `json:"phase"`
+	Parked    bool     `json:"parked"`
 	// Park is how a parked session was parked: "memory" (its sandbox
 	// suspended, its program frozen) or "snapshot" (its sandbox deleted
 	// after /sandbox was saved to S3; its program was stopped and
@@ -370,18 +373,19 @@ type sessionJSON struct {
 func sessionToJSON(r sessionRow) sessionJSON {
 	rec := r.Record()
 	j := sessionJSON{
-		Repo:     r.Info.Repo,
-		Name:     r.Info.Name,
-		Profile:  r.Info.Profile,
-		Sandbox:  r.Info.Sandbox,
-		Phase:    r.Info.Phase,
-		Parked:   r.Parked(),
-		State:    string(rec.State),
-		Kind:     signals.Sanitize(string(rec.Kind), 0),
-		Progress: rec.Progress,
-		App:      signals.Sanitize(rec.App, 0),
-		Title:    signals.Sanitize(rec.Title, 0),
-		Msg:      signals.Sanitize(rec.Msg, 0),
+		Repo:      r.Info.Repo,
+		Name:      r.Info.Name,
+		Profile:   r.Info.Profile,
+		Providers: r.Info.Providers,
+		Sandbox:   r.Info.Sandbox,
+		Phase:     r.Info.Phase,
+		Parked:    r.Parked(),
+		State:     string(rec.State),
+		Kind:      signals.Sanitize(string(rec.Kind), 0),
+		Progress:  rec.Progress,
+		App:       signals.Sanitize(rec.App, 0),
+		Title:     signals.Sanitize(rec.Title, 0),
+		Msg:       signals.Sanitize(rec.Msg, 0),
 	}
 	if j.State == "" {
 		j.State = "none"

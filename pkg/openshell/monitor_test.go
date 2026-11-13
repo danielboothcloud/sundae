@@ -150,7 +150,7 @@ func (c *monitorClient) addSession(user testUser, repo, name string, phase types
 	c.fc.AddSandbox("default", &types.Sandbox{
 		Name:        sandbox,
 		Labels:      labels,
-		Annotations: sessionAnnotations(user.name, repo, name, ""),
+		Annotations: sessionAnnotations(user.name, repo, name, "", nil),
 		Status:      types.SandboxStatus{Phase: phase},
 	})
 	return sandbox

@@ -213,12 +213,19 @@ config:
       # keep for `session signals` and the TUI, across all users. In memory
       # only: the feed is empty after a restart. At most 100000.
       keep: 1000
-    # Named presets for `session start --profile <name>`. Empty fields fall
-    # back to openshell.image and openshell.command.
+    # Named presets for `session start --profile <name>`. Empty image and
+    # command fall back to openshell.image and openshell.command.
+    # `providers` names OpenShell providers (created on the gateway with
+    # `openshell provider create`) to attach to this profile's sandboxes
+    # only; their programs get the credentials as placeholders the sandbox
+    # proxy resolves. The provider profiles' binaries and endpoints, or the
+    # sandbox policy, must allow the requests. See the top-level README,
+    # "Providers".
     profiles: {}
     #  claude:
     #    image: ghcr.io/me/agent-claude:latest
     #    command: claude
+    #    providers: [my-claude, my-github]
     # The profile for sessions started without --profile, by repository name
     # glob ("*" does not cross "/", "**" does; the most specific match wins).
     repos: {}

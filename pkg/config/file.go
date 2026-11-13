@@ -216,20 +216,32 @@ sessions:
     # They are kept in memory only, so the feed is empty after a restart.
     # At most 100000.
     keep: {{ .Sessions.Signals.Keep }}
-  # Named presets for "session start --profile NAME". Empty fields fall back
-  # to openshell.image and openshell.command.
+  # Named presets for "session start --profile NAME". Empty image and
+  # command fall back to openshell.image and openshell.command. providers
+  # names OpenShell providers (created on the gateway with "openshell
+  # provider create") to attach to the sandboxes of this profile's sessions
+  # only; the session's program gets their credentials as placeholders that
+  # the gateway's proxy resolves. The sandbox network policy must allow the
+  # provider's endpoints.
 {{- if .Sessions.Profiles }}
   profiles:
 {{- range $name, $p := .Sessions.Profiles }}
     {{ printf "%q" $name }}:
       image: {{ printf "%q" $p.Image }}
       command: {{ printf "%q" $p.Command }}
+{{- if $p.Providers }}
+      providers:
+{{- range $p.Providers }}
+        - {{ printf "%q" . }}
+{{- end }}
+{{- end }}
 {{- end }}
 {{- else }}
   #profiles:
   #  claude:
   #    image: ghcr.io/me/agent-claude:latest
   #    command: claude
+  #    providers: [my-claude, my-github]
 {{- end }}
   # Profiles for sessions started without --profile, by repository name
   # glob. "*" does not cross "/", "**" does; case-insensitive. The most

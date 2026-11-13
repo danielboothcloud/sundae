@@ -251,7 +251,7 @@ func TestManagerPark(t *testing.T) {
 	}
 	h.fc.AddSandbox("default", &types.Sandbox{
 		Name:   SessionSandboxName("alice", "r", "stopped"),
-		Labels: ownerLabels(alice), Annotations: sessionAnnotations("alice", "r", "stopped", ""),
+		Labels: ownerLabels(alice), Annotations: sessionAnnotations("alice", "r", "stopped", "", nil),
 		Status: types.SandboxStatus{Phase: types.SandboxStopped},
 	})
 	if _, err := h.mgr.Park(ctx, alice, "r", "stopped"); err == nil || !strings.Contains(err.Error(), "only a running session can be parked") {

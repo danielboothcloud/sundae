@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/anmitsu/go-shlex"
 	"github.com/gobwas/glob"
@@ -153,6 +155,39 @@ type SessionProfile struct {
 	// Command is the program the session runs, split like a shell would.
 	// Empty uses openshell.command.
 	Command string `yaml:"command"`
+
+	// Providers names OpenShell providers to attach to the sandbox of
+	// every session of this profile. The providers are created on the
+	// gateway out of band (`openshell provider create`); the gateway keeps
+	// their credentials and gives the session opaque placeholders, which
+	// its proxy replaces with the real values on requests to the provider's
+	// endpoints. Sessions of other profiles get none of them.
+	Providers []string `yaml:"providers"`
+}
+
+// OpenShell's limits on provider names and attachments (openshell-server
+// 0.1.8, grpc/mod.rs MAX_NAME_LEN and MAX_PROVIDERS).
+const (
+	// MaxProviderNameLen is the longest provider name, in bytes.
+	MaxProviderNameLen = 253
+	// MaxProviders is how many providers a sandbox can have attached.
+	MaxProviders = 32
+)
+
+// validProviderName reports whether name is a provider name a profile may
+// list: what OpenShell accepts (not empty, at most MaxProviderNameLen
+// bytes), without spaces, commas or control characters, so the list fits
+// the comma-separated sundae.providers annotation.
+func validProviderName(name string) bool {
+	if name == "" || len(name) > MaxProviderNameLen || !utf8.ValidString(name) {
+		return false
+	}
+	for _, r := range name {
+		if r == ',' || unicode.IsSpace(r) || unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
 }
 
 // SessionRepoDefaults are the session defaults for matching repositories.
@@ -288,6 +323,20 @@ func (c *Config) validateSessions() error {
 				fail("%s.command %q is not a valid command line", key, p.Command)
 			}
 		}
+		var providers []string
+		for i, prov := range p.Providers {
+			prov = strings.TrimSpace(prov)
+			switch {
+			case !validProviderName(prov):
+				fail("%s.providers[%d] %q is not a valid OpenShell provider name: 1 to %d bytes without spaces, commas or control characters", key, i, prov, MaxProviderNameLen)
+			case !slices.Contains(providers, prov):
+				providers = append(providers, prov)
+			}
+		}
+		if len(providers) > MaxProviders {
+			fail("%s.providers lists %d providers; OpenShell attaches at most %d to a sandbox", key, len(providers), MaxProviders)
+		}
+		p.Providers = providers
 		sc.Profiles[name] = p
 	}
 

@@ -31,7 +31,11 @@
 #   disconnects. OpenShell starts exec'd commands with HOME=/sandbox and a
 #   cleared environment: image ENV values other than PATH do not reach them.
 #   osewa sessions start with a clean environment too and run the program
-#   through `/bin/sh -l`, so login-shell settings go in /etc/profile.d.
+#   through `/bin/sh -l`, so login-shell settings go in /etc/profile.d. For a
+#   session whose profile has OpenShell providers, Sundae stages the exec
+#   environment (the providers' credential placeholders, the proxy's CA
+#   variables) in /tmp/sundae/session-env.<pid>, which that shell exports
+#   and deletes before starting the program.
 # - osewa is installed here as /usr/local/bin/osewa, the release Sundae
 #   pins. Sundae uses it when `osewa version` matches its pin; otherwise
 #   it uploads the pinned build to /sandbox/.local/lib/sundae. It starts
@@ -42,8 +46,8 @@
 # - Sundae writes the sandbox's short-lived git token to
 #   /tmp/sundae/gitconfig (mode 0600) on every session start and attach,
 #   and ~/.gitconfig includes that file; the token never lands in /sandbox.
-#   The bootstrap uses sh, git, grep, gzip, sha256sum and base64, and flock
-#   when present; all are in this image.
+#   The bootstrap uses sh, git, grep, gzip, sha256sum, base64, env and sed,
+#   and flock when present; all are in this image.
 # - With S3 snapshots on (snapshots.s3), Sundae archives /sandbox with GNU
 #   tar and gzip into /tmp/sundae, checks it with md5sum and uploads it
 #   with curl to a presigned URL; a restore streams curl | gzip -d | tar -x.

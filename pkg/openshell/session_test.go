@@ -143,9 +143,11 @@ type fakeSandbox struct {
 	servers  int      // osewa servers started
 	sessions map[string]bool
 	nextID   int
-	// newArgv is the argv, after the working directory, of the last osewa
-	// session created.
-	newArgv []string
+	// newArgv is the working directory and argv of the last osewa
+	// session created, and newEnvFile where its environment was staged
+	// ("" for none).
+	newArgv    []string
+	newEnvFile string
 	// identity maps a checkout to the git identity set in it, as
 	// "name <email>", and jjIdentity to the TOML values given to jj.
 	identity   map[string]string
@@ -355,7 +357,8 @@ func (f *fakeExec) Run(_ context.Context, _, sandbox string, command []string, o
 		id := fmt.Sprintf("osewa%d", b.nextID)
 		b.sessions[id] = true
 		b.files[idf] = id + "\n"
-		b.newArgv = append([]string(nil), a[3:]...)
+		b.newArgv = append([]string{a[3]}, a[5:]...)
+		b.newEnvFile = a[4]
 		return ok("created " + id + "\n")
 	case gitCredentialsName:
 		b.files[a[1]] = env(o, "SUNDAE_GITCONFIG")
@@ -551,11 +554,12 @@ func TestStartNewSession(t *testing.T) {
 
 	// The program runs in the checkout, through a login shell.
 	newCall := h.exec.last(s.Sandbox, osewaNewName)
-	if !strings.Contains(newCall.command[2], `/bin/sh -lc 'cd "$1" || exit; shift; exec "$@"' sundae-session "$dir" "$@"`) {
+	if !strings.Contains(newCall.command[2], `cd "$1" || exit; shift 2; exec "$@"' sundae-session "$dir" "$envf" "$@"`) {
 		t.Fatalf("new script = %q", newCall.command[2])
 	}
-	if got := strings.Join(h.exec.boxes[s.Sandbox].newArgv, " "); got != "/sandbox/r bash -l" {
-		t.Fatalf("osewa new argv = %q", got)
+	// Without providers, no environment is staged for it.
+	if got := strings.Join(h.exec.boxes[s.Sandbox].newArgv, " "); got != "/sandbox/r bash -l" || h.exec.boxes[s.Sandbox].newEnvFile != "" {
+		t.Fatalf("osewa new argv = %q, env file %q", got, h.exec.boxes[s.Sandbox].newEnvFile)
 	}
 
 	// jj repos clone colocated, without credentials in the URL or the env.
@@ -889,7 +893,7 @@ func TestOsewaSessionReuse(t *testing.T) {
 	b.files[osewaSessionFile] = "raced\n"
 	b.sessions["raced"] = true
 	// Pretend the list showed the old record.
-	id, started, err := h.mgr.newOsewaSession(ctx, "sundae-alice-r", "/usr/local/bin/osewa", "/sandbox/r", []string{"bash"}, fourth.OsewaID)
+	id, started, err := h.mgr.newOsewaSession(ctx, "sundae-alice-r", "/usr/local/bin/osewa", "/sandbox/r", []string{"bash"}, fourth.OsewaID, false)
 	if err != nil || id != "raced" || started {
 		t.Fatalf("raced: id=%q started=%v err=%v", id, started, err)
 	}

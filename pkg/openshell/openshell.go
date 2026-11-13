@@ -56,6 +56,11 @@ const (
 	// AnnotationProfile holds the profile the session was created from;
 	// empty when none applied.
 	AnnotationProfile = "sundae.profile"
+	// AnnotationProviders holds the OpenShell providers the profile listed
+	// when the sandbox was created, comma-separated; absent for none. The
+	// sandbox's Spec.Providers is what is attached now: start and attach
+	// reconcile it with the profile's current list.
+	AnnotationProviders = "sundae.providers"
 
 	// DefaultSessionName is the session name used when none is given. Its
 	// sandbox keeps the name SandboxName gives, so sandboxes created before
@@ -112,6 +117,66 @@ type SandboxRequest struct {
 	Labels map[string]string
 	// Annotations are set on creation.
 	Annotations map[string]string
+	// Providers are the OpenShell providers attached to the sandbox on
+	// creation. An existing sandbox's are left alone; see SyncProviders.
+	Providers []string
+}
+
+// ProviderChanges is what SyncProviders changed.
+type ProviderChanges struct {
+	// Attached and Detached are the providers attached and detached.
+	Attached, Detached []string
+}
+
+// Changed reports whether any provider was attached or detached.
+func (c ProviderChanges) Changed() bool { return len(c.Attached)+len(c.Detached) > 0 }
+
+// MissingProviderError is returned when the gateway refuses to attach a
+// provider because it does not exist.
+type MissingProviderError struct {
+	// Provider is the provider's name.
+	Provider string
+	// Err is the gateway's error.
+	Err error
+}
+
+func (e *MissingProviderError) Error() string {
+	return fmt.Sprintf("openshell: provider %q does not exist on the OpenShell gateway: %v", e.Provider, e.Err)
+}
+
+func (e *MissingProviderError) Unwrap() error { return e.Err }
+
+// missingProviderRe matches the gateway's refusal of a provider that does
+// not exist, a FailedPrecondition the SDK reports as a Conflict
+// (openshell-server 0.1.8 grpc/sandbox.rs, handle_create_sandbox and
+// handle_attach_sandbox_provider).
+var missingProviderRe = regexp.MustCompile(`^provider '(.+)' not found$`)
+
+// asMissingProvider returns err as a *MissingProviderError when it is the
+// gateway's refusal of a provider that does not exist, else err.
+func asMissingProvider(err error) error {
+	var se *v1.StatusError
+	if !errors.As(err, &se) || se.Code != v1.ErrorConflict {
+		return err
+	}
+	if m := missingProviderRe.FindStringSubmatch(se.Message); m != nil {
+		return &MissingProviderError{Provider: m[1], Err: err}
+	}
+	return err
+}
+
+// grpcAborted is the gRPC code Aborted, which the gateway returns for a
+// resource version conflict.
+const grpcAborted = 10
+
+// isVersionConflict reports whether err is the gateway's resource version
+// conflict: a concurrent change it could not merge.
+func isVersionConflict(err error) bool {
+	var se *v1.StatusError
+	if !errors.As(err, &se) || se.Code != v1.ErrorConflict {
+		return false
+	}
+	return se.GRPCCode == grpcAborted || (se.ErrorInfo != nil && se.ErrorInfo.Reason == "RESOURCE_VERSION_CONFLICT")
 }
 
 // Client is the narrow OpenShell surface Sundae needs. It is satisfied by
@@ -136,6 +201,13 @@ type Client interface {
 	// DeleteSandbox deletes the named sandbox. An absent sandbox is not an
 	// error.
 	DeleteSandbox(ctx context.Context, name string) error
+	// SyncProviders makes the OpenShell providers attached to sb exactly
+	// want: it attaches the missing ones, in order, and detaches the
+	// others. sb is the sandbox as last read; it is read again once when a
+	// concurrent change conflicts. A provider the gateway says does not
+	// exist stops it with a *MissingProviderError. What it changed before
+	// an error is returned with it.
+	SyncProviders(ctx context.Context, sb *Sandbox, want []string) (ProviderChanges, error)
 	// SuspendSandbox parks the named sandbox: it suspends it, which keeps
 	// its memory where the compute driver supports that, and waits until it
 	// is Suspended. A gateway that cannot suspend returns an error for which
@@ -236,7 +308,7 @@ func (c *sdkClient) existing(ctx context.Context, sb *Sandbox, req SandboxReques
 
 // create creates the sandbox and waits for it, deleting it on failure.
 func (c *sdkClient) create(ctx context.Context, name string, req SandboxRequest) (*Sandbox, bool, error) {
-	spec := &v1.SandboxSpec{}
+	spec := &v1.SandboxSpec{Providers: slices.Clone(req.Providers)}
 	if req.Image != "" {
 		spec.Template = &v1.SandboxTemplate{Image: req.Image}
 	}
@@ -256,7 +328,7 @@ func (c *sdkClient) create(ctx context.Context, name string, req SandboxRequest)
 			return c.existing(ctx, sb, req)
 		}
 		c.cleanup(name)
-		return nil, false, fmt.Errorf("openshell: create sandbox %q: %w", name, err)
+		return nil, false, fmt.Errorf("openshell: create sandbox %q: %w", name, asMissingProvider(err))
 	}
 
 	sb, err := c.waitReady(ctx, name)
@@ -382,6 +454,56 @@ func (c *sdkClient) ResumeSandbox(ctx context.Context, name string, labels map[s
 func (c *sdkClient) DeleteSandbox(ctx context.Context, name string) error {
 	if _, err := c.sandboxes.Delete(ctx, c.workspace, name, v1.DeleteOptions{AllowMissing: true}); err != nil && !IsNotFound(err) {
 		return fmt.Errorf("openshell: delete sandbox %q: %w", name, err)
+	}
+	return nil
+}
+
+// SyncProviders passes expected resource version 0 to AttachProvider and
+// DetachProvider: the gateway then applies the change to the sandbox as it
+// stands, retrying its own compare-and-swap (openshell-server 0.1.8
+// grpc/sandbox.rs, update_sandbox_cas), and both are idempotent, so a
+// concurrent change to the providers is merged rather than refused. Should
+// the gateway still report a resource version conflict, the sandbox is read
+// again and the difference recomputed, once.
+func (c *sdkClient) SyncProviders(ctx context.Context, sb *Sandbox, want []string) (ProviderChanges, error) {
+	var changes ProviderChanges
+	name := sb.Name
+	for attempt := 0; ; attempt++ {
+		err := c.syncProviders(ctx, sb, want, &changes)
+		if err == nil || attempt > 0 || !isVersionConflict(err) {
+			return changes, err
+		}
+		if sb, err = c.sandboxes.Get(ctx, c.workspace, name); err != nil {
+			return changes, fmt.Errorf("openshell: get sandbox %q: %w", name, err)
+		}
+	}
+}
+
+func (c *sdkClient) syncProviders(ctx context.Context, sb *Sandbox, want []string, changes *ProviderChanges) error {
+	have := sb.Spec.Providers
+	for _, p := range want {
+		if slices.Contains(have, p) {
+			continue
+		}
+		r, err := c.sandboxes.AttachProvider(ctx, c.workspace, sb.Name, p, 0)
+		if err != nil {
+			return fmt.Errorf("openshell: attach provider %q to sandbox %q: %w", p, sb.Name, asMissingProvider(err))
+		}
+		if r.Attached {
+			changes.Attached = append(changes.Attached, p)
+		}
+	}
+	for _, p := range have {
+		if slices.Contains(want, p) {
+			continue
+		}
+		r, err := c.sandboxes.DetachProvider(ctx, c.workspace, sb.Name, p, 0)
+		if err != nil {
+			return fmt.Errorf("openshell: detach provider %q from sandbox %q: %w", p, sb.Name, err)
+		}
+		if r.Detached {
+			changes.Detached = append(changes.Detached, p)
+		}
 	}
 	return nil
 }

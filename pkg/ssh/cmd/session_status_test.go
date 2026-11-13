@@ -288,3 +288,31 @@ func TestSessionBridgeCounting(t *testing.T) {
 	_, _, _ = runSessionCmd(t, cctx, "attach", "r")
 	is.Equal(mon.Bridges(sandbox), 0)
 }
+
+// `session ls --json` lists the OpenShell providers attached to a
+// session's sandbox.
+func TestSessionListProviders(t *testing.T) {
+	is := is.New(t)
+	ctx, be, user, _ := newSessionTestContext(t)
+	config.FromContext(ctx).Sessions.Profiles["claude"] = config.SessionProfile{Command: "claude", Providers: []string{"my-claude", "my-github"}}
+	_, err := be.CreateRepository(ctx, "r", user, proto.RepositoryOptions{})
+	is.NoErr(err)
+	noPty := context.WithValue(ctx, sshutils.ContextKeySession, &fakeSSHSession{noPty: true})
+	_, _, err = runSessionCmd(t, noPty, "start", "r", "-d", "--profile", "claude")
+	is.NoErr(err)
+	_, _, err = runSessionCmd(t, noPty, "start", "r", "-d", "-n", "plain")
+	is.NoErr(err)
+
+	stdout, _, err := runSessionCmd(t, ctx, "ls", "--json")
+	is.NoErr(err)
+	var got []sessionJSON
+	is.NoErr(json.Unmarshal([]byte(stdout), &got))
+	is.Equal(len(got), 2)
+	providers := map[string][]string{}
+	for _, s := range got {
+		providers[s.Name] = s.Providers
+	}
+	is.Equal(providers["main"], []string{"my-claude", "my-github"})
+	is.Equal(providers["plain"], nil)
+	is.True(!strings.Contains(stdout, `"providers":null`))
+}

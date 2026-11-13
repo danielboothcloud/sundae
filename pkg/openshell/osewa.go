@@ -59,6 +59,11 @@ var (
 	// sandbox's program. The osewa CLI cannot tag a session, so the id is
 	// how Sundae finds it again.
 	osewaSessionFile = path.Join(SandboxRoot, ".config/sundae/osewa-session")
+	// osewaSessionEnvFile is where the environment a new osewa session's
+	// program is given is staged, with the creating shell's PID appended:
+	// in /tmp/sundae, outside /sandbox and so outside snapshots, and
+	// removed by the session as soon as it has read it.
+	osewaSessionEnvFile = path.Join(gitCredentialDir, "session-env")
 )
 
 const (
@@ -181,18 +186,48 @@ exec "$bin" local ls`
 
 	osewaNewName = "sundae-osewa-new"
 	// $1: the binary, $2: the session id file, $3: the id the caller saw
-	// there, $4: the working directory, then the program's argv. Creates
-	// the osewa session and records its id, unless someone else recorded a
-	// new one meanwhile (serialized with flock where the image has it).
-	// Prints "created ID" or "existing ID".
+	// there, $4: the working directory, $5: where to stage the session's
+	// environment (empty for none), then the program's argv. Creates the
+	// osewa session and records its id, unless someone else recorded a new
+	// one meanwhile (serialized with flock where the image has it). Prints
+	// "created ID" or "existing ID".
+	//
+	// An osewa session's program starts with a clean environment: osewa
+	// 0.1.4 builds it from the account and passes on only the locale and
+	// time zone of its own (crates/paths/src/account.rs, session_env), and
+	// `osewa new` sends no environment of the caller's (crates/osewa/src/
+	// commands.rs, new_session). The OpenShell supervisor gives provider
+	// credentials, as placeholders, to the processes it starts: this
+	// exec's environment (openshell-sandbox 0.1.8 boundary_exec.rs,
+	// LocalBoundaryExec::command). With $5 set, the script writes that
+	// environment, less the account's basics osewa sets and osewa's and
+	// Sundae's own settings, to $5.<pid> (mode 0600) as export lines; the
+	// session's shell reads them and removes the file before it starts the
+	// program, which passes them on to everything it runs. The file holds
+	// placeholders, never credentials: the supervisor keeps the real
+	// values in its proxy.
 	osewaNewScript = `set -e
-bin=$1 idf=$2 seen=$3 dir=$4
-shift 4
+bin=$1 idf=$2 seen=$3 dir=$4 envf=$5
+shift 5
+sundae_env() {
+	for _n in $(env | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p'); do
+		case $_n in
+		HOME|USER|LOGNAME|SHELL|PATH|TERM|PWD|OLDPWD|SHLVL|_|OSEWA_*|SUNDAE_*) continue ;;
+		esac
+		eval "[ -n \"\${$_n+x}\" ]" || continue
+		eval "_v=\$$_n"
+		printf "export %s='%s'\n" "$_n" "$(printf '%s' "$_v" | sed "s/'/'\\\\''/g")"
+	done
+}
 mkdir -p "$(dirname "$idf")"
 if command -v flock >/dev/null 2>&1; then exec 9>"$idf.lock"; flock 9; fi
 cur=$(cat "$idf" 2>/dev/null || true)
 if [ "$cur" != "$seen" ]; then echo "existing $cur"; exit 0; fi
-id=$("$bin" new ` + osewaHost + ` -- /bin/sh -lc 'cd "$1" || exit; shift; exec "$@"' sundae-session "$dir" "$@")
+if [ -n "$envf" ]; then
+	envf=$envf.$$
+	(umask 077; sundae_env > "$envf")
+fi
+id=$("$bin" new ` + osewaHost + ` -- /bin/sh -lc 'if [ -n "$2" ]; then if [ -r "$2" ]; then . "$2"; else echo "sundae: $2 is gone; starting without the OpenShell provider credentials" >&2; fi; rm -f "$2"; fi; cd "$1" || exit; shift 2; exec "$@"' sundae-session "$dir" "$envf" "$@") || { [ -z "$envf" ] || rm -f "$envf"; exit 1; }
 printf '%s\n' "$id" > "$idf.part"
 mv -f "$idf.part" "$idf"
 echo "created $id"`
@@ -386,8 +421,10 @@ func (ls osewaList) find(id string) (osewaSessionInfo, bool) {
 // ensureOsewaSession returns the id of the osewa session running the
 // session's program, starting the program in a new osewa session when the
 // recorded one is gone, has exited or is held by an incompatible osewa
-// build. started reports whether it did.
-func (m *Manager) ensureOsewaSession(ctx context.Context, sandbox, bin, workDir string, command []string) (id string, started bool, err error) {
+// build. started reports whether it did. With providers, a program it
+// starts gets the OpenShell exec environment, which carries their
+// credential placeholders (see osewaNewScript).
+func (m *Manager) ensureOsewaSession(ctx context.Context, sandbox, bin, workDir string, command []string, providers bool) (id string, started bool, err error) {
 	out, err := m.script(ctx, sandbox, osewaListName, osewaListScript, m.osewaClientEnv(), bin, osewaSessionFile)
 	if err != nil {
 		return "", false, err
@@ -402,14 +439,19 @@ func (m *Manager) ensureOsewaSession(ctx context.Context, sandbox, bin, workDir 
 		return seen, false, nil
 	}
 
-	return m.newOsewaSession(ctx, sandbox, bin, workDir, command, seen)
+	return m.newOsewaSession(ctx, sandbox, bin, workDir, command, seen, providers)
 }
 
 // newOsewaSession starts command in workDir in a new osewa session and
 // records its id, unless the recorded id is no longer seen, which means a
 // concurrent start recorded a new session first: that one is returned.
-func (m *Manager) newOsewaSession(ctx context.Context, sandbox, bin, workDir string, command []string, seen string) (id string, started bool, err error) {
-	args := append([]string{bin, osewaSessionFile, seen, workDir}, command...)
+// With providers, the program gets the OpenShell exec environment.
+func (m *Manager) newOsewaSession(ctx context.Context, sandbox, bin, workDir string, command []string, seen string, providers bool) (id string, started bool, err error) {
+	envFile := ""
+	if providers {
+		envFile = osewaSessionEnvFile
+	}
+	args := append([]string{bin, osewaSessionFile, seen, workDir, envFile}, command...)
 	out, err := m.script(ctx, sandbox, osewaNewName, osewaNewScript, m.osewaClientEnv(), args...)
 	if err != nil {
 		return "", false, err

@@ -465,6 +465,8 @@ sessions:
     claude:
       image: ghcr.io/example/agent-claude:latest  # empty: openshell.image
       command: claude                             # empty: openshell.command
+      # OpenShell providers attached to this profile's sandboxes only.
+      providers: [my-claude, my-github]
   # The profile for sessions started without --profile, by repository glob.
   repos:
     "infra/*":
@@ -502,6 +504,79 @@ skipped with a warning. `--image` overrides the image. A session keeps the
 profile it was created from: `--profile` and `--image` are ignored, with a
 warning, when it already exists. Profile names are DNS labels; every
 `repos` entry must name a defined profile.
+
+**Providers.** `sessions.profiles.<name>.providers` lists
+[OpenShell providers](https://github.com/NVIDIA/OpenShell/blob/v0.1.8/docs/how-it-works/providers/overview.mdx)
+to attach to the sandboxes of that profile's sessions, so a secret is
+available only to sessions of the profiles that list its provider. Sessions
+without a profile get none (there is no default list). Sundae attaches
+providers by name; create them on the gateway yourself, e.g.
+`openshell provider create --name my-claude --type anthropic --from-existing`.
+The gateway keeps the credentials: the sandbox only ever sees opaque
+placeholders (`openshell:resolve:env:...`) in its environment variables
+(`ANTHROPIC_API_KEY`, `GITHUB_TOKEN`, ...), which the sandbox proxy replaces
+with the real value on requests to the provider's endpoints. Names are 1 to
+253 bytes without spaces, commas or control characters, at most 32 per
+profile; duplicates are dropped.
+
+- A new session's sandbox is created with the profile's providers (recorded
+  in its `sundae.providers` annotation). A provider that does not exist
+  fails `session start` with an error naming it and the profile.
+- On every `session start` and `session attach` of an existing session,
+  Sundae makes the sandbox's providers match its profile's current list:
+  it attaches the missing ones and detaches the others, including any
+  attached by hand with `openshell sandbox provider attach`. A provider
+  that does not exist fails the command; any other failure is a warning,
+  and the session keeps the providers it has. A session whose profile is no
+  longer configured keeps its providers.
+- OpenShell gives a process the placeholders of the providers attached when
+  it starts, and never changes a running process's environment. A running
+  program keeps its credentials after an attach changes the providers
+  (exit it and attach again to restart it with the new set); a detached
+  provider's placeholders stop resolving at once. A sandbox applies a
+  change within its policy poll interval (10 seconds by default), so a
+  program started within that time of an attach may miss the new
+  provider: start it again.
+- osewa starts a session's program with a clean environment, so for a
+  session with providers Sundae hands the program the environment
+  OpenShell gives exec'd commands: on creating the osewa session it writes
+  that environment (the provider placeholders and settings, the
+  `SSL_CERT_FILE`-style CA variables of the sandbox proxy, `SANDBOX`),
+  less `HOME`, `USER`, `LOGNAME`, `SHELL`, `PATH`, `TERM` and osewa's and
+  Sundae's own settings, to `/tmp/sundae/session-env.<pid>` (mode 0600,
+  outside `/sandbox` and so outside snapshots); the session's login shell
+  exports it and deletes the file before it starts the program, which
+  passes it on to everything it runs (`bash -l` included). The file holds
+  placeholders, never credentials. Sessions without providers get exactly
+  the environment they got before.
+- `session ls --json` lists each session's attached `providers`.
+
+A placeholder only resolves when the sandbox's network policy lets the
+calling binary reach the endpoint, the endpoint is in the provider's
+credential binding, and the credential is in the declared place (the
+`Authorization` header by default); see "How Credential Injection Works" in
+the providers overview. Sundae does not manage sandbox policy. What the
+operator must provide:
+
+- **Provider profiles.** A provider's type is an imported provider profile
+  (`openshell profile import`); its `endpoints` bind the credential and its
+  `binaries` must be the paths of the client programs in your sandbox image
+  (`/usr/bin/curl`, `/usr/local/bin/claude`, ...). A profile whose binaries
+  do not match the image has its credential withheld and its traffic denied
+  ([Profiles](https://github.com/NVIDIA/OpenShell/blob/v0.1.8/docs/how-it-works/providers/profiles.mdx)).
+  Attached providers add their profile's `_provider_*` network policy
+  entries to the sandbox's effective policy, so a profile that covers its
+  endpoints and binaries needs no policy of yours.
+- **Endpoints outside a profile.** An endpointless profile binds only
+  through a sandbox policy endpoint naming the provider instance
+  (`credential_binding: {provider: my-api}`), and any endpoint the agent
+  reaches that the provider policy does not allow needs a
+  `network_policies` entry like the ones below.
+- **HTTPS inspection.** The proxy substitutes credentials only in traffic
+  it handles as HTTP: an endpoint with `tls: skip` or a raw tunnel never
+  resolves a placeholder. The programs must trust the sandbox proxy's CA,
+  which the forwarded `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`,
+  `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE` and `GIT_SSL_CAINFO` point at.
 
 **Git identity.** A sandbox has no git or jj identity of its own, so
 without one the first `git commit` fails and jj commits have no author.

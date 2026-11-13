@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,6 +97,44 @@ func TestValidateSessions(t *testing.T) {
 			func(c *Config) { c.Sessions.Profiles["claude"] = SessionProfile{Command: `claude "unterminated`} },
 			`sessions.profiles.claude.command "claude \"unterminated" is not a valid command line`,
 		},
+		"profile providers": {
+			func(c *Config) {
+				c.Sessions.Profiles["claude"] = SessionProfile{Providers: []string{"my-claude", " my-github ", "my-claude"}}
+			}, "",
+		},
+		"profile provider empty": {
+			func(c *Config) { c.Sessions.Profiles["claude"] = SessionProfile{Providers: []string{"ok", "  "}} },
+			`sessions.profiles.claude.providers[1] "" is not a valid OpenShell provider name`,
+		},
+		"profile provider comma": {
+			func(c *Config) { c.Sessions.Profiles["claude"] = SessionProfile{Providers: []string{"a,b"}} },
+			`sessions.profiles.claude.providers[0] "a,b" is not a valid OpenShell provider name`,
+		},
+		"profile provider space": {
+			func(c *Config) { c.Sessions.Profiles["claude"] = SessionProfile{Providers: []string{"my claude"}} },
+			`sessions.profiles.claude.providers[0] "my claude"`,
+		},
+		"profile provider too long": {
+			func(c *Config) {
+				c.Sessions.Profiles["claude"] = SessionProfile{Providers: []string{strings.Repeat("p", MaxProviderNameLen+1)}}
+			},
+			"sessions.profiles.claude.providers[0]",
+		},
+		"profile provider longest": {
+			func(c *Config) {
+				c.Sessions.Profiles["claude"] = SessionProfile{Providers: []string{strings.Repeat("p", MaxProviderNameLen)}}
+			}, "",
+		},
+		"profile too many providers": {
+			func(c *Config) {
+				var ps []string
+				for i := range MaxProviders + 1 {
+					ps = append(ps, fmt.Sprintf("p%d", i))
+				}
+				c.Sessions.Profiles["claude"] = SessionProfile{Providers: ps}
+			},
+			"sessions.profiles.claude.providers lists 33 providers; OpenShell attaches at most 32 to a sandbox",
+		},
 		"repo without profile": {
 			func(c *Config) { c.Sessions.Repos["x/*"] = SessionRepoDefaults{} },
 			`sessions.repos["x/*"].profile is required`,
@@ -133,6 +172,20 @@ func TestValidateSessions(t *testing.T) {
 	}
 }
 
+func TestValidateProfileProviders(t *testing.T) {
+	is := is.New(t)
+	cfg := DefaultConfig()
+	cfg.DataPath = t.TempDir()
+	cfg.Sessions.Profiles = map[string]SessionProfile{
+		"claude": {Providers: []string{" my-claude", "my-github", "my-claude ", "my-github"}},
+		"shell":  {},
+	}
+	is.NoErr(cfg.Validate())
+	// Trimmed and deduplicated, in order.
+	is.Equal(cfg.Sessions.Profiles["claude"].Providers, []string{"my-claude", "my-github"})
+	is.Equal(cfg.Sessions.Profiles["shell"].Providers, nil)
+}
+
 func TestRepoProfile(t *testing.T) {
 	is := is.New(t)
 	s := SessionsConfig{Repos: map[string]SessionRepoDefaults{
@@ -165,7 +218,8 @@ func TestSessionsConfigFileRoundTrip(t *testing.T) {
 	cfg.Sessions.Suspend = SessionSuspendConfig{Enabled: false, After: 2 * time.Hour}
 	cfg.Sessions.Signals.Keep = 250
 	cfg.Sessions.Profiles = map[string]SessionProfile{
-		"claude": {Image: "ghcr.io/me/agent-claude:latest", Command: `claude --model "opus"`},
+		"claude": {Image: "ghcr.io/me/agent-claude:latest", Command: `claude --model "opus"`, Providers: []string{"my-claude", "gh.work"}},
+		"shell":  {},
 	}
 	cfg.Sessions.Repos = map[string]SessionRepoDefaults{"infra/*": {Profile: "claude"}}
 	is.NoErr(cfg.WriteConfig())
@@ -178,6 +232,7 @@ func TestSessionsConfigFileRoundTrip(t *testing.T) {
 	is.Equal(got.Sessions.Suspend, SessionSuspendConfig{Enabled: false, After: 2 * time.Hour, Fallback: SuspendFallbackNone})
 	is.Equal(got.Sessions.Signals.Keep, 250)
 	is.Equal(got.Sessions.Profiles["claude"], cfg.Sessions.Profiles["claude"])
+	is.Equal(got.Sessions.Profiles["shell"].Providers, nil)
 	is.Equal(got.Sessions.Repos["infra/*"].Profile, "claude")
 }
 
@@ -197,6 +252,7 @@ func TestSessionsUnknownKeys(t *testing.T) {
   profiles:
     claude:
       agent: claude
+      provider: [my-claude]
   repos:
     "infra/*":
       profil: claude
@@ -210,7 +266,8 @@ func TestSessionsUnknownKeys(t *testing.T) {
 		"line 7: unknown key sessions.suspend.idle",
 		"line 9: unknown key sessions.signals.max",
 		"line 12: unknown key sessions.profiles.<name>.agent",
-		"line 15: unknown key sessions.repos.<name>.profil",
+		"line 13: unknown key sessions.profiles.<name>.provider",
+		"line 16: unknown key sessions.repos.<name>.profil",
 	} {
 		is.True(strings.Contains(err.Error(), want)) // missing: want
 	}

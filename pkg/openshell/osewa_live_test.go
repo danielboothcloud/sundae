@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,16 +25,32 @@ import (
 // OSEWA_HOME) set to home instead of /sandbox. It lists one Ready sandbox.
 type localClient struct {
 	home, bin, sandbox string
+	// supervisorEnv is what the OpenShell supervisor adds to every exec's
+	// environment, such as provider placeholders; the exec request's own
+	// environment wins over it, as in openshell-sandbox 0.1.8
+	// (boundary_exec.rs, LocalBoundaryExec::command).
+	supervisorEnv map[string]string
 }
 
 func (c *localClient) Run(ctx context.Context, _ string, command []string, opts ExecOptions) (*ExecResult, error) {
 	if err := gatewayLimits(command, opts); err != nil {
 		return nil, err
 	}
-	env := maps.Clone(opts.Env)
+	env := maps.Clone(c.supervisorEnv)
+	if env == nil {
+		env = map[string]string{}
+	}
+	maps.Copy(env, opts.Env)
 	env["HOME"], env["OSEWA_HOME"] = c.home, c.home
 	env["PATH"] = c.bin + ":/usr/bin:/bin"
-	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
+	prog := command[0]
+	if p := filepath.Join(c.bin, prog); !strings.Contains(prog, "/") {
+		if _, err := os.Stat(p); err == nil {
+			// As the PATH below would find it.
+			prog = p
+		}
+	}
+	cmd := exec.CommandContext(ctx, prog, command[1:]...)
 	cmd.Dir = c.home
 	for k, v := range env {
 		cmd.Env = append(cmd.Env, k+"="+v)
@@ -75,6 +92,10 @@ func (c *localClient) ResumeSandbox(context.Context, string, map[string]string) 
 func (c *localClient) DeleteSandbox(context.Context, string) error { return errors.ErrUnsupported }
 func (c *localClient) SuspendSandbox(context.Context, string) (*Sandbox, error) {
 	return nil, ErrSuspendUnsupported
+}
+
+func (c *localClient) SyncProviders(context.Context, *Sandbox, []string) (ProviderChanges, error) {
+	return ProviderChanges{}, errors.ErrUnsupported
 }
 
 func (c *localClient) Upload(context.Context, string, string, string) error {
@@ -174,7 +195,7 @@ wait_for step2
 emit 'state=done:app=sundae-test:title=VGVzdHM=:msg=QWxsIHRlc3RzIHBhc3M='
 wait_for step3
 exit 7`
-	id, started, err := m.ensureOsewaSession(ctx, lc.sandbox, filepath.Join(binDir, "osewa"), work, []string{"/bin/sh", "-c", program})
+	id, started, err := m.ensureOsewaSession(ctx, lc.sandbox, filepath.Join(binDir, "osewa"), work, []string{"/bin/sh", "-c", program}, false)
 	if err != nil || !started {
 		t.Fatalf("session: id=%q started=%v err=%v", id, started, err)
 	}

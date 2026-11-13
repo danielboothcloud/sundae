@@ -180,6 +180,14 @@ type Session struct {
 	Sandbox string
 	// Profile is the profile the session was created from; empty for none.
 	Profile string
+	// Providers are the OpenShell providers the session has: those its
+	// profile lists, or, for a profile no longer configured, those
+	// attached to its sandbox. A program this call starts gets their
+	// credentials' placeholders (see osewaNewScript).
+	Providers []string
+	// ProviderChanges is what this call attached and detached to make an
+	// existing sandbox's providers match its profile.
+	ProviderChanges ProviderChanges
 	// Created reports whether the sandbox was created by this call.
 	Created bool
 	// Cloned reports whether this call cloned the repository.
@@ -218,6 +226,9 @@ type Info struct {
 	Name string
 	// Profile is the profile the session was created from; empty for none.
 	Profile string
+	// Providers are the OpenShell providers attached to the sandbox, as
+	// the gateway lists them; nil for a session parked to its snapshot.
+	Providers []string
 	// Sandbox is the sandbox name.
 	Sandbox string
 	// Phase is the sandbox phase; PhaseSnapshot for a session parked to
@@ -316,7 +327,10 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 	// first, to say so. A session parked to its snapshot has no sandbox,
 	// only its marker.
 	existing, getErr := m.client.GetSandbox(ctx, sandbox)
-	unparked := getErr == nil && existing != nil && isParkedPhase(existing.Status.Phase)
+	if getErr != nil {
+		existing = nil
+	}
+	unparked := existing != nil && isParkedPhase(existing.Status.Phase)
 	var parked *ParkedSnapshot
 	if m.snaps != nil && IsNotFound(getErr) {
 		parked, err = m.snaps.readMarker(ctx, opts.User.ID(), sandbox)
@@ -341,6 +355,24 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 		p = m.sessions.Profiles[profile]
 	}
 
+	// An existing sandbox's providers are made to match its profile
+	// before it is resumed, so a program that starts with the sandbox
+	// (after a park whose memory could not be restored) gets them. A
+	// sandbox of someone else's is left to EnsureSandbox and
+	// ResumeSandbox to refuse.
+	var (
+		changes ProviderChanges
+		synced  bool
+	)
+	if existing != nil && owns(existing, ownerLabels(opts.User)) {
+		if _, ok := managedSandbox(existing); ok {
+			if changes, err = m.syncProviders(ctx, existing, name, progress); err != nil {
+				return nil, err
+			}
+			synced = true
+		}
+	}
+
 	var (
 		sb      *Sandbox
 		created bool
@@ -361,8 +393,13 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 		sb, created, err = m.client.EnsureSandbox(ctx, sandbox, SandboxRequest{
 			Image:       image,
 			Labels:      ownerLabels(opts.User),
-			Annotations: sessionAnnotations(opts.User.Username(), opts.Repo, name, profile),
+			Annotations: sessionAnnotations(opts.User.Username(), opts.Repo, name, profile, p.Providers),
+			Providers:   p.Providers,
 		})
+		var missing *MissingProviderError
+		if errors.As(err, &missing) {
+			return nil, missingProviderError(profile, missing)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -389,6 +426,12 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 		if opts.Profile != "" && opts.Profile != profile {
 			fmt.Fprintf(progress, "Warning: --profile ignored, session %s already exists\n", name) //nolint:errcheck
 		}
+		if !synced {
+			// Created by a concurrent start after the look above.
+			if changes, err = m.syncProviders(ctx, sb, name, progress); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	command, err := m.profileCommand(profile, progress)
@@ -397,14 +440,16 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 	}
 
 	s := &Session{
-		Name:     name,
-		Repo:     opts.Repo,
-		Sandbox:  sandbox,
-		Profile:  profile,
-		Created:  created,
-		Unparked: unparked && (!created || parked != nil),
-		WorkDir:  path.Join(SandboxRoot, opts.Repo),
-		Command:  command,
+		Name:            name,
+		Repo:            opts.Repo,
+		Sandbox:         sandbox,
+		Profile:         profile,
+		Providers:       m.sessionProviders(profile, sb),
+		ProviderChanges: changes,
+		Created:         created,
+		Unparked:        unparked && (!created || parked != nil),
+		WorkDir:         path.Join(SandboxRoot, opts.Repo),
+		Command:         command,
 	}
 
 	// Restore the session's snapshot into a sandbox this call created,
@@ -466,9 +511,22 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 			return nil, err
 		}
 	}
-	s.OsewaID, s.Started, err = m.ensureOsewaSession(ctx, sandbox, bin, s.WorkDir, command)
+	s.OsewaID, s.Started, err = m.ensureOsewaSession(ctx, sandbox, bin, s.WorkDir, command, len(s.Providers) > 0)
 	if err != nil {
 		return nil, err
+	}
+	switch {
+	case !changes.Changed():
+	case !s.Started:
+		// OpenShell gives a process the credential placeholders of the
+		// providers attached when it starts; it never changes a running
+		// process's environment. A detached provider's placeholders stop
+		// resolving at once.
+		fmt.Fprintf(progress, "The running %s keeps the provider credentials it started with; exit it and attach again to start it with the current ones\n", strings.Join(command, " ")) //nolint:errcheck
+	case len(changes.Attached) > 0:
+		// The sandbox picks a provider change up within its poll interval
+		// (10s by default), so a program started at once may miss it.
+		fmt.Fprintf(progress, "If %s lacks the credentials of a provider attached just now, exit it and attach again: the sandbox may not have applied the change yet\n", strings.Join(command, " ")) //nolint:errcheck
 	}
 	switch {
 	case s.Started && s.Unparked && parked != nil:
@@ -490,6 +548,75 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 
 	m.lifecycle(opts.User, opts.Repo, name, sandbox, events.LifecycleReady, "", nil)
 	return s, nil
+}
+
+// profileProviders returns the OpenShell providers the sessions of profile
+// have attached, and whether that is known: none for no profile, and not
+// known for a profile that is no longer configured.
+func (m *Manager) profileProviders(profile string) ([]string, bool) {
+	if profile == "" {
+		return nil, true
+	}
+	p, ok := m.sessions.Profiles[profile]
+	return p.Providers, ok
+}
+
+// sessionProviders returns the providers of a session of profile in sb:
+// the profile's, or, for a profile no longer configured, those attached.
+func (m *Manager) sessionProviders(profile string, sb *Sandbox) []string {
+	if want, ok := m.profileProviders(profile); ok {
+		return want
+	}
+	return sb.Spec.Providers
+}
+
+// syncProviders makes the OpenShell providers attached to an existing
+// sandbox those its profile lists now, so a provider added to or removed
+// from a profile reaches its existing sessions on their next start or
+// attach. Providers attached by other means are detached: the profile
+// decides which credentials its sessions get. A sandbox whose profile is
+// no longer configured keeps its providers.
+//
+// A provider that does not exist on the gateway is a configuration error
+// and fails the start. Any other failure is a warning on progress: the
+// session keeps the providers it has, and attaching to it is not blocked.
+func (m *Manager) syncProviders(ctx context.Context, sb *Sandbox, name string, progress io.Writer) (ProviderChanges, error) {
+	profile := sb.Annotations[AnnotationProfile]
+	want, ok := m.profileProviders(profile)
+	if !ok {
+		return ProviderChanges{}, nil
+	}
+	changes, err := m.client.SyncProviders(ctx, sb, want)
+	var missing *MissingProviderError
+	switch {
+	case errors.As(err, &missing):
+		return changes, missingProviderError(profile, missing)
+	case err != nil:
+		m.logger.Warn("cannot update the providers of a sandbox", "sandbox", sb.Name, "profile", profile, "want", want, "err", err)
+		fmt.Fprintf(progress, "Warning: could not make the OpenShell providers of session %s match %s: %v; it keeps the providers it has\n", name, describeProfile(profile), err) //nolint:errcheck
+	}
+	if len(changes.Attached) > 0 {
+		fmt.Fprintf(progress, "Attached OpenShell provider(s) %s to session %s (%s)\n", strings.Join(changes.Attached, ", "), name, describeProfile(profile)) //nolint:errcheck
+	}
+	if len(changes.Detached) > 0 {
+		fmt.Fprintf(progress, "Detached OpenShell provider(s) %s from session %s: %s does not list them\n", strings.Join(changes.Detached, ", "), name, describeProfile(profile)) //nolint:errcheck
+	}
+	return changes, nil
+}
+
+// describeProfile names a profile for messages.
+func describeProfile(profile string) string {
+	if profile == "" {
+		return "no profile"
+	}
+	return "profile " + strconv.Quote(profile)
+}
+
+// missingProviderError explains a provider a profile lists that does not
+// exist on the gateway.
+func missingProviderError(profile string, err *MissingProviderError) error {
+	return fmt.Errorf("sessions.profiles.%s.providers lists OpenShell provider %q, which does not exist on the gateway: create it (openshell provider create --name %s ...) or remove it from the profile: %w",
+		profile, err.Provider, err.Provider, err)
 }
 
 // restoreSnapshot restores the session's snapshot, if it has one, into the
@@ -872,11 +999,12 @@ func (m *Manager) List(ctx context.Context, user proto.User) ([]Info, error) {
 			name = DefaultSessionName
 		}
 		infos = append(infos, Info{
-			Repo:    sb.Annotations[AnnotationRepo],
-			Name:    name,
-			Profile: sb.Annotations[AnnotationProfile],
-			Sandbox: sb.Name,
-			Phase:   string(sb.Status.Phase),
+			Repo:      sb.Annotations[AnnotationRepo],
+			Name:      name,
+			Profile:   sb.Annotations[AnnotationProfile],
+			Providers: slices.Clone(sb.Spec.Providers),
+			Sandbox:   sb.Name,
+			Phase:     string(sb.Status.Phase),
 		})
 	}
 	if m.snaps != nil {
@@ -1033,7 +1161,7 @@ func ownerLabels(user proto.User) map[string]string {
 	}
 }
 
-func sessionAnnotations(user, repo, name, profile string) map[string]string {
+func sessionAnnotations(user, repo, name, profile string, providers []string) map[string]string {
 	a := map[string]string{
 		AnnotationUser:    user,
 		AnnotationRepo:    repo,
@@ -1041,6 +1169,9 @@ func sessionAnnotations(user, repo, name, profile string) map[string]string {
 	}
 	if profile != "" {
 		a[AnnotationProfile] = profile
+	}
+	if len(providers) > 0 {
+		a[AnnotationProviders] = strings.Join(providers, ",")
 	}
 	return a
 }
