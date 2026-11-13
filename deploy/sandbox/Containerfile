@@ -1,9 +1,8 @@
 # The image the OpenShell sandboxes started by Sundae run
-# (openshell.image in Sundae's config, openshell.sandboxImage in
-# deploy/environment.yaml).
+# (config.openshell.image in the Helm chart's values, helm/sundae).
 #
 # Build it from the repository root. Nothing is copied from the build context.
-# See deploy/README.md for the full build and push commands:
+# See helm/sundae/README.md for the full build and push commands:
 #
 #   podman build -f deploy/sandbox/Containerfile --platform linux/amd64 \
 #     -t <registry>/sundae-sandbox:<tag> deploy/sandbox

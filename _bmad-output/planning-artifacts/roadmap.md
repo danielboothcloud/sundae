@@ -141,7 +141,7 @@ The SSH bridge fallback needs an osewa client somewhere. Leaning: exec `osewa at
 | D10 | Where settings live | (a) everything in the mounted YAML, DB holds only runtime data; (b) YAML for server settings, DB for things changed at runtime (forge connections, per-repo defaults); (c) YAML seeds the DB on start | (a). It suits GitOps and one user. Costs: changing a forge or default means editing the ConfigMap, and secrets must be file references, never inline. | **Decided 2026-11-12: leaning adopted** |
 | D11 | Applying config changes | (a) restart the pod (Reloader is already in the cluster); (b) watch the file and reload | (a) | **Decided 2026-11-12: leaning adopted** |
 | D12 | S3 snapshots | (a) drop; (b) build, always on; (c) build, switched on in the config file, off by default | **(c).** Suspend is the main way to pause and come back; S3 is the opt-in backup for what suspend cannot cover. | **Decided 2026-11-12** |
-| D13 | Deployment tooling | (a) Helmfile with a local Sundae chart and the upstream OpenShell chart; (b) ArgoCD Applications; (c) raw manifests | **(a).** One `helmfile apply` brings up both. ArgoCD can wrap it later. | **Decided 2026-11-12** |
+| D13 | Deployment tooling | (a) Helmfile with the Sundae chart and the upstream OpenShell chart; (b) a cluster-neutral Sundae chart only, OpenShell and Agent Sandbox installed per their own docs | **(b)**, changed 2026-11-13: the chart lives in `helm/sundae`; the helmfile was removed. | **Decided** |
 | D14 | Namespaces | (a) Sundae and the gateway in one namespace; (b) separate namespaces with the client TLS secret copied across | (a), so Sundae mounts `openshell-client-tls` directly. Namespace name is a helmfile value. | **Decided 2026-11-12: leaning adopted** |
 | D6 | Session state in the DB | (a) stay stateless, gateway and labels are the truth; (b) add a sessions table | (a) until named sessions or status history force it | **Decided 2026-11-12: leaning adopted** |
 
@@ -192,9 +192,9 @@ Facts checked 2026-11-12:
 
 Items:
 - J1. `Containerfile`: multi-stage build from source, non-root runtime image. **Written; image not yet built** (no container engine was running).
-- J2. `deploy/helm/sundae`: StatefulSet with a PVC, config as a read-only ConfigMap mount (I1), secrets as file mounts (I2), Services for SSH, HTTP and stats. **Written; lints and renders.**
-- J3. `deploy/helmfile.yaml` with `deploy/environment.yaml`: Agent Sandbox v1.0.10 (upstream chart, skippable), OpenShell 0.1.8, Sundae, in one namespace. **Written; renders end to end. Never installed.**
-- J4. `deploy/README.md`. **Written.**
+- J2. `helm/sundae` (moved from `deploy/helm/sundae` 2026-11-13): StatefulSet with a PVC, config as a read-only ConfigMap mount (I1), secrets as file mounts (I2), Services for SSH, HTTP and stats. **Written; lints and renders.**
+- J3. ~~`deploy/helmfile.yaml`~~ removed 2026-11-13 (D13). OpenShell and Agent Sandbox install steps are in `helm/sundae/README.md`.
+- J4. `helm/sundae/README.md` (replaces `deploy/README.md`).
 - J5. Build and push the image, apply to `omni-ops-microcloud-k8s`, run A1. Next.
 
 Found while building it:
@@ -260,7 +260,7 @@ Needs its own architecture pass before any spec.
 | agents menu with program status protocol, monitor and ssh into sessions | C1, C3, D1 |
 | (new) pub/sub and ntfy notifications on agent state change | H |
 | (new) everything configurable from a mounted YAML | I |
-| (new) Containerfile and helmfile to deploy alongside OpenShell | J |
+| (new) Containerfile and Helm chart to deploy alongside OpenShell | J |
 
 ## 9. Config file sketch
 

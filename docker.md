@@ -2,7 +2,7 @@
 
 No Sundae image is published. Build one from the [`Containerfile`](Containerfile)
 at the repository root (`docker build` and `podman build` take the same
-arguments; [deploy/README.md](deploy/README.md) has the full build and push
+arguments; [helm/sundae/README.md](helm/sundae/README.md) has the full build and push
 commands):
 
 ```sh

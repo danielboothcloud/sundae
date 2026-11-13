@@ -9,7 +9,7 @@
 #     --build-arg COMMIT_DATE="$(git log -1 --format=%cI)" \
 #     -t <registry>/sundae:<tag> .
 #
-# See deploy/README.md for the full build and push commands.
+# See helm/sundae/README.md for the full build and push commands.
 
 # Base images are pinned. go.mod requires go >= 1.26.6.
 ARG GO_IMAGE=docker.io/library/golang:1.26.11-alpine3.24

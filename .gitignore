@@ -8,5 +8,5 @@ completions/
 manpages/
 sundae_ed25519*
 
-# Cluster-specific helmfile values (see deploy/README.md)
-deploy/*.local.yaml
+# Cluster-specific Helm values (see helm/sundae/README.md)
+*.local.yaml

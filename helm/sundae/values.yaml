@@ -128,7 +128,9 @@ config:
   openshell:
     enabled: false
     # The gateway's gRPC address. http:// is plaintext; https:// or no scheme
-    # uses TLS. Required when enabled.
+    # uses TLS. Required when enabled. For the OpenShell chart installed as
+    # release `openshell` in the same namespace (chart 0.1.8 defaults):
+    # https://openshell.<namespace>.svc.cluster.local:8080
     gateway_address: ""
     workspace: "default"
     # The default sandbox image. It must provide git and jj. Required when
@@ -145,8 +147,9 @@ config:
     tls_cert: ""
     tls_key: ""
     insecure: false
-    # The HTTP base URL sandboxes use to clone and push. Use this release's
-    # in-cluster HTTP Service. Defaults to http.public_url when empty.
+    # The HTTP base URL sandboxes use to clone and push. When empty, the chart
+    # sets this release's in-cluster HTTP Service,
+    # http://<fullname>-http.<namespace>.svc.cluster.local:<service.http.port>.
     clone_url: ""
     # Lifetime of the git token in a sandbox. Renewed on every session start
     # and attach.

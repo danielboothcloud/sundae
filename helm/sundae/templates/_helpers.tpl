@@ -192,6 +192,9 @@ would reject at startup.
 {{- end -}}
 {{- end -}}
 {{- end -}}
+{{- if not (get $os "clone_url") -}}
+{{- $_ := set $os "clone_url" (printf "http://%s-http.%s.svc.cluster.local:%v" (include "sundae.fullname" .) .Release.Namespace .Values.service.http.port) -}}
+{{- end -}}
 {{- if and (include "sundae.openshellTokenMounted" .) (not (get $os "token_file")) -}}
 {{- $_ := set $os "token_file" (include "sundae.openshellTokenPath" .) -}}
 {{- end -}}

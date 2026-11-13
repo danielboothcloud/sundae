@@ -57,8 +57,8 @@ go build -o sundae ./cmd/sundae
 ```
 
 To run it in a container or on Kubernetes, build the image from the
-[`Containerfile`](Containerfile) and deploy it with the helmfile in
-[`deploy/`](deploy/README.md). [docker.md](docker.md) shows how to run the
+[`Containerfile`](Containerfile) and deploy it with the Helm chart in
+[`helm/sundae`](helm/sundae/README.md). [docker.md](docker.md) shows how to run the
 image with Docker or Podman.
 
 ## Setting up a server
