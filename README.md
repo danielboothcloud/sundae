@@ -583,8 +583,8 @@ profile; duplicates are dropped.
   change within its policy poll interval (10 seconds by default), so a
   program started within that time of an attach may miss the new
   provider: start it again.
-- osewa starts a session's program with a clean environment, so for a
-  session with providers Sundae hands the program the environment
+- osewa starts a session's program with a clean environment, so Sundae
+  hands every session's program the environment
   OpenShell gives exec'd commands: on creating the osewa session it writes
   that environment (the provider placeholders and settings, the
   `SSL_CERT_FILE`-style CA variables of the sandbox proxy, `SANDBOX`),
@@ -593,8 +593,9 @@ profile; duplicates are dropped.
   outside `/sandbox` and so outside snapshots); the session's login shell
   exports it and deletes the file before it starts the program, which
   passes it on to everything it runs (`bash -l` included). The file holds
-  placeholders, never credentials. Sessions without providers get exactly
-  the environment they got before.
+  placeholders, never credentials. Sessions without providers need it
+  too: the sandbox proxy terminates TLS for every sandbox, so programs such
+  as npm must trust its CA.
 - `session ls --json` lists each session's attached `providers`.
 
 **Declared providers.** Each `openshell.providers` entry is a provider

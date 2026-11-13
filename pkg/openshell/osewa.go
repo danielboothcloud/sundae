@@ -424,7 +424,7 @@ func (ls osewaList) find(id string) (osewaSessionInfo, bool) {
 // build. started reports whether it did. With providers, a program it
 // starts gets the OpenShell exec environment, which carries their
 // credential placeholders (see osewaNewScript).
-func (m *Manager) ensureOsewaSession(ctx context.Context, sandbox, bin, workDir string, command []string, providers bool) (id string, started bool, err error) {
+func (m *Manager) ensureOsewaSession(ctx context.Context, sandbox, bin, workDir string, command []string, stageEnv bool) (id string, started bool, err error) {
 	out, err := m.script(ctx, sandbox, osewaListName, osewaListScript, m.osewaClientEnv(), bin, osewaSessionFile)
 	if err != nil {
 		return "", false, err
@@ -439,16 +439,17 @@ func (m *Manager) ensureOsewaSession(ctx context.Context, sandbox, bin, workDir 
 		return seen, false, nil
 	}
 
-	return m.newOsewaSession(ctx, sandbox, bin, workDir, command, seen, providers)
+	return m.newOsewaSession(ctx, sandbox, bin, workDir, command, seen, stageEnv)
 }
 
 // newOsewaSession starts command in workDir in a new osewa session and
 // records its id, unless the recorded id is no longer seen, which means a
 // concurrent start recorded a new session first: that one is returned.
-// With providers, the program gets the OpenShell exec environment.
-func (m *Manager) newOsewaSession(ctx context.Context, sandbox, bin, workDir string, command []string, seen string, providers bool) (id string, started bool, err error) {
+// With stageEnv, the program gets the OpenShell exec environment: the
+// providers' credential placeholders and the TLS proxy's CA variables.
+func (m *Manager) newOsewaSession(ctx context.Context, sandbox, bin, workDir string, command []string, seen string, stageEnv bool) (id string, started bool, err error) {
 	envFile := ""
-	if providers {
+	if stageEnv {
 		envFile = osewaSessionEnvFile
 	}
 	args := append([]string{bin, osewaSessionFile, seen, workDir, envFile}, command...)

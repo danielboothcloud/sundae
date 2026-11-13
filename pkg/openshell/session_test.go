@@ -561,8 +561,9 @@ func TestStartNewSession(t *testing.T) {
 	if !strings.Contains(newCall.command[2], `cd "$1" || exit; shift 2; exec "$@"' sundae-session "$dir" "$envf" "$@"`) {
 		t.Fatalf("new script = %q", newCall.command[2])
 	}
-	// Without providers, no environment is staged for it.
-	if got := strings.Join(h.exec.boxes[s.Sandbox].newArgv, " "); got != "/sandbox/r bash -l" || h.exec.boxes[s.Sandbox].newEnvFile != "" {
+	// The exec environment is staged for it, with or without providers:
+	// the program needs the TLS proxy's CA variables.
+	if got := strings.Join(h.exec.boxes[s.Sandbox].newArgv, " "); got != "/sandbox/r bash -l" || h.exec.boxes[s.Sandbox].newEnvFile != osewaSessionEnvFile {
 		t.Fatalf("osewa new argv = %q, env file %q", got, h.exec.boxes[s.Sandbox].newEnvFile)
 	}
 

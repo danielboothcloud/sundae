@@ -168,7 +168,8 @@ func TestStartAttachesProfileProviders(t *testing.T) {
 		t.Fatalf("osewa new env = %v", call.opts.Env)
 	}
 
-	// Without providers nothing is staged, and no annotation is written.
+	// Without providers no annotation is written, but the exec environment
+	// is still staged: the program needs the TLS proxy's CA variables.
 	s, err = h.mgr.Start(ctx, StartOptions{User: alice, Repo: "r", Name: "plain", Profile: "shell"})
 	if err != nil {
 		t.Fatal(err)
@@ -177,7 +178,7 @@ func TestStartAttachesProfileProviders(t *testing.T) {
 	if len(sb.Spec.Providers) != 0 || sb.Annotations[AnnotationProviders] != "" || len(s.Providers) != 0 {
 		t.Fatalf("plain: providers = %v, annotations = %v", sb.Spec.Providers, sb.Annotations)
 	}
-	if args := h.exec.last(s.Sandbox, osewaNewName).args(); args[4] != "" {
+	if args := h.exec.last(s.Sandbox, osewaNewName).args(); args[4] != osewaSessionEnvFile {
 		t.Fatalf("plain: osewa new args = %q", args)
 	}
 

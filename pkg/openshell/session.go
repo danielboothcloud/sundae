@@ -647,7 +647,11 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 			return nil, err
 		}
 	}
-	s.OsewaID, s.Started, err = m.ensureOsewaSession(ctx, sandbox, bin, s.WorkDir, command, len(s.Providers) > 0)
+	// Every session's program gets the OpenShell exec environment: the
+	// supervisor terminates TLS for every sandbox, so the program needs its
+	// CA variables (SSL_CERT_FILE, NODE_EXTRA_CA_CERTS, ...) whether or not
+	// the profile attaches providers.
+	s.OsewaID, s.Started, err = m.ensureOsewaSession(ctx, sandbox, bin, s.WorkDir, command, true)
 	if err != nil {
 		return nil, err
 	}
