@@ -32,8 +32,8 @@
 #   disconnects. OpenShell starts exec'd commands with HOME=/sandbox and a
 #   cleared environment: image ENV values other than PATH do not reach them.
 #   osewa sessions start with a clean environment too and run the program
-#   through `/bin/sh -l`, so login-shell settings go in /etc/profile.d. For a
-#   session whose profile has OpenShell providers, Sundae stages the exec
+#   through `/bin/sh -l`, so login-shell settings go in /etc/profile.d. For
+#   every session, Sundae stages the exec
 #   environment (the providers' credential placeholders, the proxy's CA
 #   variables) in /tmp/sundae/session-env.<pid>, which that shell exports
 #   and deletes before starting the program.
@@ -60,7 +60,7 @@
 
 # Pinned by tag and by digest (a multi-arch index: amd64, arm64, ppc64le,
 # s390x): Fedora rebuilds this tag with updates. Fedora 45.
-ARG BASE_IMAGE=quay.io/fedora/fedora:45@sha256:e15959f36d52307f176f8c068009f6f1451c3b238b37a1f03e56dbfa4526e8b1
+ARG BASE_IMAGE=quay.io/fedora/fedora:45@sha256:e203b4174f6a2ce6c160ddc4917d85e6bfce32dfc610d953b355d63ec4c17909
 
 # Jujutsu release and the SHA-256 of its static musl tarball per architecture,
 # from https://github.com/jj-vcs/jj/releases/tag/v0.47.1. Change all three
