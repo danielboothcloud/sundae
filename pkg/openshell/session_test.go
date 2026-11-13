@@ -986,23 +986,35 @@ func profileConfig() *config.Config {
 func TestStartProfiles(t *testing.T) {
 	ctx := context.Background()
 
+	// The order: --profile, the repository's own profile, the
+	// sessions.repos glob, none.
 	cases := []struct {
-		name, repo, profile, image string
-		wantProfile, wantImage     string
-		wantArgv                   []string
+		name, repo, profile, repoProfile, image string
+		wantProfile, wantImage                  string
+		wantArgv                                []string
+		wantWarning                             string
 	}{
-		{"no profile", "r", "", "", "", "default-image", []string{"/sandbox/r", "bash", "-l"}},
-		{"repo default", "infra/dns", "", "", "claude", "agent-claude", []string{"/sandbox/infra/dns", "claude", "--model", "opus 4"}},
-		{"explicit", "r", "shell", "", "shell", "default-image", []string{"/sandbox/r", "zsh", "-l"}},
-		{"explicit beats repo default", "infra/dns", "shell", "", "shell", "default-image", []string{"/sandbox/infra/dns", "zsh", "-l"}},
-		{"image flag beats profile", "infra/dns", "", "custom", "claude", "custom", []string{"/sandbox/infra/dns", "claude", "--model", "opus 4"}},
+		{"no profile", "r", "", "", "", "", "default-image", []string{"/sandbox/r", "bash", "-l"}, ""},
+		{"repo default", "infra/dns", "", "", "", "claude", "agent-claude", []string{"/sandbox/infra/dns", "claude", "--model", "opus 4"}, ""},
+		{"explicit", "r", "shell", "", "", "shell", "default-image", []string{"/sandbox/r", "zsh", "-l"}, ""},
+		{"explicit beats repo default", "infra/dns", "shell", "", "", "shell", "default-image", []string{"/sandbox/infra/dns", "zsh", "-l"}, ""},
+		{"image flag beats profile", "infra/dns", "", "", "custom", "claude", "custom", []string{"/sandbox/infra/dns", "claude", "--model", "opus 4"}, ""},
+		{"repo setting", "r", "", "shell", "", "shell", "default-image", []string{"/sandbox/r", "zsh", "-l"}, ""},
+		{"repo setting beats glob", "infra/dns", "", "shell", "", "shell", "default-image", []string{"/sandbox/infra/dns", "zsh", "-l"}, ""},
+		{"explicit beats repo setting", "infra/dns", "claude", "shell", "", "claude", "agent-claude", []string{"/sandbox/infra/dns", "claude", "--model", "opus 4"}, ""},
+		{"stale repo setting falls back to glob", "infra/dns", "", "gone", "", "claude", "agent-claude", []string{"/sandbox/infra/dns", "claude", "--model", "opus 4"}, `the repository's profile "gone" is no longer configured`},
+		{"stale repo setting falls back to none", "r", "", "gone", "", "", "default-image", []string{"/sandbox/r", "bash", "-l"}, `the repository's profile "gone" is no longer configured`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarnessWith(t, profileConfig())
-			s, err := h.mgr.Start(ctx, StartOptions{User: alice, Repo: tc.repo, Profile: tc.profile, Image: tc.image})
+			var progress bytes.Buffer
+			s, err := h.mgr.Start(ctx, StartOptions{User: alice, Repo: tc.repo, Profile: tc.profile, RepoProfile: tc.repoProfile, Image: tc.image, Progress: &progress})
 			if err != nil {
 				t.Fatal(err)
+			}
+			if tc.wantWarning != "" && !strings.Contains(progress.String(), tc.wantWarning) {
+				t.Fatalf("progress = %q", progress.String())
 			}
 			if s.Profile != tc.wantProfile {
 				t.Fatalf("profile = %q, want %q", s.Profile, tc.wantProfile)

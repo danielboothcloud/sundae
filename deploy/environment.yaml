@@ -126,6 +126,21 @@ softServe:
   #           "infra/*":
   #             profile: claude
   #
+  # Project templates: `repo create <name> --template go-service` (and the
+  # TUI's new-repository form, n on Repositories) seeds the new repository
+  # with one commit holding the template repository's tree. The template
+  # repository must exist in Soft Serve; the profile, if set, becomes the new
+  # repository's default session profile (`repo profile`):
+  #   chartValues:
+  #     config:
+  #       projects:
+  #         templates:
+  #           go-service:
+  #             repo: templates/go-service
+  #             ref: main
+  #             description: Go service with a Containerfile and CI
+  #             profile: claude
+  #
   # Session status and parking: how often Soft Serve reads each session's
   # status, and when it suspends an idle one. The OpenShell 0.1.8 Kubernetes
   # compute driver cannot suspend; Soft Serve logs that once and leaves

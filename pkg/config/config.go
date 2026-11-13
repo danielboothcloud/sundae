@@ -235,6 +235,10 @@ type Config struct {
 	// profiles and per-repository defaults.
 	Sessions SessionsConfig `envPrefix:"SESSIONS_" yaml:"sessions"`
 
+	// Projects configures how new repositories are initialised: the
+	// templates `repo create --template` and the TUI offer.
+	Projects ProjectsConfig `envPrefix:"PROJECTS_" yaml:"projects"`
+
 	// Forges are the GitHub and GitLab accounts whose repositories are
 	// discovered, imported and kept in sync. The environment form is
 	// SOFT_SERVE_FORGES_<index>_<KEY>, e.g. SOFT_SERVE_FORGES_0_NAME.
@@ -342,6 +346,9 @@ func (c *Config) Environ() []string {
 	}...)
 
 	envs = append(envs, c.sessionsEnviron()...)
+
+	// projects.templates is a map and has no environment form; hook
+	// subprocesses read it from the config file.
 
 	// Forge tokens only ever live in their token_file; only the paths are
 	// passed on.
@@ -760,7 +767,7 @@ func (c *Config) Validate() error {
 
 	c.HTTP.CORS.AllowedOrigins = append([]string{c.HTTP.PublicURL}, c.HTTP.CORS.AllowedOrigins...)
 
-	return errors.Join(c.validateOpenShell(), c.validateSessions(), c.validateForges(), c.validateNotifications(), c.validateSnapshots())
+	return errors.Join(c.validateOpenShell(), c.validateSessions(), c.validateProjects(), c.validateForges(), c.validateNotifications(), c.validateSnapshots())
 }
 
 // validateOpenShell validates the OpenShell configuration and resolves its

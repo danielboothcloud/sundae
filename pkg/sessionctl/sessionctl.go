@@ -237,16 +237,26 @@ func Prepare(ctx context.Context, mgr *openshell.Manager, req Request) (_ *Prepa
 		}
 	}()
 
+	// A new session's profile: --profile, else the repository's own
+	// (`repo profile`), else the sessions.repos match, else none.
+	var repoProfile string
+	if req.Create && req.Profile == "" {
+		if repoProfile, err = be.RepoProfile(ctx, rr.Name()); err != nil {
+			return nil, err //nolint:wrapcheck
+		}
+	}
+
 	opts := openshell.StartOptions{
-		User:     user,
-		Repo:     rr.Name(),
-		VCS:      rr.Vcs(),
-		Name:     req.Name,
-		Profile:  req.Profile,
-		Image:    req.Image,
-		Term:     req.Term,
-		Restore:  req.Restore,
-		Progress: req.Progress,
+		User:        user,
+		Repo:        rr.Name(),
+		VCS:         rr.Vcs(),
+		Name:        req.Name,
+		Profile:     req.Profile,
+		RepoProfile: repoProfile,
+		Image:       req.Image,
+		Term:        req.Term,
+		Restore:     req.Restore,
+		Progress:    req.Progress,
 	}
 	var s *openshell.Session
 	if req.Create {

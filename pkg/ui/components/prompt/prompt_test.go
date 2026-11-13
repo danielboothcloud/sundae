@@ -211,3 +211,25 @@ func TestConfirm(t *testing.T) {
 		t.Fatalf("narrow view %q", v)
 	}
 }
+
+func TestTextFieldCharLimit(t *testing.T) {
+	long := strings.Repeat("x", 100)
+	for _, tc := range []struct {
+		limit int
+		want  int
+	}{{0, 64}, {256, 100}, {10, 10}} {
+		fd := TextField("description", "Description", "", nil)
+		if tc.limit > 0 {
+			fd.SetCharLimit(tc.limit)
+		}
+		f := NewForm(newCommon(), "New repository", "create", fd)
+		for _, r := range long {
+			f.Update(press(string(r)))
+		}
+		if got := len(fd.Value()); got != tc.want {
+			t.Errorf("limit %d: %d characters, want %d", tc.limit, got, tc.want)
+		}
+	}
+	// Other kinds ignore it.
+	ToggleField("t", "T", false).SetCharLimit(1)
+}

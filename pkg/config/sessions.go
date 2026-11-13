@@ -179,6 +179,23 @@ func (s SessionsConfig) RepoProfile(repo string) string {
 	return s.Repos[best].Profile
 }
 
+// ErrUnknownProfile is returned for a session profile that is not defined in
+// sessions.profiles.
+var ErrUnknownProfile = errors.New("unknown profile")
+
+// CheckProfile returns an error wrapping ErrUnknownProfile, naming the
+// configured profiles, when name is not one of them.
+func (s SessionsConfig) CheckProfile(name string) error {
+	if _, ok := s.Profiles[name]; ok {
+		return nil
+	}
+	known := sortedKeys(s.Profiles)
+	if len(known) == 0 {
+		return fmt.Errorf("%w %q: no profiles are configured", ErrUnknownProfile, name)
+	}
+	return fmt.Errorf("%w %q: use one of %s", ErrUnknownProfile, name, strings.Join(known, ", "))
+}
+
 // globSpecificity counts the characters of a glob pattern that are not
 // wildcard syntax.
 func globSpecificity(p string) int {

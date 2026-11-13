@@ -246,6 +246,41 @@ sessions:
   #    profile: claude
 {{- end }}
 
+# Projects: how new repositories are initialised (repo create --template NAME,
+# and the TUI's new-repository form, n on Repositories). A template is an
+# existing Soft Serve repository whose tree, at ref and under subdir, becomes
+# the new repository's single initial commit, authored by its creator; the
+# template's history is not copied, and file contents are copied unchanged.
+# Creating from a template needs read access to the template repository.
+# Changes take effect on restart.
+#
+#   repo         the template repository (required)
+#   ref          branch, tag or commit hash; empty is the repository's HEAD
+#   subdir       directory whose contents become the new repository's root
+#   description  shown where the template is offered
+#   profile      a sessions.profiles entry that becomes the new repository's
+#                default session profile unless one is given (repo profile)
+projects:
+{{- if .Projects.Templates }}
+  templates:
+{{- range $name, $t := .Projects.Templates }}
+    {{ printf "%q" $name }}:
+      repo: {{ printf "%q" $t.Repo }}
+      ref: {{ printf "%q" $t.Ref }}
+      subdir: {{ printf "%q" $t.Subdir }}
+      description: {{ printf "%q" $t.Description }}
+      profile: {{ printf "%q" $t.Profile }}
+{{- end }}
+{{- else }}
+  templates: {}
+  #  go-service:
+  #    repo: templates/go-service
+  #    ref: main
+  #    subdir: ""
+  #    description: Go service with a Containerfile and CI
+  #    profile: claude
+{{- end }}
+
 # Forges: GitHub and GitLab accounts whose repositories Soft Serve discovers,
 # imports and keeps in sync (ssh <server> forge --help). Sync never rewrites or
 # deletes a Soft Serve branch: upstream refs are fetched into

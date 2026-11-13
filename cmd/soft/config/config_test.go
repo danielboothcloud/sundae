@@ -153,6 +153,49 @@ func TestCheck(t *testing.T) {
 		is.True(strings.Contains(err.Error(), "sessions.signals.keep 1000000 must be between 1 and 100000"))
 	})
 
+	t.Run("projects", func(t *testing.T) {
+		is := is.New(t)
+		p := filepath.Join(td, "projects.yaml")
+		writeFile(t, p, `sessions:
+  profiles:
+    claude:
+      command: claude
+projects:
+  templates:
+    go-service:
+      repo: templates/go
+      ref: main
+      subdir: service
+      description: Go service
+      profile: claude
+`)
+		is.NoErr(check(p))
+
+		writeFile(t, p, `projects:
+  templates:
+    go-service:
+      repo: ""
+      ref: "main~1"
+      subdir: ../x
+      profile: claude
+      branch: main
+`)
+		err := check(p)
+		is.True(err != nil)
+		msg := err.Error()
+		for _, want := range []string{
+			"line 8: unknown key projects.templates.<name>.branch",
+			"projects.templates.go-service.repo is required",
+			`projects.templates.go-service.ref "main~1" must be a branch, tag or commit hash`,
+			`projects.templates.go-service.subdir "../x" must stay inside the template repository`,
+			`projects.templates.go-service.profile "claude" is not defined in sessions.profiles`,
+		} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("%q missing from:\n%s", want, msg)
+			}
+		}
+	})
+
 	t.Run("missing file is not written", func(t *testing.T) {
 		is := is.New(t)
 		p := filepath.Join(td, "missing", "config.yaml")

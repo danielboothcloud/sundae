@@ -113,6 +113,13 @@ func ToggleField(key, label string, on bool) *Field {
 	return &Field{Key: key, Label: label, kind: Toggle, on: on}
 }
 
+// SetCharLimit sets how many characters a Text field takes; 64 by default.
+func (f *Field) SetCharLimit(n int) {
+	if f.kind == Text {
+		f.input.CharLimit = n
+	}
+}
+
 // Kind returns the field's kind.
 func (f *Field) Kind() Kind { return f.kind }
 

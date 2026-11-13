@@ -142,7 +142,7 @@ type (
 // to the home page while a repository is shown.
 func IsMsg(msg tea.Msg) bool {
 	switch msg.(type) {
-	case originsMsg, originMsg, originFeedMsg, originFeedEndMsg:
+	case originsMsg, originMsg, originFeedMsg, originFeedEndMsg, repoCreatedMsg:
 		return true
 	}
 	return sessions.IsMsg(msg) || forges.IsMsg(msg)

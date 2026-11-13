@@ -294,6 +294,15 @@ jobs:
 #    "infra/*":
 #      profile: claude
 
+# Templates for new repositories. See "Project templates and profiles".
+#projects:
+#  templates:
+#    go-service:
+#      repo: templates/go-service
+#      ref: main
+#      description: Go service with a Containerfile and CI
+#      profile: claude
+
 # Snapshots of a session's /sandbox in S3, off by default. See "S3 snapshots".
 #snapshots:
 #  s3:
@@ -509,10 +518,13 @@ set, must be readable and not empty. Setting both `token` and `token_file` is
 an error. `soft config check` reports every problem, naming the key.
 
 **Profiles.** A new session is created from `--profile`, else from the
-`sessions.repos` entry matching the repository (`*` does not cross `/`, `**`
-does, case-insensitive; when several match, the one with the most
+repository's own profile (`repo profile`, see
+[Project templates and profiles](#project-templates-and-profiles)), else from
+the `sessions.repos` entry matching the repository (`*` does not cross `/`,
+`**` does, case-insensitive; when several match, the one with the most
 non-wildcard characters wins), else from `openshell.image` and
-`openshell.command`. `--image` overrides the image. A session keeps the
+`openshell.command`. A repository profile that is no longer configured is
+skipped with a warning. `--image` overrides the image. A session keeps the
 profile it was created from: `--profile` and `--image` are ignored, with a
 warning, when it already exists. Profile names are DNS labels; every
 `repos` entry must name a defined profile.
@@ -1195,6 +1207,7 @@ Available Commands:
   list         List repositories
   mirror       Set or get a repository mirror property
   private      Set or get a repository private property
+  profile      Set or get the default session profile of a repository
   project-name Set or get the project name for a repository
   rename       Rename an existing repository
   tag          Manage repository tags
@@ -1243,6 +1256,73 @@ on the server it’ll be created.
 ```
 git push origin main
 ```
+
+### Project templates and profiles
+
+New repositories can start from a template and carry the session profile
+their agent sessions use:
+
+```sh
+# Start from the go-service template, as a git repository
+ssh -p 23231 localhost repo create icecream --template go-service --vcs git
+
+# Store the session profile new sessions of the repository start from
+ssh -p 23231 localhost repo create icecream --profile claude
+
+# ... and start a session for yourself right away (detached)
+ssh -p 23231 localhost repo create icecream --template go-service --start
+
+# Get, set and remove a repository's profile
+ssh -p 23231 localhost repo profile icecream
+ssh -p 23231 localhost repo profile icecream shell
+ssh -p 23231 localhost repo profile icecream --unset
+```
+
+Templates are declared in the config file only (there is no environment
+form), by the server administrator:
+
+```yaml
+projects:
+  templates:
+    go-service:
+      repo: templates/go-service   # an existing Soft Serve repository (required)
+      ref: main                    # branch, tag or commit hash; empty: its HEAD
+      subdir: ""                   # copy only this directory, as the new root
+      description: Go service with a Containerfile and CI
+      profile: claude              # a sessions.profiles entry (optional)
+```
+
+`--template` copies the template repository's tree at `ref` (under `subdir`,
+when set) into the new repository as one initial commit on the branch its
+`HEAD` names. None of the template's history comes along: only the objects of
+that tree are copied. The commit is authored and committed by you, as
+`<username> <username@host>`, where host is the host of `ssh.public_url`
+(Soft Serve does not know email addresses); its message names the template,
+the template repository and its commit. This works the same for `git` and
+`jj` repositories; jj gives the commit a change id when it imports it. File
+contents are copied unchanged: there are no placeholders. Git LFS objects are
+not copied, so a template should not hold LFS files.
+
+Creating from a template needs read access to the template repository, the
+same access cloning it needs: a private template is only offered to, and
+usable by, those who can read it. Unknown templates, a missing template repository,
+ref or subdirectory, and missing access are reported before anything is
+created; if the initial commit fails, the new repository is removed again.
+
+A repository's session profile is kept in its git config (`session.profile`),
+as forges keep their link; there is no database table. `--profile` sets it,
+else the template's `profile`. `repo profile` reads it (anyone who can read
+the repository) and sets or removes it (collaborators with write access); it
+must name a `sessions.profiles` entry. A new session's profile is the first
+of `session start --profile`, the repository's profile, the `sessions.repos`
+match and none. `--start` needs OpenShell enabled, and starts the `main`
+session as `session start --detach` does; a failed start leaves the
+repository and says so.
+
+`soft config check` checks the templates: names are DNS labels, `repo` is a
+repository name, `ref` is a ref or hash (no revision syntax such as `~1`),
+`subdir` stays inside the repository, and `profile` is defined. It cannot
+check that the repositories exist; that happens when one is used.
 
 ### Nested Repositories
 
@@ -1575,7 +1655,12 @@ repository (the most urgent state and how many), and, when forges are
 configured, where it comes from (`local`, or the forge with `↑n ↓n` commits
 ahead and behind its default branch as of the last sync). They follow status
 changes and forge syncs live and drop off on narrow terminals. <kbd>s</kbd>
-starts a session for the highlighted repository. Inside a repository, a
+starts a session for the highlighted repository, and <kbd>n</kbd> opens the
+new-repository form (for whoever may run `repo create`): name, description,
+VCS, template (those you can read), session profile, private, and whether to
+start a session. On success the new repository is selected; with "Start
+session" the Sessions tab starts one, named as its own new-session form
+names them, and attaches to it. Inside a repository, a
 **Sessions** tab after Tags lists that repository's sessions and signals with
 the same keys, and the status bar ends with the attention summary.
 

@@ -197,6 +197,23 @@ config:
     #  "infra/*":
     #    profile: claude
 
+  # How new repositories are initialised: templates for `repo create
+  # --template <name>` and the TUI's new-repository form. A template is an
+  # existing Soft Serve repository whose tree (at ref, under subdir) becomes
+  # the new repository's single initial commit, authored by its creator.
+  # Creating from one needs read access to its repository. Semantics in the
+  # top-level README, "Project templates and profiles".
+  projects:
+    templates: {}
+    #  go-service:
+    #    repo: templates/go-service
+    #    ref: main
+    #    subdir: ""
+    #    description: Go service with a Containerfile and CI
+    #    # A sessions.profiles entry stored as the new repository's default
+    #    # session profile (`repo profile`).
+    #    profile: claude
+
   # GitHub and GitLab accounts whose repositories Soft Serve discovers,
   # imports and keeps in sync (ssh <server> forge --help). Tokens are only
   # read from files: put each token in an existing Secret, mount it with

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
@@ -14,6 +15,7 @@ import (
 	"github.com/charmbracelet/soft-serve/pkg/backend"
 	"github.com/charmbracelet/soft-serve/pkg/ui/common"
 	"github.com/charmbracelet/soft-serve/pkg/ui/components/code"
+	"github.com/charmbracelet/soft-serve/pkg/ui/components/prompt"
 	"github.com/charmbracelet/soft-serve/pkg/ui/components/selector"
 	"github.com/charmbracelet/soft-serve/pkg/ui/components/tabs"
 	"github.com/charmbracelet/soft-serve/pkg/ui/pages/forges"
@@ -59,6 +61,16 @@ type Selection struct {
 	tabKeys key.Binding
 	// newSession is the Repositories tab's s key.
 	newSession key.Binding
+	// newRepo is the Repositories tab's n key: the new-repository form.
+	newRepo key.Binding
+
+	// repoForm is the new-repository form while it is open; creating
+	// names the repository it is creating.
+	repoForm *prompt.Form
+	creating string
+	// repoNotice is a one-line message about the last repository
+	// created, shown in the footer until the next key.
+	repoNotice string
 
 	// badges are the Repositories tab's session and origin badges, which
 	// delegate renders.
@@ -81,6 +93,7 @@ func New(c common.Common) *Selection {
 		ctx:        ctx,
 		cancel:     cancel,
 		newSession: key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "new session")),
+		newRepo:    key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new repository")),
 	}
 
 	// The home tabs, in order. A feature's tab is added here and left out
@@ -202,6 +215,8 @@ func (s *Selection) IsFiltering() bool {
 // leaves q, ?, tab and the digits to it.
 func (s *Selection) Capturing() bool {
 	switch s.activePane {
+	case selectorPane:
+		return s.repoForm != nil
 	case sessionsPane:
 		return s.sessions != nil && s.sessions.Capturing()
 	case forgesPane:
@@ -212,7 +227,13 @@ func (s *Selection) Capturing() bool {
 
 // capturingHelp is the help of the tab that takes every key.
 func (s *Selection) capturingHelp() []key.Binding {
-	if s.activePane == forgesPane {
+	switch s.activePane {
+	case selectorPane:
+		if s.creating != "" {
+			return nil
+		}
+		return s.repoForm.ShortHelp()
+	case forgesPane:
 		return s.forges.ShortHelp()
 	}
 	return s.sessions.ShortHelp()
@@ -231,6 +252,14 @@ func (s *Selection) Summary(narrow bool) string {
 // for none.
 func (s *Selection) FooterLine(width int) string {
 	switch {
+	case s.activePane == selectorPane && s.creating != "":
+		return common.TruncateString("Creating "+s.creating+" …", max(width, 1))
+	case s.activePane == selectorPane && s.repoNotice != "":
+		line := common.TruncateString(s.repoNotice, max(width, 1))
+		if strings.HasPrefix(s.repoNotice, "✗") {
+			return s.common.Styles.State.Error.Render(line)
+		}
+		return line
 	case s.activePane == sessionsPane && s.sessions != nil:
 		return s.sessions.FooterLine(width)
 	case s.activePane == forgesPane && s.forges != nil:
@@ -309,6 +338,9 @@ func (s *Selection) ShortHelp() []key.Binding {
 		if s.sessions != nil {
 			kb = append(kb, s.newSession)
 		}
+		if s.canCreate() {
+			kb = append(kb, s.newRepo)
+		}
 	case forgesPane:
 		kb = kb[1:]
 		sh := s.forges.ShortHelp()
@@ -372,6 +404,9 @@ func (s *Selection) FullHelp() [][]key.Binding {
 			if s.sessions != nil {
 				b[0] = append(b[0], s.newSession)
 			}
+			if s.canCreate() {
+				b[0] = append(b[0], s.newRepo)
+			}
 		}
 		b = append(b, []key.Binding{
 			k.CursorUp,
@@ -415,10 +450,37 @@ func (s *Selection) Init() tea.Cmd {
 		return sessionsCmd
 	}
 
-	repos, err := be.Repositories(ctx)
+	items, about, err := s.listRepos()
 	if err != nil {
 		return tea.Batch(sessionsCmd, common.ErrorCmd(err))
 	}
+	if about != nil {
+		readmeCmd = s.readme.SetContent(about.readme, about.path)
+	}
+	return tea.Batch(
+		s.selector.Init(),
+		s.selector.SetItems(items),
+		readmeCmd,
+		sessionsCmd,
+	)
+}
+
+// aboutReadme is the README of the .soft-serve repository, which the
+// About tab shows.
+type aboutReadme struct{ readme, path string }
+
+// listRepos lists the repositories the user may read, for the Repositories
+// tab, most recently updated first, and the .soft-serve README; nil when
+// there is none. A .soft-serve repository without a README is not listed.
+func (s *Selection) listRepos() ([]selector.IdentifiableItem, *aboutReadme, error) {
+	ctx := s.common.Context()
+	be := s.common.Backend()
+	pk := s.common.PublicKey()
+	repos, err := be.Repositories(ctx)
+	if err != nil {
+		return nil, nil, err //nolint:wrapcheck
+	}
+	var about *aboutReadme
 	sortedItems := make(Items, 0)
 	for _, r := range repos {
 		if r.Name() == ".soft-serve" {
@@ -427,7 +489,7 @@ func (s *Selection) Init() tea.Cmd {
 				continue
 			}
 
-			readmeCmd = s.readme.SetContent(readme, path)
+			about = &aboutReadme{readme: readme, path: path}
 		}
 
 		if r.IsHidden() {
@@ -449,12 +511,13 @@ func (s *Selection) Init() tea.Cmd {
 	for i, it := range sortedItems {
 		items[i] = it
 	}
-	return tea.Batch(
-		s.selector.Init(),
-		s.selector.SetItems(items),
-		readmeCmd,
-		sessionsCmd,
-	)
+	return items, about, nil
+}
+
+// repoItems lists the repositories for the Repositories tab.
+func (s *Selection) repoItems() ([]selector.IdentifiableItem, error) {
+	items, _, err := s.listRepos()
+	return items, err
 }
 
 // Update implements tea.Model.
@@ -473,9 +536,17 @@ func (s *Selection) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 		return s, tea.Batch(cmds...)
+	case repoCreatedMsg:
+		return s, s.onRepoCreated(msg)
 	case tea.KeyPressMsg:
+		if s.activePane == selectorPane {
+			s.repoNotice = ""
+		}
 		if s.Capturing() {
 			// A form, confirm or filter of the tab has the keys.
+			if s.activePane == selectorPane {
+				return s, s.onRepoFormKey(msg)
+			}
 			if s.activePane == forgesPane {
 				_, cmd := s.forges.Update(msg)
 				return s, cmd
@@ -485,6 +556,10 @@ func (s *Selection) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 			return s, cmd
 		}
 		repoFiltering := s.activePane == selectorPane && s.FilterState() == list.Filtering
+		if s.activePane == selectorPane && !repoFiltering && key.Matches(msg, s.newRepo) && s.canCreate() {
+			s.openNewRepo()
+			return s, nil
+		}
 		if s.activePane == selectorPane && !repoFiltering && s.sessions != nil && key.Matches(msg, s.newSession) {
 			if it, ok := s.selector.SelectedItem().(Item); ok {
 				return s, s.OpenNewSession(it.ID())
@@ -578,11 +653,20 @@ func (s *Selection) View() string {
 	wm, hm := s.getMargins()
 	switch s.activePane {
 	case selectorPane:
-		// The session badges are what the Monitor reads now.
-		s.refreshSessionBadges()
 		ss := lipgloss.NewStyle().
 			Width(s.common.Width - wm).
 			Height(s.common.Height - hm)
+		if s.repoForm != nil {
+			// Placed as the Sessions tab places its forms.
+			lines := strings.Split(s.repoForm.View(s.common.Width-wm-1), "\n")
+			for i, l := range lines {
+				lines[i] = " " + l
+			}
+			view = ss.Render("\n" + strings.Join(lines, "\n"))
+			break
+		}
+		// The session badges are what the Monitor reads now.
+		s.refreshSessionBadges()
 		view = ss.Render(s.selector.View())
 	case sessionsPane:
 		s.bindSessions()

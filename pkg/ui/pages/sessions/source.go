@@ -41,8 +41,9 @@ type Source interface {
 	Repos(ctx context.Context) ([]string, error)
 	// Profiles returns the configured session profiles, sorted by name.
 	Profiles() []Profile
-	// RepoProfile returns the profile configured for new sessions of the
-	// repository; "" for none.
+	// RepoProfile returns the profile new sessions of the repository are
+	// created from without one: the repository's own (`repo profile`),
+	// else the sessions.repos match; "" for none.
 	RepoProfile(repo string) string
 	// Command returns the program a session created from the profile runs
 	// ("" is no profile).
@@ -201,7 +202,13 @@ func (s *source) Profiles() []Profile {
 	return out
 }
 
-func (s *source) RepoProfile(repo string) string { return s.cfg.Sessions.RepoProfile(repo) }
+func (s *source) RepoProfile(repo string) string {
+	p, err := backend.FromContext(s.ctx).RepoProfile(s.ctx, repo)
+	if _, ok := s.cfg.Sessions.Profiles[p]; err == nil && ok {
+		return p
+	}
+	return s.cfg.Sessions.RepoProfile(repo)
+}
 
 func (s *source) Command(profile string) string {
 	if p, ok := s.cfg.Sessions.Profiles[profile]; ok && p.Command != "" {

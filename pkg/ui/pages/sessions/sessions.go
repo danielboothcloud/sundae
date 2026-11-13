@@ -878,10 +878,29 @@ func (m *Sessions) attachCmd(repo, name, key string, parked bool) tea.Cmd {
 	return op.run(ctx, m.src, sessionctl.Request{Repo: repo, Name: name, Term: m.term()})
 }
 
+// StartNew starts a new session of repo, as the new-session form does with
+// its defaults: from profile, else the repository's default profile, named
+// after it; then attaches to it when attach is set and the TUI can hand the
+// terminal over. The Repositories tab's new-repository form uses it.
+func (m *Sessions) StartNew(repo, profile string, attach bool) tea.Cmd {
+	if m.src == nil {
+		return nil
+	}
+	m.notice = notice{}
+	if profile == "" {
+		profile = m.src.RepoProfile(repo)
+	}
+	return m.start(repo, m.defaultName(repo, profile), profile, attach)
+}
+
 // startCmd starts the session the new-session form describes.
 func (m *Sessions) startCmd(f *prompt.Form) tea.Cmd {
 	repo, name, profile := f.Field("repo").Value(), f.Field("name").Value(), f.Field("profile").Value()
-	attach := f.Field("attach").On()
+	return m.start(repo, name, profile, f.Field("attach").On())
+}
+
+// start creates the named session and attaches to it when attach is set.
+func (m *Sessions) start(repo, name, profile string, attach bool) tea.Cmd {
 	if attach && m.handoff == nil {
 		attach = false
 		m.notice = notice{text: errNoTerminal.Error(), err: true}

@@ -144,9 +144,14 @@ type StartOptions struct {
 	// Name is the session name. Empty is DefaultSessionName.
 	Name string
 	// Profile names the sessions.profiles entry to create the session from.
-	// Empty uses the sessions.repos match for Repo, if any. Start only; it
-	// is ignored, with a warning, for a session that already exists.
+	// Empty uses RepoProfile, else the sessions.repos match for Repo, if
+	// any. Start only; it is ignored, with a warning, for a session that
+	// already exists.
 	Profile string
+	// RepoProfile is the repository's own default profile (`repo
+	// profile`), used when Profile is empty. One that is no longer in
+	// sessions.profiles is skipped with a warning.
+	RepoProfile string
 	// Image overrides the image when the sandbox is created. Start only;
 	// ignored, with a warning, for a session that already exists.
 	Image string
@@ -272,7 +277,7 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 		p       config.SessionProfile
 	)
 	if create {
-		profile, p, err = m.resolveProfile(opts.Repo, opts.Profile)
+		profile, p, err = m.resolveProfile(opts.Repo, opts.Profile, opts.RepoProfile, progress)
 		if err != nil {
 			return nil, err
 		}
@@ -621,24 +626,29 @@ func nameFlag(name string) string {
 }
 
 // resolveProfile returns the profile a new session for repo is created from:
-// explicit when set, else the sessions.repos match, else none ("").
-func (m *Manager) resolveProfile(repo, explicit string) (string, config.SessionProfile, error) {
+// explicit when set, else the repository's own profile (repoSetting), else
+// the sessions.repos match, else none (""). An explicit profile that is not
+// configured is an error; a repository profile that no longer is falls
+// through to the next, with a warning on progress.
+func (m *Manager) resolveProfile(repo, explicit, repoSetting string, progress io.Writer) (string, config.SessionProfile, error) {
 	name := explicit
+	if name == "" && repoSetting != "" {
+		if _, ok := m.sessions.Profiles[repoSetting]; ok {
+			name = repoSetting
+		} else {
+			fmt.Fprintf(progress, "Warning: the repository's profile %q is no longer configured; ignoring it\n", repoSetting) //nolint:errcheck
+		}
+	}
 	if name == "" {
 		name = m.sessions.RepoProfile(repo)
 	}
 	if name == "" {
 		return "", config.SessionProfile{}, nil
 	}
-	p, ok := m.sessions.Profiles[name]
-	if !ok {
-		known := slices.Sorted(maps.Keys(m.sessions.Profiles))
-		if len(known) == 0 {
-			return "", config.SessionProfile{}, fmt.Errorf("unknown profile %q: no profiles are configured", name)
-		}
-		return "", config.SessionProfile{}, fmt.Errorf("unknown profile %q: use one of %s", name, strings.Join(known, ", "))
+	if err := m.sessions.CheckProfile(name); err != nil {
+		return "", config.SessionProfile{}, err //nolint:wrapcheck
 	}
-	return name, p, nil
+	return name, m.sessions.Profiles[name], nil
 }
 
 // profileCommand returns the program of a session created from profile: the
