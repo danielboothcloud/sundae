@@ -65,6 +65,11 @@ type Manager struct {
 	providerSync *ProviderReconciler
 	// snaps is the S3 snapshot store; nil when snapshots are off.
 	snaps *snapshotStore
+	// policy is the policy of the sandboxes the Manager creates; nil with
+	// openshell.sandbox_policy: image. policyErr is why it could not be
+	// built, returned when a sandbox is to be created.
+	policy    *SandboxPolicy
+	policyErr error
 	// logger reports what does not fail a command.
 	logger *log.Logger
 }
@@ -110,6 +115,7 @@ func NewManager(client Client, tokens TokenStore, cfg *config.Config, opts ...Ma
 		snaps:          newSnapshotStore(cfg),
 		logger:         log.Default().WithPrefix("sessions"),
 	}
+	m.policy, m.policyErr = BuildSandboxPolicy(cfg)
 	if m.osewaBinaryDir == "" {
 		m.osewaBinaryDir = config.DefaultOsewaBinaryDir
 	}
@@ -459,12 +465,16 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 			image = m.image
 		}
 
+		if m.policyErr != nil {
+			return nil, m.policyErr
+		}
 		fmt.Fprintf(progress, "Starting sandbox %s...\n", sandbox) //nolint:errcheck
 		sb, created, err = m.client.EnsureSandbox(ctx, sandbox, SandboxRequest{
 			Image:       image,
 			Labels:      ownerLabels(opts.User),
 			Annotations: sessionAnnotations(opts.User.Username(), repos, name, profile, p.Providers),
 			Providers:   p.Providers,
+			Policy:      m.policy,
 		})
 		var missing *MissingProviderError
 		if errors.As(err, &missing) {

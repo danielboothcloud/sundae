@@ -212,6 +212,21 @@ type OpenShellConfig struct {
 	// managed label) that are no longer declared. Off by default: such
 	// providers are kept and reported.
 	PruneProviders bool `env:"PRUNE_PROVIDERS" yaml:"prune_providers"`
+
+	// SandboxPolicy is where the policy of a sandbox Sundae creates comes
+	// from: "sundae" (the default) sends one, OpenShell's restrictive
+	// default plus network rules for Sundae's git endpoint, the S3
+	// snapshot endpoint and NetworkPolicies; "image" sends none, so the
+	// image's /etc/openshell/policy.yaml applies, or OpenShell's default,
+	// which denies all network access. It applies when a sandbox is
+	// created; existing sandboxes keep theirs.
+	SandboxPolicy string `env:"SANDBOX_POLICY" yaml:"sandbox_policy"`
+
+	// NetworkPolicies are extra network rules for the policy Sundae
+	// sends (sandbox_policy: sundae), e.g. for an agent's API that no
+	// attached provider covers. The environment form is
+	// SUNDAE_OPENSHELL_NETWORK_POLICIES_<index>_<KEY>.
+	NetworkPolicies []OpenShellNetworkPolicy `envPrefix:"NETWORK_POLICIES_" yaml:"network_policies"`
 }
 
 // Config is the configuration for Sundae.
@@ -362,6 +377,8 @@ func (c *Config) Environ() []string {
 
 	// Provider credentials only ever live in their credentials_dir.
 	envs = append(envs, c.providersEnviron()...)
+
+	envs = append(envs, c.sandboxPolicyEnviron()...)
 
 	envs = append(envs, c.sessionsEnviron()...)
 
@@ -709,6 +726,7 @@ func DefaultConfig() *Config {
 			TokenTTL:      24 * time.Hour,
 			Command:       "bash -l",
 			ProvidersSync: DefaultProvidersSync,
+			SandboxPolicy: SandboxPolicySundae,
 		},
 		Sessions: SessionsConfig{
 			Osewa: OsewaConfig{
@@ -786,7 +804,7 @@ func (c *Config) Validate() error {
 
 	c.HTTP.CORS.AllowedOrigins = append([]string{c.HTTP.PublicURL}, c.HTTP.CORS.AllowedOrigins...)
 
-	return errors.Join(c.validateOpenShell(), c.validateProviders(), c.validateSessions(), c.validateProjects(), c.validateForges(), c.validateGitIdentities(), c.validateNotifications(), c.validateSnapshots())
+	return errors.Join(c.validateOpenShell(), c.validateProviders(), c.validateSandboxPolicy(), c.validateSessions(), c.validateProjects(), c.validateForges(), c.validateGitIdentities(), c.validateNotifications(), c.validateSnapshots())
 }
 
 // validateOpenShell validates the OpenShell configuration and resolves its

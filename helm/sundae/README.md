@@ -198,23 +198,64 @@ the result):
 
 ### Sandbox egress
 
-OpenShell denies a sandbox all network access unless its policy allows it,
+OpenShell denies a sandbox all network access its policy does not allow,
 and git (and jj, which runs git) in the sandbox must reach Sundae's HTTP
-Service (`config.openshell.clone_url`). Sundae does not set sandbox
-policies, and the OpenShell 0.1.8 chart has no value for a default one, so
-supply it in one of two ways (OpenShell picks the first that exists: a
-gateway-global policy, the sandbox's saved policy, the image's
-`/etc/openshell/policy.yaml`, the deny-all default):
+Service (`config.openshell.clone_url`). Sundae takes care of this: with
+`config.openshell.sandbox_policy: sundae` (the default) it gives each
+sandbox it creates a policy, OpenShell's restrictive default (the
+filesystem and process limits a sandbox gets without a policy) with these
+network rules:
 
-- in the sandbox image, as `/etc/openshell/policy.yaml` (the image in
-  `deploy/sandbox` deliberately has none, since it would apply to every
-  sandbox from that image), or
-- as the gateway-global policy, once, with the OpenShell CLI as a gateway
-  admin: `openshell policy set --global --policy ./policy.yaml`. A global
-  policy replaces every sandbox's own policy and blocks changes to them.
+- `sundae_git`: the clone URL's host and port, for any program in the
+  sandbox;
+- `sundae_snapshots`, with `config.snapshots.s3.enabled`: the host and port
+  the presigned snapshot URLs point at, for any program (`curl` uses it).
+  That is `<bucket>.<endpoint host>` (for AWS,
+  `<bucket>.s3.<region>.amazonaws.com`), or the endpoint's host with
+  `path_style: true`;
+- the rules in `config.openshell.network_policies`.
 
-The policy needs at least this rule (the install notes print it with this
-release's host and port); list the real paths of your image's binaries:
+Nothing else is allowed, except what the providers attached to a sandbox
+allow: the gateway adds their profiles' rules. Add rules for anything else
+the sandboxes need, e.g. an agent's API that no provider covers or a
+package registry:
+
+```yaml
+config:
+  openshell:
+    network_policies:
+      - name: anthropic
+        endpoints:
+          - host: api.anthropic.com
+            port: 443                # or ports: [80, 443]
+        binaries: [/usr/local/bin/claude]   # empty: any program
+      - name: internal
+        endpoints:
+          - host: "*.corp.example.com"   # a wildcard needs allowed_ips for private addresses
+            port: 443
+            allowed_ips: [10.0.0.0/8]
+```
+
+An endpoint has a `host` (a name, an IP address, or a wildcard in the first
+label) or `allowed_ips`, and `port` or `ports`. `protocol` is empty
+(connections pass through the sandbox proxy uninspected, right for most
+clients), `rest` (requests are inspected; needs `access: read-only`,
+`read-write` or `full`) or `tcp`. Names may not start with `sundae_`.
+`sundae config check` checks the rules; the gateway checks the policy again
+when it creates a sandbox, and refuses one whose rules overlap ambiguously
+(the same host and port with different protocols, say).
+
+The policy is sent when a sandbox is created; it overrides the image's
+`/etc/openshell/policy.yaml`. A sandbox that already exists keeps its
+policy, including through stops, parks and resumes: changes reach a session
+when it gets a new sandbox (`session end`, then start it again). A
+gateway-global policy (`openshell policy set --global`) replaces every
+sandbox's policy, Sundae's included.
+
+To manage the policy yourself instead, set `sandbox_policy: image`: Sundae
+then sends none, and the image's `/etc/openshell/policy.yaml` applies, or
+OpenShell's default, which allows no network access. That policy needs at
+least a rule for the clone URL (and, with snapshots, the S3 endpoint):
 
 ```yaml
 version: 1
@@ -223,16 +264,11 @@ network_policies:
     endpoints:
       - host: <fullname>-http.<namespace>.svc.cluster.local
         port: 23232
-        protocol: rest
-        access: read-write
     binaries:
-      - path: /usr/bin/git
-      - path: /usr/bin/jj
+      - path: "/**"
 ```
 
-A rule covers the processes a listed binary starts (`git-remote-http`). An
-exact host name may resolve to a cluster-private address. With S3 snapshots,
-add the S3 endpoint for `curl` (top-level README, "Sandbox egress").
+An exact host name may resolve to a cluster-private address.
 
 ### A gateway installed separately
 
@@ -443,11 +479,10 @@ is set).
   The chart points `snapshots.s3.credentials_file` at it, refuses inline keys
   and a bare `on:` key, and requires a bucket. Sundae needs egress to the
   endpoint (HEAD, small GET and PUT, LIST, DELETE), and so do the sandboxes:
-  they upload and download the archives themselves with `curl`, so add the
-  endpoint to the sandbox network policy (example in the top-level README,
-  "Sandbox egress"). With `config.sessions.suspend.fallback: snapshot`, idle
-  sessions are parked to S3 instead of left running, since that driver
-  cannot suspend.
+  they upload and download the archives themselves with `curl`, which the
+  policy Sundae gives them allows ("Sandbox egress" above). With
+  `config.sessions.suspend.fallback: snapshot`, idle sessions are parked to
+  S3 instead of left running, since that driver cannot suspend.
 - **The data volume outlives the release.** `helm uninstall` keeps the
   `data-<fullname>-0` claim. Its size cannot be changed by upgrading the
   release after the first install (StatefulSet volume claims are immutable).
@@ -470,8 +505,7 @@ Not checked, because it needs an image build or a live cluster:
   the bootstrap sequence was run against a native osewa build outside a
   sandbox; neither has run under OpenShell.
 - Whether a sandbox started from the sandbox image comes up under OpenShell:
-  the workspace seeding, the UID 10001 identity, and the binary paths in the
-  sandbox network policy.
+  the workspace seeding and the UID 10001 identity.
 - Nothing was installed on a cluster, so the chart itself and the OpenShell
   install order are untested, including the embedded OpenShell gateway and
   Agent Sandbox controller (`openshell.install`, `agentSandbox.install`):
@@ -482,8 +516,10 @@ Not checked, because it needs an image build or a live cluster:
 - Whether the gateway accepts Sundae's requests with only the client
   certificate from `openshell-client-tls`, and whether the Go SDK in `go.mod`
   (0.1.6) works against a 0.1.8 gateway.
-- Whether sandboxes can reach Sundae's HTTP Service, and how the sandbox
-  egress policy is supplied.
+- Whether the gateway accepts the sandbox policy Sundae sends on create
+  (`config.openshell.sandbox_policy: sundae`; built from the OpenShell 0.1.8
+  sources and checked only against the SDK's fake gateway), and whether
+  sandboxes can then reach Sundae's HTTP Service through it.
 - Session status polling and parking against a gateway: that `osewa local
   ls` by exec answers within the poll timeout in a sandbox, what the gateway
   answers to a suspend (expected: FailedPrecondition, "compute driver does

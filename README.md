@@ -473,6 +473,12 @@ openshell:
       credentials_dir: /etc/sundae-providers/my-claude  # ANTHROPIC_API_KEY
   providers_sync: 1m       # at least 10s
   prune_providers: false   # delete undeclared providers Sundae created
+  # The policy of new sandboxes: "sundae" (OpenShell's restrictive default
+  # plus egress to clone_url, the S3 snapshot endpoint and network_policies)
+  # or "image" (none sent; the image's /etc/openshell/policy.yaml applies).
+  # See "Sandbox egress" below.
+  sandbox_policy: sundae
+  network_policies: []
 
 sessions:
   osewa:
@@ -671,8 +677,9 @@ A placeholder only resolves when the sandbox's network policy lets the
 calling binary reach the endpoint, the endpoint is in the provider's
 credential binding, and the credential is in the declared place (the
 `Authorization` header by default); see "How Credential Injection Works" in
-the providers overview. Sundae does not manage sandbox policy. What the
-operator must provide:
+the providers overview. The policy Sundae gives sandboxes (see "Sandbox
+egress") allows only its own endpoints and `openshell.network_policies`,
+and binds no credentials. What the operator must provide:
 
 - **Provider profiles.** A provider's type is an imported provider profile
   (`openshell profile import`); its `endpoints` bind the credential and its
@@ -683,11 +690,12 @@ operator must provide:
   Attached providers add their profile's `_provider_*` network policy
   entries to the sandbox's effective policy, so a profile that covers its
   endpoints and binaries needs no policy of yours.
-- **Endpoints outside a profile.** An endpointless profile binds only
-  through a sandbox policy endpoint naming the provider instance
-  (`credential_binding: {provider: my-api}`), and any endpoint the agent
-  reaches that the provider policy does not allow needs a
-  `network_policies` entry like the ones below.
+- **Endpoints outside a profile.** Any endpoint the agent reaches that the
+  provider policy does not allow needs an `openshell.network_policies`
+  rule (see "Sandbox egress"). An endpointless profile binds only through a
+  sandbox policy endpoint naming the provider instance
+  (`credential_binding: {provider: my-api}`), which those rules cannot
+  express: that needs your own policy (`openshell.sandbox_policy: image`).
 - **HTTPS inspection.** The proxy substitutes credentials only in traffic
   it handles as HTTP: an endpoint with `tls: skip` or a raw tunnel never
   resolves a placeholder. The programs must trust the sandbox proxy's CA,
@@ -910,47 +918,86 @@ A program left running longer than `token_ttl` after the last start or
 attach loses git access until the next one renews the file. Attach again, or
 raise `token_ttl` for long-running agents.
 
-**Sandbox egress.** The sandbox's network policy must allow git (and jj, which
-runs git) to reach Sundae's internal HTTP endpoint. OpenShell's default policy
-denies all egress, and Sundae sets no policy, so put the rule in the sandbox
-image's `/etc/openshell/policy.yaml` or in a gateway-global policy (`openshell
-policy set --global`; see the Helm chart's README, "Sandbox egress"). Here is
-an example sandbox policy entry. Adjust the host, port and binary paths to
-your cluster and image, and the field names to your OpenShell version:
+**Sandbox egress.** OpenShell denies a sandbox all network access its
+policy does not allow, and git (and jj, which runs git) in the sandbox must
+reach Sundae's internal HTTP endpoint. With `openshell.sandbox_policy:
+sundae`, the default, Sundae gives every sandbox it creates a policy that
+allows it: OpenShell's restrictive default policy (`/sandbox` and `/tmp`
+writable, the system directories read-only, the default process identity;
+`restrictive_default_policy()` in OpenShell 0.1.8) with these network rules,
+each allowing any program in the sandbox and inspecting nothing:
+
+- `sundae_git`: the host and port of `openshell.clone_url` (or
+  `http.public_url`), 80 or 443 by scheme when the URL has no port;
+- `sundae_snapshots`, with S3 snapshots on: the host and port the presigned
+  snapshot URLs point at, `<bucket>.<endpoint host>` (for AWS,
+  `<bucket>.s3.<region>.amazonaws.com`), or the endpoint's host with
+  `path_style: true`;
+- the rules in `openshell.network_policies`.
+
+Providers attached to a sandbox add their profiles' rules on the gateway.
+Anything else a session needs, such as an agent's API that no provider
+covers or a package registry, goes in `openshell.network_policies`:
+
+```yaml
+openshell:
+  network_policies:
+    - name: anthropic
+      endpoints:
+        - host: api.anthropic.com       # a name, an IP, or *.example.com
+          port: 443                     # or ports: [80, 443]
+      binaries: [/usr/local/bin/claude] # empty: any program
+    - name: pypi
+      endpoints:
+        - host: pypi.org
+          port: 443
+          protocol: rest                # inspect requests...
+          access: read-only             # ...and allow only reads
+        - host: files.pythonhosted.org
+          port: 443
+```
+
+An endpoint needs a `host` or `allowed_ips` (IP addresses or CIDR ranges
+every resolved address must be in; a wildcard host needs them to reach a
+private address, an exact name does not), and `port` or `ports`. `protocol`
+is empty (connections pass through the sandbox proxy uninspected, right for
+git, curl and most clients), `rest` (with `access`: `read-only`,
+`read-write` or `full`) or `tcp` (native TCP, for non-HTTP clients). Names
+may not start with `sundae_`. The environment form is
+`SUNDAE_OPENSHELL_NETWORK_POLICIES_<i>_NAME`, `..._BINARIES` (comma-separated)
+and `SUNDAE_OPENSHELL_NETWORK_POLICIES_<i>_ENDPOINTS_<j>_HOST`, `_PORT`,
+`_PORTS`, `_PROTOCOL`, `_ACCESS`, `_ALLOWED_IPS`. `sundae config check`
+checks the rules; the gateway checks the whole policy again when it creates
+a sandbox.
+
+The policy is sent only when a sandbox is created, and takes precedence over
+the image's `/etc/openshell/policy.yaml`. An existing sandbox keeps the
+policy it was created with, through stops, parks and resumes; a change
+reaches a session when it gets a new sandbox (`session end`, then start it
+again). A gateway-global policy (`openshell policy set --global`) replaces
+every sandbox's policy, Sundae's included.
+
+To ship your own policy in the image instead, set `openshell.sandbox_policy:
+image`: Sundae sends none, and the image's `/etc/openshell/policy.yaml`
+applies, or OpenShell's default, which allows no network access.
+`network_policies` is then refused. That policy needs at least:
 
 ```yaml
 network_policies:
   sundae_git:
-    name: sundae-git
+    name: sundae_git
     endpoints:
       - host: sundae-http.sundae.svc.cluster.local
         port: 23232
-        protocol: rest
-        access: read-write
     binaries:
-      - path: /usr/bin/git
-      - path: /usr/lib/git-core/git-remote-http
-      - path: /usr/bin/jj
+      - path: "/**"
 ```
+
+and, with S3 snapshots on, a rule like it for the snapshot host (see "S3
+snapshots").
 
 osewa needs no egress: the bridge reaches its server over loopback, and Sundae
 turns its update checks off.
-
-With S3 snapshots on, the sandbox also needs egress to the S3 endpoint
-(`curl` uploads and downloads the snapshot; see "S3 snapshots"):
-
-```yaml
-network_policies:
-  sundae_snapshots:
-    name: sundae-snapshots
-    endpoints:
-      - host: rook-ceph-rgw-store.rook-ceph.svc.cluster.local   # or s3.<region>.amazonaws.com, <bucket>.s3.<region>.amazonaws.com
-        port: 80
-        protocol: rest
-        access: read-write
-    binaries:
-      - path: /usr/bin/curl
-```
 
 **Idle timeout.** A bridged session is an ordinary SSH session, so
 `ssh.idle_timeout` (default 600 seconds) still applies. Terminal traffic in
@@ -1002,8 +1049,8 @@ archive's MD5 and the `sse` header, and the sandbox uploads the file with
 `curl`; then the file is deleted. To restore, the sandbox streams `curl |
 gzip -d | tar -x` into `/sandbox`. The sandbox therefore needs `sh`, `tar`
 (GNU tar for anchored exclusions), `gzip`, `md5sum` and `curl`, which the
-sandbox image in `deploy/sandbox` has, egress to the endpoint (see "Sandbox
-egress"), and free space in `/tmp` for the compressed archive. The archive is
+sandbox image in `deploy/sandbox` has, egress to the endpoint (the policy
+Sundae gives sandboxes allows it; see "Sandbox egress"), and free space in `/tmp` for the compressed archive. The archive is
 written to a file first, not streamed, because AWS S3 refuses an upload
 without a length, and so a `tar` that fails half-way never uploads a
 truncated archive.

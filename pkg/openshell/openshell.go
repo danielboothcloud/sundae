@@ -119,6 +119,11 @@ type SandboxRequest struct {
 	// Providers are the OpenShell providers attached to the sandbox on
 	// creation. An existing sandbox's are left alone; see SyncProviders.
 	Providers []string
+	// Policy is the sandbox's policy on creation (see BuildSandboxPolicy);
+	// nil sends none, so the image's /etc/openshell/policy.yaml or
+	// OpenShell's default applies. An existing sandbox keeps the policy it
+	// has. Read only.
+	Policy *SandboxPolicy
 }
 
 // ProviderChanges is what SyncProviders changed.
@@ -328,7 +333,7 @@ func (c *sdkClient) existing(ctx context.Context, sb *Sandbox, req SandboxReques
 
 // create creates the sandbox and waits for it, deleting it on failure.
 func (c *sdkClient) create(ctx context.Context, name string, req SandboxRequest) (*Sandbox, bool, error) {
-	spec := &v1.SandboxSpec{Providers: slices.Clone(req.Providers)}
+	spec := &v1.SandboxSpec{Providers: slices.Clone(req.Providers), Policy: req.Policy}
 	if req.Image != "" {
 		spec.Template = &v1.SandboxTemplate{Image: req.Image}
 	}

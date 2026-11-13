@@ -228,6 +228,31 @@ config:
     # Delete providers Sundae created that are no longer declared. Off: they
     # are kept and listed as undeclared.
     prune_providers: false
+    # The policy of the sandboxes Sundae creates. OpenShell denies a sandbox
+    # all network access its policy does not allow. "sundae" (the default):
+    # Sundae sends OpenShell's restrictive default policy plus network rules
+    # letting any program in the sandbox reach clone_url (git, jj) and, with
+    # config.snapshots.s3 enabled, the S3 endpoint (curl), and the rules in
+    # network_policies. "image": Sundae sends none, so the image's
+    # /etc/openshell/policy.yaml applies, or OpenShell's default, which
+    # allows no network access. Applies to sandboxes created after the
+    # change; existing ones keep theirs. A gateway-global policy (`openshell
+    # policy set --global`) replaces either. See the chart README, "Sandbox
+    # egress".
+    sandbox_policy: sundae
+    # Extra network rules for sandbox_policy: sundae, e.g. an agent's API
+    # that no attached provider covers (providers add their own rules).
+    # Names may not start with "sundae_". An endpoint has a host (a name, an
+    # IP or *.domain) or allowed_ips, and port or ports; protocol is empty
+    # (uninspected; right for most clients), rest (with access: read-only,
+    # read-write or full) or tcp. binaries are the programs allowed; empty
+    # means any.
+    network_policies: []
+    #  - name: anthropic
+    #    endpoints:
+    #      - host: api.anthropic.com
+    #        port: 443
+    #    binaries: [/usr/local/bin/claude]
 
   # What runs in the sandboxes: several named sessions per repository
   # (session start <repo> --name <name>), each from a profile.
@@ -266,8 +291,9 @@ config:
     # config.openshell.providers, or created on the gateway with
     # `openshell provider create`) to attach to this profile's sandboxes
     # only; their programs get the credentials as placeholders the sandbox
-    # proxy resolves. The provider profiles' binaries and endpoints, or the
-    # sandbox policy, must allow the requests. See the top-level README,
+    # proxy resolves. The provider profiles' binaries and endpoints, or
+    # config.openshell.network_policies, must allow the requests. See the
+    # top-level README,
     # "Providers".
     profiles: {}
     #  claude:
@@ -371,8 +397,9 @@ config:
   # Ceph RGW and other S3-compatible stores). Off by default; while
   # s3.enabled is false nothing here is checked. Semantics in the top-level
   # README, "S3 snapshots". The sandboxes upload and download the snapshot
-  # themselves through presigned URLs: the sandbox network policy must allow
-  # the endpoint, and Sundae needs egress to it too.
+  # themselves through presigned URLs; the sandbox policy Sundae sends
+  # (config.openshell.sandbox_policy: sundae) allows the endpoint. Sundae
+  # needs egress to it too.
   snapshots:
     s3:
       enabled: false

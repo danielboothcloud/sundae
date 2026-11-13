@@ -15,8 +15,9 @@
 # - The image's ENTRYPOINT and CMD never run: OpenShell replaces the container
 #   command with its own sandbox runtime, which it stages into /.openshell.
 #   Nothing here lives under /.openshell or /run, which OpenShell mounts over.
-#   There is deliberately no /etc/openshell/policy.yaml: a policy there would
-#   become the policy of every sandbox started from this image.
+#   There is deliberately no /etc/openshell/policy.yaml: Sundae sends each
+#   sandbox it creates its policy (openshell.sandbox_policy: sundae), which
+#   takes precedence over one in the image.
 # - On Kubernetes the pod runs as the driver's sandbox UID/GID, 10001:10001
 #   unless server.sandboxUid/sandboxGid are set in the OpenShell chart. The
 #   image's USER is ignored there; Docker and Podman gateways use it. Either
@@ -51,8 +52,8 @@
 # - With S3 snapshots on (snapshots.s3), Sundae archives /sandbox with GNU
 #   tar and gzip into /tmp/sundae, checks it with md5sum and uploads it
 #   with curl to a presigned URL; a restore streams curl | gzip -d | tar -x.
-#   All are in this image; the sandbox network policy must allow curl to
-#   reach the S3 endpoint.
+#   All are in this image; the policy Sundae sends allows curl to reach the
+#   S3 endpoint.
 # - The default filesystem policy grants read-only access to /usr, /bin, /lib
 #   and /etc but not /opt, so every tool is installed under /usr; /sandbox and
 #   /tmp are writable.

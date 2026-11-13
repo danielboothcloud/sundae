@@ -5,7 +5,8 @@ Sundae is running as StatefulSet {{ include "sundae.fullname" . }} in namespace 
 
 The configuration is the ConfigMap {{ include "sundae.fullname" . }}-config, mounted read-only.
 {{- if include "sundae.openshellEnabled" . }}
-{{- $os := (include "sundae.config" . | fromYaml).openshell }}
+{{- $cfg := include "sundae.config" . | fromYaml }}
+{{- $os := $cfg.openshell }}
 OpenShell sessions are enabled against {{ $os.gateway_address }}.
 {{- if include "sundae.openshellEmbedded" . }}
 The gateway is part of this release: Service {{ include "sundae.openshellFullname" . }}.
@@ -13,25 +14,17 @@ The gateway is part of this release: Service {{ include "sundae.openshellFullnam
 It needs Agent Sandbox (agents.x-k8s.io) on the cluster; agentSandbox.install is off.
 {{- end }}
 {{- end }}
-{{- $u := urlParse $os.clone_url }}
-{{- $hostPort := splitList ":" $u.host }}
 
-Sandboxes clone and push over {{ $os.clone_url }}. OpenShell denies all
-sandbox egress by default, so the sandboxes' policy (in the image at
-/etc/openshell/policy.yaml, or a gateway-global policy) needs a rule like:
-
-network_policies:
-  sundae_git:
-    endpoints:
-      - host: {{ first $hostPort }}
-        port: {{ if gt (len $hostPort) 1 }}{{ last $hostPort }}{{ else }}80{{ end }}
-        protocol: rest
-        access: read-write
-    binaries:
-      - path: /usr/bin/git
-      - path: /usr/bin/jj
-
-with your image's real binary paths. See the chart README, "Sandbox egress".
+Sandboxes clone and push over {{ $os.clone_url }}.
+{{- if eq (lower (default "sundae" $os.sandbox_policy)) "image" }}
+config.openshell.sandbox_policy is "image": Sundae sends no sandbox policy, so the
+image's /etc/openshell/policy.yaml must allow that (OpenShell otherwise denies all
+sandbox egress). See the chart README, "Sandbox egress".
+{{- else }}
+Sundae gives each sandbox it creates a policy allowing that{{ if (($cfg.snapshots).s3).enabled }} and the S3 snapshot endpoint{{ end }}
+{{- with $os.network_policies }}, plus {{ len . }} rule(s) from config.openshell.network_policies{{ end }}.
+Other egress is denied unless an attached provider allows it; see the chart README, "Sandbox egress".
+{{- end }}
 {{- end }}
 {{- if not (or .Values.initialAdminKeys .Values.config.initial_admin_keys .Values.initialAdminKeysSecret.name) }}
 

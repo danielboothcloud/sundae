@@ -112,6 +112,12 @@ func New(cfg config.S3SnapshotConfig, opts ...Option) (*Store, error) {
 // Bucket returns the bucket name.
 func (s *Store) Bucket() string { return s.bucket }
 
+// BucketURL returns the URL of the bucket, as objects are addressed under
+// it: the endpoint, with the bucket as the first label of the host for
+// virtual-hosted addressing or as the first path segment for path-style.
+// Its scheme and host are where presigned URLs point.
+func (s *Store) BucketURL() *url.URL { return s.objectURL("") }
+
 // SSEHeaders returns the server-side encryption headers every upload
 // carries; empty when none is configured.
 func (s *Store) SSEHeaders() http.Header {

@@ -229,6 +229,59 @@ openshell:
   # longer declared above. Off: they are kept, and listed by
   # "openshell providers".
   prune_providers: {{ .OpenShell.PruneProviders }}
+  # The policy of the sandboxes Sundae creates. OpenShell denies a sandbox
+  # all network access its policy does not allow. "sundae": Sundae sends
+  # OpenShell's restrictive default policy (filesystem and process limits)
+  # with network rules that let any program in the sandbox reach the clone
+  # URL (rule sundae_git) and, with snapshots.s3 enabled, the S3 endpoint
+  # (sundae_snapshots), plus network_policies below. "image": Sundae sends
+  # none; the image's /etc/openshell/policy.yaml applies, or OpenShell's
+  # default, which allows no network access. Applies to sandboxes created
+  # after a restart; existing ones keep their policy. A gateway-global
+  # policy (openshell policy set --global) replaces either.
+  sandbox_policy: {{ printf "%q" .OpenShell.SandboxPolicy }}
+  # Extra network rules for sandbox_policy: sundae, e.g. an agent's API
+  # that no attached provider covers (providers add their own rules).
+  # Names may not start with "sundae_". Each endpoint has a host (a name,
+  # an IP or *.domain) or allowed_ips, and port or ports. protocol is empty
+  # (connections pass through the sandbox proxy uninspected; right for most
+  # clients), rest (with access: read-only, read-write or full) or tcp.
+  # binaries are the programs allowed; empty means any ("/**").
+{{- if .OpenShell.NetworkPolicies }}
+  network_policies:
+{{- range .OpenShell.NetworkPolicies }}
+    - name: {{ printf "%q" .Name }}
+      endpoints:
+      {{- range .Endpoints }}
+        - host: {{ printf "%q" .Host }}
+          {{- if .Port }}
+          port: {{ .Port }}
+          {{- end }}
+          {{- if .Ports }}
+          ports: [{{ range $i, $p := .Ports }}{{ if $i }}, {{ end }}{{ $p }}{{ end }}]
+          {{- end }}
+          {{- if .Protocol }}
+          protocol: {{ printf "%q" .Protocol }}
+          {{- end }}
+          {{- if .Access }}
+          access: {{ printf "%q" .Access }}
+          {{- end }}
+          {{- if .AllowedIPs }}
+          allowed_ips: [{{ range $i, $ip := .AllowedIPs }}{{ if $i }}, {{ end }}{{ printf "%q" $ip }}{{ end }}]
+          {{- end }}
+      {{- end }}
+      {{- if .Binaries }}
+      binaries: [{{ range $i, $b := .Binaries }}{{ if $i }}, {{ end }}{{ printf "%q" $b }}{{ end }}]
+      {{- end }}
+{{- end }}
+{{- else }}
+  #network_policies:
+  #  - name: anthropic
+  #    endpoints:
+  #      - host: api.anthropic.com
+  #        port: 443
+  #    binaries: [/usr/local/bin/claude]
+{{- end }}
 
 # Sessions: what runs in the OpenShell sandboxes. Each user can have several
 # named sessions per repository (session start REPO --name NAME), one sandbox
@@ -478,9 +531,9 @@ notifications:
 # default: while s3.enabled is false nothing in this section is checked.
 # Each session has one object, <prefix>/<user-id>/<sandbox>.tar.gz, replaced
 # by every snapshot. The sandbox uploads and downloads it itself through
-# presigned URLs Sundae signs, so the S3 keys never enter a sandbox, but
-# the sandbox network policy must allow the endpoint. Changes take effect on
-# restart.
+# presigned URLs Sundae signs, so the S3 keys never enter a sandbox; with
+# openshell.sandbox_policy: sundae, the sandbox policy allows the endpoint.
+# Changes take effect on restart.
 snapshots:
   s3:
     enabled: {{ .Snapshots.S3.Enabled }}
