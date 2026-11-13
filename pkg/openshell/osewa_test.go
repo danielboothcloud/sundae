@@ -88,7 +88,13 @@ func TestGitCredentialsScript(t *testing.T) {
 
 	git := func(args ...string) string {
 		cmd := exec.CommandContext(t.Context(), "git", args...)
-		cmd.Env = []string{"HOME=" + home, "PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1"}
+		// Run outside any repository so only the global config is read
+		// (CI checkouts carry their own http.extraheader in .git/config).
+		cmd.Dir = home
+		cmd.Env = []string{
+			"HOME=" + home, "PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1",
+			"GIT_CEILING_DIRECTORIES=" + filepath.Dir(home),
+		}
 		out, _ := cmd.Output()
 		return strings.TrimSpace(string(out))
 	}

@@ -106,6 +106,11 @@ func pushBranch(ctx context.Context, dir, forge, remote, branch string, lease bo
 
 	res.Forced = !ff
 	if err := updateRef(ctx, dir, trackRef, l, u); err != nil {
+		// git push itself moves the remote-tracking ref when the remote's
+		// fetch refspec maps the pushed branch, so it may already be there.
+		if cur, rerr := resolveRef(ctx, dir, trackRef); rerr == nil && cur == l {
+			return res, nil
+		}
 		return res, fmt.Errorf("pushed, but could not record it: %w", err)
 	}
 	return res, nil

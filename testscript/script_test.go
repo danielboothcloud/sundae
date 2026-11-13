@@ -454,18 +454,34 @@ func cmdNewWebhook(ts *testscript.TestScript, neg bool, args []string) {
 		ts.Fatalf("usage: new-webhook <env-name>")
 	}
 
+	// webhook.site is an external service that rate-limits (HTTP 429, or an
+	// HTML error page). Retry with backoff before giving up.
 	const whSite = "https://webhook.site"
-	req, err := http.NewRequest(http.MethodPost, whSite+"/token", nil) //nolint:noctx
-	check(ts, err, neg)
+	var lastErr error
+	for attempt := range 5 {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * 3 * time.Second)
+		}
+		req, err := http.NewRequest(http.MethodPost, whSite+"/token", nil) //nolint:noctx
+		check(ts, err, neg)
+		req.Header.Set("Accept", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
-	check(ts, err, neg)
-
-	defer resp.Body.Close()
-	var site webhookSite
-	check(ts, json.NewDecoder(resp.Body).Decode(&site), neg)
-
-	ts.Setenv(args[0], whSite+"/"+site.UUID)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		var site webhookSite
+		err = json.NewDecoder(resp.Body).Decode(&site)
+		resp.Body.Close() //nolint:errcheck
+		if resp.StatusCode/100 != 2 || err != nil || site.UUID == "" {
+			lastErr = fmt.Errorf("webhook.site: status %d: %v", resp.StatusCode, err)
+			continue
+		}
+		ts.Setenv(args[0], whSite+"/"+site.UUID)
+		return
+	}
+	ts.Fatalf("webhook.site unavailable after retries: %v", lastErr)
 }
 
 func cmdCurl(ts *testscript.TestScript, neg bool, args []string) {
