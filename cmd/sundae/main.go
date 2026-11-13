@@ -13,6 +13,7 @@ import (
 	"github.com/danielboothcloud/sundae/cmd/sundae/browse"
 	configcmd "github.com/danielboothcloud/sundae/cmd/sundae/config"
 	"github.com/danielboothcloud/sundae/cmd/sundae/hook"
+	kubecmd "github.com/danielboothcloud/sundae/cmd/sundae/kube"
 	"github.com/danielboothcloud/sundae/cmd/sundae/serve"
 	"github.com/danielboothcloud/sundae/pkg/config"
 	logr "github.com/danielboothcloud/sundae/pkg/log"
@@ -78,6 +79,7 @@ func init() {
 		admin.Command,
 		browse.Command,
 		configcmd.Command,
+		kubecmd.Command,
 	)
 	rootCmd.CompletionOptions.HiddenDefaultCmd = true
 
@@ -145,14 +147,14 @@ func main() {
 // loadsConfig reports whether the command selected by args needs the server
 // config loaded before it runs. `sundae config` loads (and reports on) the config
 // itself, so it must not be stopped by a bad config here, and must not open
-// the log file the config names.
+// the log file the config names. `sundae kube` (chart hook Jobs) has no config.
 func loadsConfig(args []string) bool {
 	c, _, err := rootCmd.Find(args)
 	if err != nil {
 		return true
 	}
 	for ; c != nil; c = c.Parent() {
-		if c == configcmd.Command {
+		if c == configcmd.Command || c == kubecmd.Command {
 			return false
 		}
 	}

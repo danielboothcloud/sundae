@@ -462,16 +462,29 @@ openshell:
     # cluster's default StorageClass, 1Gi. Immutable after install.
     dataStorageClass: ""
     credentialStorage:
-      # An existing Secret holding the key that encrypts provider credentials
-      # in the gateway's database: key `key-encryption-key`, a base64-encoded
-      # 32-byte value (`openssl rand -base64 32`). Empty: the OpenShell chart
-      # generates the Secret (kept on uninstall) and finds it again on upgrade
-      # with `lookup`. That only works with helm install/upgrade: helm
-      # template and Argo CD cannot look it up and render a new random key
-      # every time, which makes stored credentials unreadable. For GitOps,
-      # create the Secret yourself (e.g. an ExternalSecret in extraObjects)
-      # and name it here.
-      existingSecret: ""
+      # The Secret holding the key that encrypts provider credentials in the
+      # gateway's database: key `key-encryption-key`, a base64-encoded
+      # 32-byte value (`openssl rand -base64 32`). With
+      # openshell.credentialKey.generate (the default) this chart creates it
+      # (see there); otherwise it must exist, e.g. an ExternalSecret in
+      # extraObjects. Empty, with generate off: the OpenShell chart generates
+      # it at render time and finds it again with `lookup`, which only works
+      # with helm install/upgrade (helm template and Argo CD render a new key
+      # every time, which makes stored credentials unreadable).
+      existingSecret: openshell-credential-key
+  credentialKey:
+    # Generate the credentialStorage.existingSecret Secret in the cluster,
+    # once, with a pre-install/pre-upgrade hook Job (an Argo CD PreSync
+    # hook) running this chart's image: 32 random bytes, base64-encoded. An
+    # existing Secret is never changed, and the Secret is not part of the
+    # release, so uninstalling, pruning or re-rendering keeps it. Works the
+    # same with helm install, helm template and Argo CD. Keep the Secret if
+    # you reinstall: losing it makes the stored credentials unreadable. Set
+    # to false when you provide the Secret yourself (an ExternalSecret, to
+    # back it up outside the cluster), so the Job cannot create it first.
+    # Ignored when an OpenShell credential driver (kubernetesSecrets, vault)
+    # is enabled: those do not use the key.
+    generate: true
 
 # The Kubernetes Agent Sandbox controller and its CRDs
 # (https://github.com/kubernetes-sigs/agent-sandbox v1.0.10, vendored in

@@ -161,14 +161,22 @@ How the pieces are ordered:
   pod waits in `ContainerCreating` until it exists rather than starting
   without it.
 - **The credential key.** The gateway encrypts provider credentials with a
-  key-encryption key from a Secret. Left empty,
-  `openshell.server.credentialStorage.existingSecret` makes the OpenShell
-  chart generate that Secret and find it again on upgrade with `lookup`,
-  which only works with `helm install`/`upgrade`. With `helm template` or Argo
-  CD every render makes a new random key, and credentials stored with the old
-  one become unreadable. There, create the Secret yourself (key
-  `key-encryption-key`, value from `openssl rand -base64 32`), e.g. with an
-  `ExternalSecret` in `extraObjects`, and set `existingSecret` to its name.
+  key-encryption key from the Secret
+  `openshell.server.credentialStorage.existingSecret`
+  (`openshell-credential-key`). This chart generates it in the cluster: a
+  `pre-install,pre-upgrade` hook Job (weight -40, before the certgen Job)
+  runs `sundae kube ensure-secret`, which creates the Secret with 32 random
+  bytes, base64-encoded, unless it exists, and never changes an existing
+  one. The Secret is not part of the release, so `helm uninstall`, Argo CD
+  pruning and re-rendering all keep it; delete it only together with the
+  gateway's data volume, since stored credentials cannot be read without it.
+  The OpenShell chart's own generator is not used: it keeps the key across
+  upgrades with `lookup`, which `helm template` and Argo CD cannot run, so
+  every render there would make a new key. To keep the key outside the
+  cluster too, provide the Secret yourself (key `key-encryption-key`, value
+  from `openssl rand -base64 32`, e.g. an `ExternalSecret` in
+  `extraObjects`), name it in `existingSecret` and set
+  `openshell.credentialKey.generate: false`.
 
 With **Argo CD** (or anything that renders with `helm template` and applies
 the result):
@@ -178,12 +186,13 @@ the result):
   applies CRDs before the other kinds of the same sync wave. Two of them are
   over 200 KB, so apply them server-side (`ServerSideApply=true`); a
   client-side apply exceeds the annotation size limit.
-- Helm hooks become Argo CD hooks: the certgen Job (PreSync) runs before
-  every sync, before the Secrets it creates are needed. They are not part of
+- Helm hooks become Argo CD hooks: the credential key Job and the certgen
+  Job (PreSync) run before every sync, before the Secrets they create are
+  needed, and leave existing Secrets alone. Those Secrets are not part of
   the rendered manifests, so Argo CD never prunes them.
-- Set `openshell.server.credentialStorage.existingSecret` as above, and give
-  the `ExternalSecret` that creates it `argocd.argoproj.io/sync-wave: "-1"`
-  so it is synced before the gateway starts.
+- Nothing to set for the credential key. If you provide it yourself instead
+  (above), give the `ExternalSecret` `argocd.argoproj.io/sync-wave: "-1"` so
+  it is synced before the gateway starts.
 - Everything except the cluster-scoped RBAC and CRDs is in the release
   namespace.
 
@@ -283,7 +292,7 @@ config:
 | `openshell.install`, `agentSandbox.install` | no | Install the OpenShell gateway and Agent Sandbox with the release (step 2). |
 | `config.openshell.gateway_address`, `config.openshell.image` | with sessions | The gateway and the sandbox image from steps 1 and 2. With `openshell.install`, only the image. |
 | `openshell.server.workspaceStorageClass`, `.workspaceDefaultStorageSize` | with `openshell.install` | Each sandbox's `/sandbox` volume; empty uses the cluster default class and 2Gi. |
-| `openshell.server.credentialStorage.existingSecret` | with `openshell.install` under GitOps | The gateway's credential encryption key (step 2). |
+| `openshell.credentialKey.generate`, `openshell.server.credentialStorage.existingSecret` | no | The gateway's credential encryption key, generated once in the cluster as `openshell-credential-key` (step 2). |
 | `config.openshell.clone_url` | no | Defaults to this release's HTTP Service, `http://<fullname>-http.<namespace>.svc.cluster.local:23232`. |
 | `openshell.clientTLS.secretName` | no | Defaults to `openshell-client-tls`; the TLS paths in `config.openshell` point at it. Ignored with `openshell.install`. |
 | `persistence.size`, `persistence.storageClass` | no | Data volume; empty StorageClass uses the cluster default. |
