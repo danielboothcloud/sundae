@@ -76,6 +76,8 @@ type forgeState struct {
 	lastSync time.Time
 	lastErr  string
 	listing  *Listing
+	// listErr is why the last discovery failed; empty when it succeeded.
+	listErr string
 }
 
 // NewService returns the forge service for the forges in cfg, which must
@@ -289,9 +291,14 @@ type ForgeStatus struct {
 	// failing that the newest sync recorded in an imported repository.
 	LastSync  *time.Time `json:"last_sync"`
 	LastError string     `json:"last_error,omitempty"`
+	// ListError is why the last discovery failed; empty when it succeeded
+	// or none ran.
+	ListError string `json:"list_error,omitempty"`
+	// Syncing reports that a forge-wide sync is running.
+	Syncing bool `json:"syncing"`
 }
 
-// Status returns every forge's status.
+// Status returns every forge's status. It never calls a forge.
 func (s *Service) Status(ctx context.Context) ([]ForgeStatus, error) {
 	links, err := s.links(ctx, "")
 	if err != nil {
@@ -331,6 +338,8 @@ func (s *Service) Status(ctx context.Context) ([]ForgeStatus, error) {
 			newest = fs.lastSync
 		}
 		st.LastError = fs.lastErr
+		st.ListError = fs.listErr
+		st.Syncing = fs.running
 		s.mu.Unlock()
 		if !newest.IsZero() {
 			st.LastSync = &newest
@@ -350,6 +359,9 @@ func (s *Service) Discover(ctx context.Context, name string) (*Listing, error) {
 	s.mu.Lock()
 	if err == nil {
 		s.states[name].listing = listing
+		s.states[name].listErr = ""
+	} else {
+		s.states[name].listErr = strings.Join(strings.Fields(err.Error()), " ")
 	}
 	s.mu.Unlock()
 	s.notify(ctx, Event{Kind: EventDiscover, Forge: name, Err: err})
@@ -396,7 +408,27 @@ func (s *Service) Repos(ctx context.Context, name string, all bool) ([]RepoStatu
 	if err != nil {
 		return nil, err
 	}
-	links, err := s.links(ctx, name)
+	return s.reposFrom(ctx, f, listing, all)
+}
+
+// KnownRepos is Repos from the last discovery instead of a new one: it
+// never calls the forge. Before any discovery succeeded it lists the
+// imported repositories only, all with Listed false.
+func (s *Service) KnownRepos(ctx context.Context, name string, all bool) ([]RepoStatus, error) {
+	f, err := s.Forge(name)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	listing := s.states[name].listing
+	s.mu.Unlock()
+	return s.reposFrom(ctx, f, listing, all)
+}
+
+// reposFrom lists the repositories of a listing (nil for none) and the
+// imported ones it lacks.
+func (s *Service) reposFrom(ctx context.Context, f *Forge, listing *Listing, all bool) ([]RepoStatus, error) {
+	links, err := s.links(ctx, f.Name())
 	if err != nil {
 		return nil, err
 	}
@@ -406,7 +438,11 @@ func (s *Service) Repos(ctx context.Context, name string, all bool) ([]RepoStatu
 	}
 
 	var out []RepoStatus
-	for _, rr := range listing.Repos {
+	var listed []RemoteRepo
+	if listing != nil {
+		listed = listing.Repos
+	}
+	for _, rr := range listed {
 		excluded := !f.Matches(rr.Path)
 		l := byPath[strings.ToLower(rr.Path)]
 		delete(byPath, strings.ToLower(rr.Path))
@@ -434,6 +470,71 @@ func (s *Service) Repos(ctx context.Context, name string, all bool) ([]RepoStatu
 	}
 	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Path) < strings.ToLower(out[j].Path) })
 	return out, nil
+}
+
+// Origin is where an imported repository comes from, and how its default
+// branch compares with the forge's as of the last sync.
+type Origin struct {
+	Forge string `json:"forge"`
+	Path  string `json:"path"`
+	// DefaultBranch is the forge's default branch as of the last sync.
+	DefaultBranch string `json:"default_branch,omitempty"`
+	// Ahead and Behind are as in RepoStatus: nil when either branch is
+	// missing.
+	Ahead     *int       `json:"ahead"`
+	Behind    *int       `json:"behind"`
+	LastSync  *time.Time `json:"last_sync"`
+	LastError string     `json:"last_error,omitempty"`
+}
+
+func (s *Service) originOf(ctx context.Context, l *Link) Origin {
+	st := RepoStatus{Path: l.Path, DefaultBranch: l.DefaultBranch}
+	s.fillLinkStatus(ctx, &st, l)
+	return Origin{
+		Forge:         l.Forge,
+		Path:          l.Path,
+		DefaultBranch: l.DefaultBranch,
+		Ahead:         st.Ahead,
+		Behind:        st.Behind,
+		LastSync:      st.LastSync,
+		LastError:     st.LastError,
+	}
+}
+
+// Origins returns the origin of every repository imported from a forge,
+// by Soft Serve repository name; repositories not in it are local. It
+// never calls a forge.
+func (s *Service) Origins(ctx context.Context) (map[string]Origin, error) {
+	links, err := s.links(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]Origin, len(links))
+	for _, l := range links {
+		if _, ok := s.byName[l.Forge]; !ok {
+			// Imported from a forge no longer configured: local now.
+			continue
+		}
+		out[l.Repo] = s.originOf(ctx, l)
+	}
+	return out, nil
+}
+
+// Origin returns the origin of one repository; false when it is local. It
+// never calls a forge.
+func (s *Service) Origin(ctx context.Context, repo string) (Origin, bool, error) {
+	r, err := s.be.Repository(ctx, repo)
+	if err != nil {
+		return Origin{}, false, err
+	}
+	l, err := readLink(r)
+	if err != nil || l == nil {
+		return Origin{}, false, err
+	}
+	if _, ok := s.byName[l.Forge]; !ok {
+		return Origin{}, false, nil
+	}
+	return s.originOf(ctx, l), true, nil
 }
 
 // fillLinkStatus fills in the status of an imported repository.
@@ -794,6 +895,26 @@ func (s *Service) syncLinkLocked(ctx context.Context, f *Forge, l *Link, listing
 		s.logger.Warn("could not point HEAD at the default branch", "repo", l.Repo, "err", err)
 	}
 	return sr, nil
+}
+
+// PushBranch returns the branch Push pushes when given none: the branch
+// HEAD points at, else the forge's default branch.
+func (s *Service) PushBranch(ctx context.Context, repo string) (string, error) {
+	r, err := s.be.Repository(ctx, repo)
+	if err != nil {
+		return "", err
+	}
+	l, err := readLink(r)
+	if err != nil {
+		return "", err
+	}
+	if l == nil {
+		return "", fmt.Errorf("%w: %s", ErrNotLinked, r.Name())
+	}
+	if b := headBranch(ctx, l.Dir); b != "" {
+		return b, nil
+	}
+	return l.DefaultBranch, nil
 }
 
 // Push pushes a branch of an imported repository to its forge. An empty

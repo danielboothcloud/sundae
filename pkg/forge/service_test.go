@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -418,5 +419,94 @@ func TestServiceSyncRunningRefused(t *testing.T) {
 	}
 	if _, err := fx.svc.SyncForge(fx.ctx, "nope"); !errors.Is(err, ErrForgeNotFound) {
 		t.Errorf("err = %v, want ErrForgeNotFound", err)
+	}
+}
+
+// TestServiceKnownReposAndOrigins checks the views the TUI reads without
+// calling the forge: the last listing with the imported repositories, each
+// repository's origin, the branch a push would push, and the status of a
+// failed discovery.
+func TestServiceKnownReposAndOrigins(t *testing.T) {
+	fx := newServiceFixture(t)
+	ctx := fx.ctx
+	fx.upstream(t, "me/proj", false)
+	fx.upstream(t, "me/other", false)
+
+	// Before any discovery nothing is known.
+	known, err := fx.svc.KnownRepos(ctx, "gh", false)
+	if err != nil || len(known) != 0 {
+		t.Fatalf("KnownRepos before discovery: %+v, %v", known, err)
+	}
+	if _, err := fx.svc.Import(ctx, fx.user, "gh", ImportOptions{Paths: []string{"me/proj"}}); err != nil {
+		t.Fatal(err)
+	}
+	known, err = fx.svc.KnownRepos(ctx, "gh", false)
+	if err != nil || len(known) != 2 {
+		t.Fatalf("KnownRepos: %+v, %v", known, err)
+	}
+	if !known[1].Imported || known[1].Path != "me/proj" || known[1].Ahead == nil || *known[1].Ahead != 0 || known[0].Imported {
+		t.Errorf("KnownRepos = %+v", known)
+	}
+
+	// Origins: the imported repository and its counts; local ones are
+	// left out.
+	if _, err := fx.be.CreateRepository(ctx, "plain", fx.user, proto.RepositoryOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	origins, err := fx.svc.Origins(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o, ok := origins["gh/me/proj"]
+	if len(origins) != 1 || !ok || o.Forge != "gh" || o.Path != "me/proj" || deref(o.Ahead) != 0 || deref(o.Behind) != 0 || o.LastSync == nil {
+		t.Fatalf("Origins = %+v", origins)
+	}
+	repo, _ := fx.be.Repository(ctx, "gh/me/proj")
+	gr, _ := repo.Open()
+	commitAndPush(t, localClone(t, gr.Path), "main", "local work")
+	fx.ups["me/proj"].commit(t, "main", "upstream work")
+	if _, err := fx.svc.SyncRepo(ctx, "gh", "me/proj"); err != nil {
+		t.Fatal(err)
+	}
+	o, ok, err = fx.svc.Origin(ctx, "gh/me/proj")
+	if err != nil || !ok || deref(o.Ahead) != 1 || deref(o.Behind) != 1 {
+		t.Fatalf("Origin after diverging = %+v, %v, %v", o, ok, err)
+	}
+	if _, ok, err := fx.svc.Origin(ctx, "plain"); ok || err != nil {
+		t.Errorf("Origin of a local repository: %v, %v", ok, err)
+	}
+
+	// The branch a push without one pushes.
+	if b, err := fx.svc.PushBranch(ctx, "gh/me/proj"); err != nil || b != "main" {
+		t.Errorf("PushBranch = %q, %v", b, err)
+	}
+	if _, err := fx.svc.PushBranch(ctx, "plain"); !errors.Is(err, ErrNotLinked) {
+		t.Errorf("PushBranch of a local repository: %v", err)
+	}
+
+	// A failed discovery is in the status until one succeeds; the last
+	// listing stays known.
+	tokenFile := fx.svc.forges[0].cfg.TokenFile
+	if err := os.WriteFile(tokenFile, []byte("bad\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fx.svc.Discover(ctx, "gh"); err == nil {
+		t.Fatal("discovery with a bad token succeeded")
+	}
+	st, _ := fx.svc.Status(ctx)
+	if !strings.Contains(st[0].ListError, "401") || st[0].Syncing {
+		t.Errorf("status after a failed discovery = %+v", st[0])
+	}
+	if known, _ := fx.svc.KnownRepos(ctx, "gh", false); len(known) != 2 {
+		t.Errorf("listing lost after a failed discovery: %+v", known)
+	}
+	if err := os.WriteFile(tokenFile, []byte("ghp_test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fx.svc.Discover(ctx, "gh"); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := fx.svc.Status(ctx); st[0].ListError != "" {
+		t.Errorf("list error kept after a good discovery: %q", st[0].ListError)
 	}
 }

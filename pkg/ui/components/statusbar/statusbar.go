@@ -9,11 +9,12 @@ import (
 
 // Model is a status bar model.
 type Model struct {
-	common common.Common
-	key    string
-	value  string
-	info   string
-	extra  string
+	common  common.Common
+	key     string
+	value   string
+	info    string
+	extra   string
+	summary string
 }
 
 // New creates a new status bar component.
@@ -46,6 +47,12 @@ func (s *Model) SetStatus(key, value, info, extra string) {
 	}
 }
 
+// SetSummary sets what shows at the right end, after the help: the
+// attention summary of the user's sessions, already styled. "" for none.
+func (s *Model) SetSummary(summary string) {
+	s.summary = summary
+}
+
 // Init implements tea.Model.
 func (s *Model) Init() tea.Cmd {
 	return nil
@@ -74,7 +81,11 @@ func (s *Model) View() string {
 		info = st.StatusBarInfo.Render(s.info)
 	}
 	branch := st.StatusBarBranch.Render(s.extra)
-	maxWidth := s.common.Width - w(key) - w(info) - w(branch) - w(help)
+	summary := ""
+	if s.summary != "" {
+		summary = st.StatusBarSummary.Render(s.summary)
+	}
+	maxWidth := s.common.Width - w(key) - w(info) - w(branch) - w(help) - w(summary)
 	v := ansi.Truncate(s.value, maxWidth-st.StatusBarValue.GetHorizontalFrameSize(), "…")
 	value := st.StatusBarValue.
 		Width(maxWidth).
@@ -88,6 +99,7 @@ func (s *Model) View() string {
 				info,
 				branch,
 				help,
+				summary,
 			),
 		)
 }

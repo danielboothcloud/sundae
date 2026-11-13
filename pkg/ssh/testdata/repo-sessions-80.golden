@@ -1,0 +1,19 @@
+
+  soft-serve                 jj git clone ssh://localhost:23231/soft-serve.git
+  about soft-serve
+  Readme │ Files │ Commits │ Bookmarks │ Tags │ Sessions
+
+
+   ‹ Sessions ›   Signals                                          2 sessions
+
+  ┃ ✓ forge-sync                                                     done   5m
+  ┃   Implemented GitHub discovery
+
+    ● tui                                                         working   5m
+      Running go test ./pkg/ui/...
+
+
+
+
+
+   soft-serve  forge-sync                         1 of 2  *  ? Help  ▲1 ✓1 ●2

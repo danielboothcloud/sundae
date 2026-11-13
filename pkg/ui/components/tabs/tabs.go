@@ -27,6 +27,9 @@ type Tabs struct {
 	// CollapseBelow, when set, shows only the active tab, as "‹ name ›",
 	// when narrower than this many columns.
 	CollapseBelow int
+	// CollapseOverflow shows only the active tab, as "‹ name ›", when the
+	// tabs do not fit.
+	CollapseOverflow bool
 }
 
 // New creates a new Tabs component.
@@ -106,8 +109,7 @@ func (t *Tabs) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 // View implements tea.Model.
 func (t *Tabs) View() string {
 	if t.CollapseBelow > 0 && t.common.Width < t.CollapseBelow && t.activeTab < len(t.tabs) {
-		tab := t.tabs[t.activeTab]
-		return t.common.Zone.Mark(tab, t.TabActive.Render("‹ "+tab+" ›"))
+		return t.collapsed()
 	}
 	s := strings.Builder{}
 	sep := t.TabSeparator
@@ -131,9 +133,18 @@ func (t *Tabs) View() string {
 			s.WriteString(sep.String())
 		}
 	}
+	if t.CollapseOverflow && t.common.Width > 0 && lipgloss.Width(s.String()) > t.common.Width && t.activeTab < len(t.tabs) {
+		return t.collapsed()
+	}
 	return lipgloss.NewStyle().
 		MaxWidth(t.common.Width).
 		Render(s.String())
+}
+
+// collapsed shows the active tab only, as "‹ name ›".
+func (t *Tabs) collapsed() string {
+	tab := t.tabs[t.activeTab]
+	return t.common.Zone.Mark(tab, t.TabActive.Render("‹ "+tab+" ›"))
 }
 
 func (t *Tabs) activeTabCmd() tea.Msg {

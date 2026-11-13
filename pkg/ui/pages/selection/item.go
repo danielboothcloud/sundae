@@ -13,6 +13,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/soft-serve/pkg/proto"
 	"github.com/charmbracelet/soft-serve/pkg/ui/common"
+	"github.com/charmbracelet/soft-serve/pkg/ui/pages/sessions"
 	"github.com/dustin/go-humanize"
 )
 
@@ -101,13 +102,43 @@ type ItemDelegate struct {
 	common     *common.Common
 	activePane *pane
 	copiedID   string
+	// badges are the session and origin badges; nil for none.
+	badges *badges
+	// updatedW is the width of the longest "Updated …", and titleW of
+	// the longest title, so the badges line up from row to row.
+	updatedW int
+	titleW   int
 }
 
-// NewItemDelegate creates a new ItemDelegate.
-func NewItemDelegate(common *common.Common, activePane *pane) *ItemDelegate {
+// NewItemDelegate creates a new ItemDelegate. b holds the badges it
+// shows on the title line; nil for none.
+func NewItemDelegate(common *common.Common, activePane *pane, b *badges) *ItemDelegate {
 	return &ItemDelegate{
 		common:     common,
 		activePane: activePane,
+		badges:     b,
+	}
+}
+
+// updated renders when a repository was last updated.
+func updated(i Item) string {
+	if i.lastUpdate == nil {
+		return ""
+	}
+	return fmt.Sprintf(" Updated %s", humanize.Time(*i.lastUpdate))
+}
+
+// setUpdatedWidth fits the "Updated" column, and the room left for
+// titles, to the items.
+func (d *ItemDelegate) setUpdatedWidth(items Items) {
+	d.updatedW, d.titleW = 0, 0
+	for _, it := range items {
+		d.updatedW = max(d.updatedW, lipgloss.Width(updated(it)))
+		title := it.Title() + " " // the selected row's trailing space
+		if it.repo.IsPrivate() {
+			title += " 🔒"
+		}
+		d.titleW = max(d.titleW, lipgloss.Width(title))
 	}
 }
 
@@ -171,17 +202,19 @@ func (d *ItemDelegate) Render(w io.Writer, m list.Model, index int, listItem lis
 	if isSelected {
 		title += " "
 	}
-	var updatedStr string
-	if i.lastUpdate != nil {
-		updatedStr = fmt.Sprintf(" Updated %s", humanize.Time(*i.lastUpdate))
+	updatedStr := updated(i)
+	var right string
+	if d.badges != nil && (d.badges.sessionsOn || d.badges.originsOn) {
+		right = d.badgeColumns(i, styles.Updated, m.Width()-styles.Base.GetHorizontalFrameSize(), lipgloss.Width(title))
+	} else {
+		if m.Width()-styles.Base.GetHorizontalFrameSize()-lipgloss.Width(updatedStr)-lipgloss.Width(title) <= 0 {
+			updatedStr = ""
+		}
+		updatedStyle := styles.Updated.
+			Align(lipgloss.Right).
+			Width(m.Width() - styles.Base.GetHorizontalFrameSize() - lipgloss.Width(title))
+		right = updatedStyle.Render(updatedStr)
 	}
-	if m.Width()-styles.Base.GetHorizontalFrameSize()-lipgloss.Width(updatedStr)-lipgloss.Width(title) <= 0 {
-		updatedStr = ""
-	}
-	updatedStyle := styles.Updated.
-		Align(lipgloss.Right).
-		Width(m.Width() - styles.Base.GetHorizontalFrameSize() - lipgloss.Width(title))
-	updated := updatedStyle.Render(updatedStr)
 
 	if isFiltered && index < len(m.VisibleItems()) {
 		// Get indices of matched characters
@@ -198,7 +231,7 @@ func (d *ItemDelegate) Render(w io.Writer, m list.Model, index int, listItem lis
 	desc = common.TruncateString(desc, m.Width()-styles.Base.GetHorizontalFrameSize())
 	desc = styles.Desc.Render(desc)
 
-	s.WriteString(lipgloss.JoinHorizontal(lipgloss.Bottom, title, updated))
+	s.WriteString(lipgloss.JoinHorizontal(lipgloss.Bottom, title, right))
 	s.WriteRune('\n')
 	s.WriteString(desc)
 	s.WriteRune('\n')
@@ -217,4 +250,116 @@ func (d *ItemDelegate) Render(w io.Writer, m list.Model, index int, listItem lis
 			styles.Base.Render(s.String()),
 		),
 	)
+}
+
+// Badge column widths: "● 12 sessions", and its compact "●12".
+const (
+	sessionBadgeWidth = 13
+	compactBadgeWidth = 4
+	badgeGap          = 2
+)
+
+// badgeColumns renders the right part of a title line of cw columns
+// whose title takes titleW: the session badge, the origin badge and when
+// the repository was last updated, each in its column so they line up
+// from row to row (section 4). What does not fit is dropped: first the
+// update time, then the origin, then the session badge's word, then the
+// session badge. Every row drops the same, fitting the longest title (up
+// to half the width); a longer title drops more on its own row.
+func (d *ItemDelegate) badgeColumns(i Item, dim lipgloss.Style, cw, titleW int) string {
+	if line, ok := d.badgeLine(i, dim, cw-min(max(d.titleW, titleW), cw/2), cw-titleW); ok {
+		return line
+	}
+	line, _ := d.badgeLine(i, dim, cw-titleW, cw-titleW)
+	return line
+}
+
+// badgeLine renders the badges that fit in fit columns, padded to room;
+// false when they do not fit in room.
+func (d *ItemDelegate) badgeLine(i Item, dim lipgloss.Style, fit, room int) (string, bool) {
+	b := d.badges
+	st := d.common.Styles
+	name := i.ID()
+
+	originW := 0
+	origin := ""
+	if b.originsOn {
+		origin = b.originText(name)
+		originW = lipgloss.Width("local")
+		for repo := range b.origins {
+			originW = max(originW, lipgloss.Width(b.originText(repo)))
+		}
+	}
+	sessText, sb := "", sessions.RepoBadge{}
+	if b.sessionsOn {
+		sessText, sb = b.sessionText(name, false)
+	}
+	upd := d.updatedW
+
+	width := func(sessW, originW, upd int) int {
+		n := 0
+		for _, w := range []int{sessW, originW, upd} {
+			if w > 0 {
+				if n > 0 {
+					n += badgeGap
+				}
+				n += w
+			}
+		}
+		return n
+	}
+	sessW := 0
+	if b.sessionsOn {
+		sessW = sessionBadgeWidth
+	}
+	compact := false
+	// Leave at least a space after the title.
+	fit--
+	if width(sessW, originW, upd) > fit {
+		upd = 0
+	}
+	if width(sessW, originW, upd) > fit {
+		originW = 0
+	}
+	if sessW > 0 && width(sessW, originW, upd) > fit {
+		sessW, compact = compactBadgeWidth, true
+	}
+	if width(sessW, originW, upd) > fit {
+		sessW = 0
+	}
+	total := width(sessW, originW, upd)
+	if total <= 0 {
+		return "", true
+	}
+	if total > room-1 {
+		return "", false
+	}
+
+	var cols []string
+	if sessW > 0 {
+		if compact {
+			sessText, _ = b.sessionText(name, true)
+		}
+		text := ""
+		if sessText != "" {
+			text = sessions.StateStyle(st, sb.State).Render(sessText)
+		}
+		cols = append(cols, padRight(text, sessW))
+	}
+	if originW > 0 {
+		cols = append(cols, dim.Render(padRight(origin, originW)))
+	}
+	if upd > 0 {
+		cols = append(cols, dim.Render(fmt.Sprintf("%*s", upd, strings.TrimSpace(updated(i)))))
+	}
+	line := strings.Join(cols, strings.Repeat(" ", badgeGap))
+	return strings.Repeat(" ", max(room-total, 1)) + line, true
+}
+
+// padRight pads s with spaces to n cells.
+func padRight(s string, n int) string {
+	if w := lipgloss.Width(s); w < n {
+		return s + strings.Repeat(" ", n-w)
+	}
+	return s
 }

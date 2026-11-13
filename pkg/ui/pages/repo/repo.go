@@ -69,6 +69,9 @@ func New(c common.Common, comps ...common.TabComponent) *Repo {
 	}
 	c.Logger = c.Logger.WithPrefix("ui.repo")
 	tb := tabs.New(c, ts)
+	// On a narrow terminal the tabs collapse to the active one
+	// (tui-screens.md section 9), so the Sessions tab stays reachable.
+	tb.CollapseOverflow = true
 	// Make sure the order matches the order of tab constants above.
 	s := spinner.New(spinner.WithSpinner(spinner.Dot),
 		spinner.WithStyle(c.Styles.Spinner))
@@ -133,8 +136,27 @@ func (r *Repo) commonHelp() []key.Binding {
 	return b
 }
 
+// Capturing reports whether the active tab takes every key (the Sessions
+// tab's form, confirm or filter): the page then leaves tab and esc to it,
+// and the frame q and ?.
+func (r *Repo) Capturing() bool {
+	if c, ok := r.panes[r.activeTab].(interface{ Capturing() bool }); ok {
+		return c.Capturing()
+	}
+	return false
+}
+
+// SetSummary sets the attention summary at the status bar's right end
+// (tui-screens.md R7); "" for none.
+func (r *Repo) SetSummary(summary string) {
+	r.statusbar.SetSummary(summary)
+}
+
 // ShortHelp implements help.KeyMap.
 func (r *Repo) ShortHelp() []key.Binding {
+	if r.Capturing() {
+		return r.panes[r.activeTab].(help.KeyMap).ShortHelp()
+	}
 	b := r.commonHelp()
 	b = append(b, r.panes[r.activeTab].(help.KeyMap).ShortHelp()...)
 	return b
@@ -186,6 +208,10 @@ func (r *Repo) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 	case tabs.ActiveTabMsg:
 		r.activeTab = int(msg)
 	case tea.KeyPressMsg, tea.MouseClickMsg:
+		if _, ok := msg.(tea.KeyPressMsg); ok && r.Capturing() {
+			// A form, confirm or filter of the tab has the keys.
+			break
+		}
 		t, cmd := r.tabs.Update(msg)
 		r.tabs = t.(*tabs.Tabs)
 		if cmd != nil {
@@ -318,6 +344,10 @@ func (r *Repo) View() string {
 		main = fmt.Sprintf("%s loading…", r.spinner.View())
 	case readyState:
 		main = r.panes[r.activeTab].View()
+		if _, ok := r.panes[r.activeTab].(*Sessions); ok {
+			// The sessions change without a key press.
+			r.setStatusBarInfo()
+		}
 		statusbar = r.statusbar.View()
 	}
 	main = r.common.Zone.Mark(

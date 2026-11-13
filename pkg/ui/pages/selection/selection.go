@@ -1,6 +1,7 @@
 package selection
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 	"github.com/charmbracelet/soft-serve/pkg/ui/components/code"
 	"github.com/charmbracelet/soft-serve/pkg/ui/components/selector"
 	"github.com/charmbracelet/soft-serve/pkg/ui/components/tabs"
+	"github.com/charmbracelet/soft-serve/pkg/ui/pages/forges"
 	"github.com/charmbracelet/soft-serve/pkg/ui/pages/sessions"
 )
 
@@ -28,6 +30,7 @@ type pane int
 const (
 	selectorPane pane = iota
 	sessionsPane
+	forgesPane
 	readmePane
 )
 
@@ -35,6 +38,7 @@ func (p pane) String() string {
 	return map[pane]string{
 		selectorPane: "Repositories",
 		sessionsPane: "Sessions",
+		forgesPane:   "Forges",
 		readmePane:   "About",
 	}[p]
 }
@@ -46,28 +50,56 @@ type Selection struct {
 	readme     *code.Code
 	selector   *selector.Selector
 	sessions   *sessions.Sessions
+	forges     *forges.Forges
 	activePane pane
 	// panes are the tabs shown, in order.
 	panes []pane
 	tabs  *tabs.Tabs
 	// tabKeys jumps to a tab by its number, or cycles through them.
 	tabKeys key.Binding
+	// newSession is the Repositories tab's s key.
+	newSession key.Binding
+
+	// badges are the Repositories tab's session and origin badges, which
+	// delegate renders.
+	badges     *badges
+	delegate   *ItemDelegate
+	origins    OriginSource
+	originFeed forges.Feed
+
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // New creates a new selection model.
 func New(c common.Common) *Selection {
+	ctx, cancel := context.WithCancel(c.Context())
 	sel := &Selection{
 		common:     c,
 		activePane: selectorPane, // start with the selector focused
+		badges:     &badges{},
+		ctx:        ctx,
+		cancel:     cancel,
+		newSession: key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "new session")),
 	}
 
 	// The home tabs, in order. A feature's tab is added here and left out
 	// when the feature is off in the config, or when the user is not
-	// authenticated (tui-screens.md, section 3).
+	// authenticated (tui-screens.md, section 3). Forges is for server
+	// admins only, as the `forge` command's listing, import and sync are.
 	sel.panes = []pane{selectorPane}
 	if src := sessions.SourceFor(c.Context()); src != nil {
 		sel.sessions = sessions.New(c, src)
 		sel.panes = append(sel.panes, sessionsPane)
+		sel.badges.sessionsOn = true
+	}
+	if src := forges.SourceFor(c.Context()); src != nil {
+		sel.forges = forges.New(c, src)
+		sel.panes = append(sel.panes, forgesPane)
+	}
+	if src := OriginSourceFor(c.Context()); src != nil {
+		sel.origins = src
+		sel.badges.originsOn = true
 	}
 	sel.panes = append(sel.panes, readmePane)
 
@@ -95,9 +127,10 @@ func New(c common.Common) *Selection {
 	readme.UseGlamour = true
 	readme.NoContentStyle = c.Styles.NoContent.
 		SetString(defaultNoContent)
+	sel.delegate = NewItemDelegate(&c, &sel.activePane, sel.badges)
 	selector := selector.New(c,
 		[]selector.IdentifiableItem{},
-		NewItemDelegate(&c, &sel.activePane))
+		sel.delegate)
 	selector.SetShowTitle(false)
 	selector.SetShowHelp(false)
 	selector.SetShowStatusBar(false)
@@ -133,6 +166,30 @@ func (s *Selection) SetSize(width, height int) {
 	if s.sessions != nil {
 		s.sessions.SetSize(width-wm, height-hm)
 	}
+	if s.forges != nil {
+		s.forges.SetSize(width-wm, height-hm)
+	}
+}
+
+// bindSessions makes the Sessions model, which the repository page's
+// Sessions tab shares, the home tab's: all sessions, at the home size.
+func (s *Selection) bindSessions() {
+	wm, hm := s.getMargins()
+	s.sessions.SetSize(s.common.Width-wm, s.common.Height-hm)
+	s.sessions.SetScope("")
+}
+
+// SessionsModel returns the Sessions tab's model, for the repository
+// page's Sessions tab; nil when sessions are off.
+func (s *Selection) SessionsModel() *sessions.Sessions { return s.sessions }
+
+// StatusSummary is the attention summary for the repository page's
+// status bar (R7); "" when there is none.
+func (s *Selection) StatusSummary() string {
+	if s.sessions == nil {
+		return ""
+	}
+	return s.sessions.StatusSummary()
 }
 
 // IsFiltering returns true when keys go to text input: the repository
@@ -144,7 +201,21 @@ func (s *Selection) IsFiltering() bool {
 // Capturing reports whether the active tab takes every key, so the frame
 // leaves q, ?, tab and the digits to it.
 func (s *Selection) Capturing() bool {
-	return s.activePane == sessionsPane && s.sessions != nil && s.sessions.Capturing()
+	switch s.activePane {
+	case sessionsPane:
+		return s.sessions != nil && s.sessions.Capturing()
+	case forgesPane:
+		return s.forges != nil && s.forges.Capturing()
+	}
+	return false
+}
+
+// capturingHelp is the help of the tab that takes every key.
+func (s *Selection) capturingHelp() []key.Binding {
+	if s.activePane == forgesPane {
+		return s.forges.ShortHelp()
+	}
+	return s.sessions.ShortHelp()
 }
 
 // Summary is the attention summary for the header (section 3): "" when the
@@ -159,26 +230,38 @@ func (s *Selection) Summary(narrow bool) string {
 // FooterLine is a line that replaces the help footer, e.g. a confirm; ""
 // for none.
 func (s *Selection) FooterLine(width int) string {
-	if s.activePane == sessionsPane && s.sessions != nil {
+	switch {
+	case s.activePane == sessionsPane && s.sessions != nil:
 		return s.sessions.FooterLine(width)
+	case s.activePane == forgesPane && s.forges != nil:
+		return s.forges.FooterLine(width)
 	}
 	return ""
 }
 
 // Close stops the tabs' background work. The UI calls it when it quits.
 func (s *Selection) Close() {
+	s.cancel()
 	if s.sessions != nil {
 		s.sessions.Close()
 	}
+	if s.forges != nil {
+		s.forges.Close()
+	}
+	if s.originFeed != nil {
+		s.originFeed.Close()
+	}
 }
 
-// OpenNewSession opens the Sessions tab's new-session form for repo (the
-// Repositories tab's s key, next change).
+// OpenNewSession opens the Sessions tab's new-session form for repo, with
+// the repository fixed (the Repositories tab's s key).
 func (s *Selection) OpenNewSession(repo string) tea.Cmd {
 	if s.sessions == nil {
 		return nil
 	}
-	return tea.Batch(s.selectPane(sessionsPane), s.sessions.OpenNewSession(repo, true))
+	cmd := s.selectPane(sessionsPane)
+	s.bindSessions()
+	return tea.Batch(cmd, s.sessions.OpenNewSession(repo, true))
 }
 
 // selectPane makes p the active tab.
@@ -190,13 +273,22 @@ func (s *Selection) selectPane(p pane) tea.Cmd {
 			s.SetSize(s.common.Width, s.common.Height)
 		}
 	}
+	return s.shown()
+}
+
+// shown starts the active tab when it is first shown: the Forges tab
+// reads, and maybe lists, the forges only then.
+func (s *Selection) shown() tea.Cmd {
+	if s.activePane == forgesPane && s.forges != nil {
+		return s.forges.Start()
+	}
 	return nil
 }
 
 // ShortHelp implements help.KeyMap.
 func (s *Selection) ShortHelp() []key.Binding {
 	if s.Capturing() {
-		return s.sessions.ShortHelp()
+		return s.capturingHelp()
 	}
 	k := s.selector.KeyMap
 	kb := make([]key.Binding, 0)
@@ -214,7 +306,19 @@ func (s *Selection) ShortHelp() []key.Binding {
 			k.ClearFilter,
 			copyKey,
 		)
+		if s.sessions != nil {
+			kb = append(kb, s.newSession)
+		}
+	case forgesPane:
+		kb = kb[1:]
+		sh := s.forges.ShortHelp()
+		if len(sh) > 0 && sh[0].Help().Desc == s.common.KeyMap.UpDown.Help().Desc {
+			kb = append([]key.Binding{sh[0]}, kb...)
+			sh = sh[1:]
+		}
+		kb = append(kb, sh...)
 	case sessionsPane:
+		s.bindSessions()
 		kb = kb[1:]
 		sh := s.sessions.ShortHelp()
 		if len(sh) > 0 && sh[0].Help().Desc == s.common.KeyMap.UpDown.Help().Desc {
@@ -229,7 +333,7 @@ func (s *Selection) ShortHelp() []key.Binding {
 // FullHelp implements help.KeyMap.
 func (s *Selection) FullHelp() [][]key.Binding {
 	if s.Capturing() {
-		return s.sessions.FullHelp()
+		return [][]key.Binding{s.capturingHelp()}
 	}
 	b := [][]key.Binding{
 		{
@@ -252,7 +356,10 @@ func (s *Selection) FullHelp() [][]key.Binding {
 			k.Up,
 		})
 	case sessionsPane:
+		s.bindSessions()
 		b = append(b, s.sessions.FullHelp()...)
+	case forgesPane:
+		b = append(b, s.forges.FullHelp()...)
 	case selectorPane:
 		copyKey := s.common.KeyMap.Copy
 		copyKey.SetHelp("c", "copy command")
@@ -262,6 +369,9 @@ func (s *Selection) FullHelp() [][]key.Binding {
 				s.common.KeyMap.Select,
 				copyKey,
 			)
+			if s.sessions != nil {
+				b[0] = append(b[0], s.newSession)
+			}
 		}
 		b = append(b, []key.Binding{
 			k.CursorUp,
@@ -292,6 +402,10 @@ func (s *Selection) Init() tea.Cmd {
 	}
 	if s.sessions != nil {
 		sessionsCmd = s.sessions.Init()
+	}
+	if s.origins != nil {
+		s.originFeed = s.origins.Follow()
+		sessionsCmd = tea.Batch(sessionsCmd, s.originsCmd(), s.originNextCmd())
 	}
 
 	ctx := s.common.Context()
@@ -330,6 +444,7 @@ func (s *Selection) Init() tea.Cmd {
 		}
 	}
 	sort.Sort(sortedItems)
+	s.delegate.setUpdatedWidth(sortedItems)
 	items := make([]selector.IdentifiableItem, len(sortedItems))
 	for i, it := range sortedItems {
 		items[i] = it
@@ -361,10 +476,21 @@ func (s *Selection) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		if s.Capturing() {
 			// A form, confirm or filter of the tab has the keys.
+			if s.activePane == forgesPane {
+				_, cmd := s.forges.Update(msg)
+				return s, cmd
+			}
+			s.bindSessions()
 			_, cmd := s.sessions.Update(msg)
 			return s, cmd
 		}
 		repoFiltering := s.activePane == selectorPane && s.FilterState() == list.Filtering
+		if s.activePane == selectorPane && !repoFiltering && s.sessions != nil && key.Matches(msg, s.newSession) {
+			if it, ok := s.selector.SelectedItem().(Item); ok {
+				return s, s.OpenNewSession(it.ID())
+			}
+			return s, nil
+		}
 		if i, err := strconv.Atoi(msg.String()); err == nil && !repoFiltering {
 			if i >= 1 && i <= len(s.panes) {
 				return s, s.selectPane(s.panes[i-1])
@@ -390,13 +516,25 @@ func (s *Selection) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 			s.activePane = s.panes[i]
 		}
 		s.SetSize(s.common.Width, s.common.Height)
+		if cmd := s.shown(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	default:
-		// The Sessions tab's live updates and results reach it whether
-		// it is shown or not: the header summary follows them.
-		if s.sessions != nil {
-			_, cmd := s.sessions.Update(msg)
-			if cmd != nil {
+		// The tabs' live updates and results reach them whether they are
+		// shown or not: the header summary and the badges follow them.
+		switch {
+		case forges.IsMsg(msg):
+			if s.forges != nil {
+				_, cmd := s.forges.Update(msg)
 				cmds = append(cmds, cmd)
+			}
+		case IsMsg(msg) && !sessions.IsMsg(msg):
+			cmds = append(cmds, s.onBadgeMsg(msg))
+		case s.sessions != nil:
+			_, cmd := s.sessions.Update(msg)
+			cmds = append(cmds, cmd)
+			if sessions.IsMsg(msg) {
+				s.refreshSessionBadges()
 			}
 		}
 	}
@@ -416,7 +554,16 @@ func (s *Selection) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 	case sessionsPane:
 		switch msg.(type) {
 		case tea.KeyPressMsg, tea.MouseMsg:
+			s.bindSessions()
 			_, cmd := s.sessions.Update(msg)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+	case forgesPane:
+		switch msg.(type) {
+		case tea.KeyPressMsg, tea.MouseMsg:
+			_, cmd := s.forges.Update(msg)
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -431,12 +578,17 @@ func (s *Selection) View() string {
 	wm, hm := s.getMargins()
 	switch s.activePane {
 	case selectorPane:
+		// The session badges are what the Monitor reads now.
+		s.refreshSessionBadges()
 		ss := lipgloss.NewStyle().
 			Width(s.common.Width - wm).
 			Height(s.common.Height - hm)
 		view = ss.Render(s.selector.View())
 	case sessionsPane:
+		s.bindSessions()
 		view = s.sessions.View()
+	case forgesPane:
+		view = s.forges.View()
 	case readmePane:
 		rs := lipgloss.NewStyle().
 			Height(s.common.Height - hm)

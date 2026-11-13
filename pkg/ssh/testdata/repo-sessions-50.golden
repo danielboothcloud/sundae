@@ -1,0 +1,19 @@
+
+  soft-serve       jj git clone ssh://localhost…
+  about soft-serve
+  ‹ Sessions ›
+
+
+  ┃ ✓ forge-sync
+  ┃   done  5m
+  ┃   Implemented GitHub discovery
+
+    ● tui
+      working  5m
+      Running go test ./pkg/ui/...
+
+
+
+
+
+   soft-serve  fo…  1 of 2  *  ? Help  ▲1 ✓1 ●2

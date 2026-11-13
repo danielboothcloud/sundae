@@ -1,0 +1,8 @@
+
+ ‹ Sessions ›   Signals                                              2 sessions
+
+┃ ✓ forge-sync                                                         done  12m
+┃   Implemented GitHub discovery; 14 tests pass
+
+  ● tui                                                         working 40%  now
+    Running go test ./pkg/ui/...

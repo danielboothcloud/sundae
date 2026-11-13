@@ -10,6 +10,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"image/color"
 	"slices"
 	"strings"
 	"time"
@@ -17,12 +18,14 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/soft-serve/pkg/events"
 	"github.com/charmbracelet/soft-serve/pkg/openshell"
 	"github.com/charmbracelet/soft-serve/pkg/sessionctl"
 	"github.com/charmbracelet/soft-serve/pkg/signals"
 	"github.com/charmbracelet/soft-serve/pkg/ui/common"
 	"github.com/charmbracelet/soft-serve/pkg/ui/components/prompt"
+	"github.com/charmbracelet/soft-serve/pkg/ui/styles"
 )
 
 // NarrowWidth is the content width under which the tab, and the home
@@ -182,6 +185,22 @@ type Sessions struct {
 	opLines []string
 
 	notice notice
+
+	// scope, when set, narrows the tab to one repository's sessions and
+	// signals: the repository page's Sessions tab (section 8) shows this
+	// model so scoped. scopes keeps each scope's cursor and filters.
+	scope  string
+	scopes map[string]viewState
+}
+
+// viewState is what the tab shows of one scope.
+type viewState struct {
+	pane      pane
+	cursor    int
+	selKey    string
+	rowQuery  string
+	attention bool
+	sigQuery  string
 }
 
 // New returns the Sessions tab showing src. src may be nil: the tab then
@@ -205,6 +224,7 @@ func New(c common.Common, src Source) *Sessions {
 		busy:     map[string]string{},
 		profiles: map[string]string{},
 		keep:     1000,
+		scopes:   map[string]viewState{},
 	}
 	if h, ok := c.Context().Value(HandoffKey).(Handoff); ok {
 		m.handoff = h
@@ -246,8 +266,51 @@ func (m *Sessions) Init() tea.Cmd {
 	return tea.Batch(m.listCmd(), m.followCmd(), m.tickCmd())
 }
 
+// SetScope narrows the tab to the sessions and signals of repo; "" shows
+// all of them. Each scope keeps its own cursor, pane and filters; the
+// Signals pane follows again on a switch.
+func (m *Sessions) SetScope(repo string) {
+	if repo == m.scope {
+		return
+	}
+	m.scopes[m.scope] = viewState{
+		pane: m.pane, cursor: m.cursor, selKey: m.selKey,
+		rowQuery: m.rowQuery, attention: m.attention, sigQuery: m.sigQuery,
+	}
+	v := m.scopes[repo]
+	m.scope = repo
+	m.pane, m.cursor, m.selKey = v.pane, v.cursor, v.selKey
+	m.rowQuery, m.attention, m.sigQuery = v.rowQuery, v.attention, v.sigQuery
+	m.sigCursor, m.unseen = 0, 0
+	m.copied = ""
+	m.notice = notice{}
+	m.sortRows()
+}
+
+// Scope returns the repository the tab is narrowed to; "" for none.
+func (m *Sessions) Scope() string { return m.scope }
+
+// Busy reports whether the tab is starting or attaching to a session:
+// esc cancels that.
+func (m *Sessions) Busy() bool { return m.op != nil }
+
+// Filtered reports whether a text filter narrows the active pane: esc
+// clears it.
+func (m *Sessions) Filtered() bool { return m.query() != "" }
+
+// SelectedName returns the selected session's name and how many sessions
+// the tab shows, for a status bar; "" when none is selected.
+func (m *Sessions) SelectedName() (name string, index, total int) {
+	vis := m.visibleRows()
+	r, ok := m.selected()
+	if !ok {
+		return "", 0, len(vis)
+	}
+	return signals.Sanitize(r.Info.Name, 0), m.cursor + 1, len(vis)
+}
+
 // OpenNewSession opens the new-session form for repo; fixed keeps the
-// repository from being changed (the Repositories tab's s key, next).
+// repository from being changed (the Repositories tab's s key).
 func (m *Sessions) OpenNewSession(repo string, fixed bool) tea.Cmd {
 	return m.reposCmd(prefill{repo: repo, fixed: fixed})
 }
@@ -501,13 +564,13 @@ func (m *Sessions) addSignals(sigs []signals.Signal) {
 
 // sigMatch reports whether the Signals pane's filter selects s.
 func (m *Sessions) sigMatch(s signals.Signal) bool {
-	q := signals.Query{UserID: s.UserID, Attention: m.attention, Text: m.sigQuery}
+	q := signals.Query{UserID: s.UserID, Repo: m.scope, Attention: m.attention, Text: m.sigQuery}
 	return q.Match(s)
 }
 
 // visibleSignals returns the signals the filter selects, newest first.
 func (m *Sessions) visibleSignals() []signals.Signal {
-	if !m.attention && m.sigQuery == "" {
+	if !m.attention && m.sigQuery == "" && m.scope == "" {
 		return m.sigs
 	}
 	var out []signals.Signal
@@ -519,14 +582,29 @@ func (m *Sessions) visibleSignals() []signals.Signal {
 	return out
 }
 
-// visibleRows returns the sessions the filter selects.
-func (m *Sessions) visibleRows() []sessionctl.Row {
-	if m.rowQuery == "" {
+// scopedRows returns the sessions of the scope.
+func (m *Sessions) scopedRows() []sessionctl.Row {
+	if m.scope == "" {
 		return m.rows
+	}
+	var out []sessionctl.Row
+	for _, r := range m.rows {
+		if r.Info.Repo == m.scope {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// visibleRows returns the sessions of the scope the filter selects.
+func (m *Sessions) visibleRows() []sessionctl.Row {
+	rows := m.scopedRows()
+	if m.rowQuery == "" {
+		return rows
 	}
 	q := strings.ToLower(m.rowQuery)
 	var out []sessionctl.Row
-	for _, r := range m.rows {
+	for _, r := range rows {
 		text := strings.ToLower(strings.Join([]string{r.Info.Repo, r.Info.Name, r.Words(), m.message(r)}, " "))
 		if strings.Contains(text, q) {
 			out = append(out, r)
@@ -609,6 +687,9 @@ func (m *Sessions) onKey(msg tea.KeyPressMsg) tea.Cmd {
 	case key.Matches(msg, m.keys.Retry):
 		return m.listCmd()
 	case key.Matches(msg, m.keys.New):
+		if m.scope != "" {
+			return m.reposCmd(prefill{repo: m.scope, fixed: true})
+		}
 		return m.reposCmd(prefill{})
 	case key.Matches(msg, km.Up):
 		m.move(-1)
@@ -1024,6 +1105,17 @@ func sessionNameBase(profile string) string {
 // user's sessions are blocked, errored, done and working, zero counts left
 // out; "" when there are none. Narrow drops the words.
 func (m *Sessions) Summary(narrow bool) string {
+	return m.summary(narrow, nil)
+}
+
+// StatusSummary renders the attention summary for the repository page's
+// status bar (R7): narrow, on the bar's background.
+func (m *Sessions) StatusSummary() string {
+	bg := m.common.Styles.StatusBarSummary.GetBackground()
+	return m.summary(true, bg)
+}
+
+func (m *Sessions) summary(narrow bool, bg color.Color) string {
 	if m.src == nil || m.listErr != nil {
 		return ""
 	}
@@ -1032,6 +1124,10 @@ func (m *Sessions) Summary(narrow bool) string {
 		counts[r.State()]++
 	}
 	st := m.common.Styles
+	sep := "  "
+	if narrow {
+		sep = " "
+	}
 	var parts []string
 	for _, s := range []events.State{events.StateBlocked, events.StateError, events.StateDone, events.StateWorking} {
 		n := counts[s]
@@ -1042,10 +1138,45 @@ func (m *Sessions) Summary(narrow bool) string {
 		if narrow {
 			text = fmt.Sprintf("%s%d", s.Glyph(), n)
 		}
-		parts = append(parts, stateStyle(st, s).Render(text))
+		style := stateStyle(st, s)
+		if bg != nil {
+			style = style.Background(bg)
+		}
+		parts = append(parts, style.Render(text))
 	}
-	if narrow {
-		return strings.Join(parts, " ")
+	if bg != nil {
+		return strings.Join(parts, lipgloss.NewStyle().Background(bg).Render(sep))
 	}
-	return strings.Join(parts, "  ")
+	return strings.Join(parts, sep)
 }
+
+// RepoBadge is the session badge of a repository (section 4): the most
+// urgent state among the user's sessions of it, and how many there are.
+type RepoBadge struct {
+	State events.State
+	Count int
+}
+
+// RepoBadges returns the session badge of each repository the user has
+// sessions of, from what the Monitor last read. It never calls the
+// gateway.
+func (m *Sessions) RepoBadges() map[string]RepoBadge {
+	if m.src == nil {
+		return nil
+	}
+	out := map[string]RepoBadge{}
+	for _, st := range m.src.Statuses() {
+		repo := st.Session.Repo
+		b, ok := out[repo]
+		s := st.Record.State
+		if !ok || s.Rank() < b.State.Rank() {
+			b.State = s
+		}
+		b.Count++
+		out[repo] = b
+	}
+	return out
+}
+
+// StateStyle returns the colour of a state (section 2).
+func StateStyle(st *styles.Styles, s events.State) lipgloss.Style { return stateStyle(st, s) }

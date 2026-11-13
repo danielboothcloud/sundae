@@ -1424,6 +1424,27 @@ what needs you, <kbd>g</kbd> goes back to the top and follows new signals).
 When the OpenShell gateway is unreachable the tab says so and <kbd>r</kbd>
 retries; the other tabs keep working.
 
+On **Repositories**, each title line carries badges: your sessions of the
+repository (the most urgent state and how many), and, when forges are
+configured, where it comes from (`local`, or the forge with `↑n ↓n` commits
+ahead and behind its default branch as of the last sync). They follow status
+changes and forge syncs live and drop off on narrow terminals. <kbd>s</kbd>
+starts a session for the highlighted repository. Inside a repository, a
+**Sessions** tab after Tags lists that repository's sessions and signals with
+the same keys, and the status bar ends with the attention summary.
+
+When forges are configured, server admins (the same people who may run
+`forge import` and `forge sync`) get a **Forges** tab: every forge with its
+repositories, imported (`✓`, with ahead/behind and last sync) or not.
+<kbd>i</kbd> imports the highlighted repository, <kbd>I</kbd> imports all
+shown (the <kbd>/</kbd> filter narrows them; you confirm the count),
+<kbd>r</kbd> syncs the forge on its header or the repository on its row,
+<kbd>p</kbd> pushes the repository's branch to the forge after a confirm
+naming it (fast-forward only; a refusal says why), and <kbd>enter</kbd> opens
+the imported repository. Imports, syncs and pushes run in the background with
+their progress and outcome in the rows; syncs from the schedule or the command
+line show up live.
+
 [^osc52]:
     Copying over SSH depends on your terminal support of OSC52. Refer to
     [go-osc52](https://github.com/aymanbagabas/go-osc52) for more information.

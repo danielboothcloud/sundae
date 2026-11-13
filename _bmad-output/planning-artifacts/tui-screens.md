@@ -249,3 +249,18 @@ Settled 2026-11-12 for the first build: two-line rows; open on Repositories; For
 4. Signals: in memory only, or kept in the database so the feed survives restarts?
 6. Signals as a pane inside Sessions as drawn, or its own top-level tab?
 5. Repository rows: keep the 4-line row, or add a compact one-line mode once forges fill the list?
+
+## 12. Implementation notes
+
+Where the build differs from the screens above (sections 4, 6, 8, 9, 10).
+
+- **Forges is for server admins only**, not every authenticated user (R10): listing, importing and syncing use the server's forge tokens, and `forge ls`, `forge import` and `forge sync` are admin-only, so the tab follows the same rule. Push (collaborator write in the CLI) is always allowed to an admin.
+- **Forges starts when first shown**, not with the TUI. It shows the forge service's last listing and lists (discovers) only forges never listed since the server started; the scheduled sync keeps listings fresh. Imports, syncs and pushes run in the background; forge events from the bus (other admins, the schedule) refresh the affected forge live, coalesced while a read is under way.
+- **Forge header**: `name · host`, then `N repos` (those the include/exclude patterns let through), `N imported`, and `synced 3m ago`; an error replaces the last part: `✗ sync failed: …` (last forge-wide sync) or `✗ cannot list: …` (last discovery). While busy: `syncing… 3 of 12`, `importing… 2 of 7`, `listing…`. Narrow: the right part goes to a second line.
+- **Forge rows** show the forge path (`owner/repo`), not the bare name, since a forge can span owners. An operation's outcome (`✓ synced`, `✓ pushed`, `✗ push refused`, `✗ import failed`) replaces the sync age in the row; the full reason is on the tab's bottom line while the row is selected. An imported repository the forge stopped listing reads `(no longer listed)`.
+- **Forge keys**: `r` on a repository that is not imported syncs its forge, as on the header. `c` copies an imported repository's clone command. `I` counts per forge in its confirm: `Import 3 repositories (github 2, gitlab 1)?`. The push confirm reads `Push main of <repo> to <forge>?  Fast-forward only, no force.`; `--force-with-lease` stays CLI-only.
+- **Origin badge** shows only when forges are configured (otherwise every repository would read `local`), to anyone who can see the repository. Only non-zero arrows show: `github ↑3`, `github ↓2`, `github ↑1 ↓4`.
+- **Session badge** is read from the Monitor (never the gateway) whenever the Repositories tab is drawn, so it follows status changes as they arrive. Every row drops the same badges so the columns line up: first `Updated …`, then the origin, then the session badge's word (`▲1`), then the badge. A title longer than half the row drops more on its own row only.
+- **In-repo Sessions tab** shows the home Sessions tab's model narrowed to the repository; each scope (home, each repository) keeps its own cursor, pane and filters, and Signals follows again after a switch. Its end-session confirm shows inside the tab (the repository page's footer is the help). `esc` first closes a form or confirm, clears the filter or cancels a start, and only then leaves the repository. Status bar: `<repo>  <session>  1 of 2  *  ? Help  ▲1 ✓1 ●2`, the summary always in its narrow form.
+- **Narrow repository page**: its tabs collapse to `‹ Sessions ›` whenever they do not fit, not only under 60 columns (at 50 columns the old tab strip already hid Sessions).
+- `forge ls --json` gains `list_error` and `syncing`, which the tab reads.

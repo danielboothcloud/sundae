@@ -2,7 +2,9 @@ package forge
 
 import (
 	"context"
+	"fmt"
 	"sort"
+	"strings"
 )
 
 // BranchAction is what a sync did to, or found about, one local branch.
@@ -64,6 +66,37 @@ func (r *SyncResult) Changed() bool {
 		}
 	}
 	return false
+}
+
+// Summary describes the result in a few words, e.g.
+// "main fast-forwarded; dev diverged +1/-2; 2 tag(s) created", or "up to
+// date". A nil result is "no result".
+func (r *SyncResult) Summary() string {
+	if r == nil {
+		return "no result"
+	}
+	var parts []string
+	for _, b := range r.Branches {
+		switch b.Action {
+		case BranchCreated, BranchFastForwarded:
+			parts = append(parts, b.Name+" "+string(b.Action))
+		case BranchAhead, BranchDiverged:
+			parts = append(parts, fmt.Sprintf("%s %s +%d/-%d", b.Name, b.Action, b.Ahead, b.Behind))
+		case BranchFailed:
+			parts = append(parts, b.Name+" failed: "+b.Error)
+		case BranchUpToDate, BranchLocalOnly:
+		}
+	}
+	if n := len(r.TagsCreated); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d tag(s) created", n))
+	}
+	if n := len(r.TagsConflicting); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d tag(s) differ from upstream, left alone: %s", n, strings.Join(r.TagsConflicting, ", ")))
+	}
+	if len(parts) == 0 {
+		return "up to date"
+	}
+	return strings.Join(parts, "; ")
 }
 
 // Branch returns the status of the named branch.

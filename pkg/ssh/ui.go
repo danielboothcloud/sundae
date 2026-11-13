@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/soft-serve/pkg/ui/components/footer"
 	"github.com/charmbracelet/soft-serve/pkg/ui/components/header"
 	"github.com/charmbracelet/soft-serve/pkg/ui/components/selector"
+	"github.com/charmbracelet/soft-serve/pkg/ui/pages/forges"
 	"github.com/charmbracelet/soft-serve/pkg/ui/pages/repo"
 	"github.com/charmbracelet/soft-serve/pkg/ui/pages/selection"
 	"github.com/charmbracelet/soft-serve/pkg/ui/pages/sessions"
@@ -102,11 +103,26 @@ func (ui *UI) footerView() string {
 	return ui.footer.View()
 }
 
-// capturing reports whether the home page's active tab takes every key
-// (a form, confirm or filter is open).
+// repo returns the repository page.
+func (ui *UI) repo() *repo.Repo {
+	if r, ok := ui.pages[repoPage].(*repo.Repo); ok {
+		return r
+	}
+	return nil
+}
+
+// capturing reports whether the active page's tab takes every key (a
+// form, confirm or filter is open).
 func (ui *UI) capturing() bool {
-	s := ui.selection()
-	return ui.activePage == selectionPage && s != nil && s.Capturing()
+	switch ui.activePage {
+	case selectionPage:
+		s := ui.selection()
+		return s != nil && s.Capturing()
+	case repoPage:
+		r := ui.repo()
+		return r != nil && r.Capturing()
+	}
+	return false
 }
 
 // close stops the pages' background work before quitting.
@@ -170,14 +186,21 @@ func (ui *UI) SetSize(width, height int) {
 
 // Init implements tea.Model.
 func (ui *UI) Init() tea.Cmd {
-	ui.pages[selectionPage] = selection.New(ui.common)
-	ui.pages[repoPage] = repo.New(ui.common,
+	sel := selection.New(ui.common)
+	ui.pages[selectionPage] = sel
+	tabs := []common.TabComponent{
 		repo.NewReadme(ui.common),
 		repo.NewFiles(ui.common),
 		repo.NewLog(ui.common),
 		repo.NewRefs(ui.common, git.RefsHeads),
 		repo.NewRefs(ui.common, git.RefsTags),
-	)
+	}
+	// The repository's sessions, after Tags (section 8), when the user
+	// has sessions: the home Sessions tab's model, narrowed to it.
+	if m := sel.SessionsModel(); m != nil {
+		tabs = append(tabs, repo.NewSessions(ui.common, m))
+	}
+	ui.pages[repoPage] = repo.New(ui.common, tabs...)
 	ui.SetSize(ui.common.Width, ui.common.Height)
 	cmds := make([]tea.Cmd, 0)
 	cmds = append(cmds,
@@ -192,15 +215,15 @@ func (ui *UI) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// IsFiltering returns true if the selection page is filtering, or its
-// active tab takes every key.
+// IsFiltering returns true if the selection page is filtering, or the
+// active page's tab takes every key.
 func (ui *UI) IsFiltering() bool {
 	if ui.activePage == selectionPage {
 		if s := ui.selection(); s != nil && s.IsFiltering() {
 			return true
 		}
 	}
-	return false
+	return ui.capturing()
 }
 
 // Update implements tea.Model.
@@ -262,6 +285,8 @@ func (ui *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		ui.error = msg
 		ui.state = errorState
 		ui.showFooter = true
+	case forges.OpenRepoMsg:
+		cmds = append(cmds, ui.setRepoCmd(msg.Repo))
 	case selector.SelectMsg:
 		switch msg.IdentifiableItem.(type) {
 		case selection.Item:
@@ -280,8 +305,8 @@ func (ui *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if cmd != nil {
 		cmds = append(cmds, cmd)
 	}
-	if ui.activePage != selectionPage && sessions.IsMsg(msg) {
-		// The Sessions tab keeps following its live updates while a
+	if ui.activePage != selectionPage && selection.IsMsg(msg) {
+		// The home tabs keep following their live updates while a
 		// repository is open.
 		m, cmd := ui.pages[selectionPage].Update(msg)
 		ui.pages[selectionPage] = m.(common.Component)
@@ -308,6 +333,11 @@ func (ui *UI) View() tea.View {
 
 	var view string
 	wm, hm := ui.getMargins()
+	if r, s := ui.repo(), ui.selection(); ui.activePage == repoPage && r != nil && s != nil {
+		// The attention summary, in a repository, is at the status
+		// bar's right end (R7).
+		r.SetSummary(s.StatusSummary())
+	}
 	switch ui.state {
 	case loadingState:
 		view = "Loading..."

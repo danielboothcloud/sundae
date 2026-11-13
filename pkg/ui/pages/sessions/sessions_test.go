@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/soft-serve/pkg/sessionctl"
 	"github.com/charmbracelet/soft-serve/pkg/signals"
 	"github.com/charmbracelet/soft-serve/pkg/ui/common"
+	"github.com/charmbracelet/soft-serve/pkg/ui/components/prompt"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -921,4 +922,80 @@ func (nopTerm) Read([]byte) (int, error)    { return 0, nil }
 func (nopTerm) Write(p []byte) (int, error) { return len(p), nil }
 func (nopTerm) Pty() (ssh.Pty, <-chan ssh.Window, bool) {
 	return ssh.Pty{}, nil, true
+}
+
+// TestScopeGolden is the repository page's Sessions tab (section 8): the
+// sessions of one repository, without the repository prefix.
+func TestScopeGolden(t *testing.T) {
+	for _, w := range []int{80, 50} {
+		t.Run(fmt.Sprint(w), func(t *testing.T) {
+			src := newFakeSource()
+			src.snap = mockSignals()
+			m := loaded(t, w, 12, src)
+			m.Update(followMsg{snap: src.snap, feed: &fakeFeed{ch: make(chan []signals.Signal)}})
+			m.SetScope("soft-serve")
+			golden(t, fmt.Sprintf("repo-sessions-%d", w), view(m))
+			keys(m, "e")
+			golden(t, fmt.Sprintf("repo-signals-%d", w), view(m))
+		})
+	}
+}
+
+func TestScopeKeys(t *testing.T) {
+	src := newFakeSource()
+	m := loaded(t, 80, 20, src)
+	// The home tab's filter is kept while a repository is shown.
+	keys(m, "/")
+	typeText(m, "infra")
+	keys(m, "enter")
+	m.SetScope("soft-serve")
+	if got := strings.Join(visibleKeys(m), " "); got != "soft-serve/forge-sync soft-serve/tui" {
+		t.Fatalf("scoped rows %s", got)
+	}
+	if name, i, n := m.SelectedName(); name != "forge-sync" || i != 1 || n != 2 {
+		t.Fatalf("SelectedName = %s %d %d", name, i, n)
+	}
+	// n opens the form for this repository, fixed.
+	run(m, keys(m, "n"), 1)
+	if m.form == nil || m.form.Field("repo").Kind() != prompt.Fixed || m.form.Field("repo").Value() != "soft-serve" {
+		t.Fatal("n did not open the form for the repository")
+	}
+	keys(m, "esc")
+	// x asks in the tab: the repository page's footer is the help.
+	keys(m, "j", "x")
+	if m.FooterLine(80) != "" || !strings.Contains(view(m), "End soft-serve / tui?") || !strings.Contains(view(m), "y / N") {
+		t.Fatalf("confirm:\n%s", view(m))
+	}
+	run(m, keys(m, "y"), 2)
+	if fmt.Sprint(src.ended) != "[soft-serve/tui]" {
+		t.Fatalf("ended %v", src.ended)
+	}
+	// A filter in the repository is its own; esc clears it.
+	keys(m, "/")
+	typeText(m, "forge")
+	keys(m, "enter")
+	if !m.Filtered() {
+		t.Fatal("not filtered")
+	}
+	m.SetScope("")
+	if m.rowQuery != "infra" || len(visibleKeys(m)) != 1 {
+		t.Fatalf("home filter lost: %q %v", m.rowQuery, visibleKeys(m))
+	}
+	m.SetScope("soft-serve")
+	if m.rowQuery != "forge" {
+		t.Fatalf("repository filter lost: %q", m.rowQuery)
+	}
+	keys(m, "esc")
+	if m.Filtered() {
+		t.Fatal("esc did not clear the filter")
+	}
+	// A repository without sessions says so.
+	m.SetScope("gateway-2")
+	if !strings.Contains(view(m), "No sessions of this repository. Press n to start one.") {
+		t.Fatalf("empty:\n%s", view(m))
+	}
+	// The header summary still counts every session.
+	if got := ansi.Strip(m.Summary(true)); got != "▲1 ✓1 ●2" {
+		t.Fatalf("summary %q", got)
+	}
 }

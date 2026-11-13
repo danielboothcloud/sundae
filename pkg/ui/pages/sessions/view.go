@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/soft-serve/pkg/events"
+	"github.com/charmbracelet/soft-serve/pkg/openshell"
 	"github.com/charmbracelet/soft-serve/pkg/sessionctl"
 	"github.com/charmbracelet/soft-serve/pkg/signals"
 	"github.com/charmbracelet/soft-serve/pkg/ui/common"
@@ -48,6 +49,23 @@ func stateStyle(st *styles.Styles, s events.State) lipgloss.Style {
 // narrow reports whether the tab uses its narrow layout.
 func (m *Sessions) narrow() bool { return m.common.Width < NarrowWidth }
 
+// collapsed reports whether the frame's tabs are collapsed to the active
+// one, "‹ Sessions ›", naming the Sessions pane: the home page's and the
+// repository page's both are when narrow.
+func (m *Sessions) collapsed() bool { return m.narrow() }
+
+// where is a session's "repo / name"; just the name when the tab is
+// scoped to its repository.
+func (m *Sessions) where(repo, name string) string {
+	if m.scope != "" && repo == m.scope {
+		if name == "" {
+			name = openshell.DefaultSessionName
+		}
+		return signals.Sanitize(name, 0)
+	}
+	return sessionLabel(repo, name)
+}
+
 // View implements tea.Model.
 func (m *Sessions) View() string {
 	if m.src == nil {
@@ -61,14 +79,14 @@ func (m *Sessions) View() string {
 	case m.op != nil:
 		lines = append([]string{""}, m.opView(w)...)
 	default:
-		if m.narrow() && m.pane == sessionsPane && !m.typing {
+		if m.collapsed() && m.pane == sessionsPane && !m.typing {
 			// The collapsed tabs name the pane; keep the lines for rows.
 			lines = append(lines, "")
 		} else {
 			lines = append(lines, "", m.paneHeader(w), "")
 		}
 		body := h - len(lines)
-		if m.notice.text != "" {
+		if m.notice.text != "" || m.inlineConfirm() {
 			body -= 2
 		}
 		if m.pane == signalsPane {
@@ -77,7 +95,12 @@ func (m *Sessions) View() string {
 			lines = append(lines, m.sessionsView(w, body)...)
 		}
 	}
-	if m.notice.text != "" {
+	if m.inlineConfirm() {
+		for len(lines) < h-2 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, "", " "+m.confirm.View(w-2))
+	} else if m.notice.text != "" {
 		style := m.common.Styles.RepoSelector.Normal.Desc
 		if m.notice.err {
 			style = m.common.Styles.State.Error
@@ -134,7 +157,7 @@ func (m *Sessions) paneHeader(w int) string {
 	var parts []string
 	for i, n := range names {
 		switch {
-		case m.narrow() && m.pane == sessionsPane:
+		case m.collapsed() && m.pane == sessionsPane:
 			// The collapsed tabs already read ‹ Sessions ›.
 		case pane(i) == m.pane:
 			parts = append(parts, st.TopLevelActiveTab.UnsetMarginRight().Render("‹ "+n+" ›"))
@@ -172,7 +195,7 @@ func (m *Sessions) paneInfo() string {
 		if m.sigQuery != "" {
 			parts = append(parts, "/"+m.sigQuery)
 		}
-		if m.attention || m.sigQuery != "" {
+		if m.attention || m.sigQuery != "" || m.scope != "" {
 			parts = append(parts, fmt.Sprintf("%d of %d", len(m.visibleSignals()), len(m.sigs)))
 		} else {
 			parts = append(parts, fmt.Sprintf("%d kept", len(m.sigs)))
@@ -182,13 +205,14 @@ func (m *Sessions) paneInfo() string {
 	if !m.loaded || m.listErr != nil {
 		return ""
 	}
+	n := len(m.scopedRows())
 	if m.rowQuery != "" {
-		return fmt.Sprintf("/%s · %d of %d", m.rowQuery, len(m.visibleRows()), len(m.rows))
+		return fmt.Sprintf("/%s · %d of %d", m.rowQuery, len(m.visibleRows()), n)
 	}
-	if len(m.rows) == 1 {
+	if n == 1 {
 		return "1 session"
 	}
-	return fmt.Sprintf("%d sessions", len(m.rows))
+	return fmt.Sprintf("%d sessions", n)
 }
 
 // sessionRowHeight is the lines of a session row, its spacing included.
@@ -228,8 +252,12 @@ func (m *Sessions) sessionsView(w, h int) []string {
 		return []string{out}
 	case !m.loaded:
 		return []string{" " + st.RepoSelector.Normal.Desc.Render("Loading sessions…")}
-	case len(m.rows) == 0:
-		return []string{" " + st.NoContent.UnsetMargins().UnsetPadding().Render("No sessions. Press n to start one.")}
+	case len(m.scopedRows()) == 0:
+		text := "No sessions. Press n to start one."
+		if m.scope != "" {
+			text = "No sessions of this repository. Press n to start one."
+		}
+		return []string{" " + st.NoContent.UnsetMargins().UnsetPadding().Render(common.TruncateString(text, w-1))}
 	}
 	vis := m.visibleRows()
 	if len(vis) == 0 {
@@ -268,7 +296,7 @@ func (m *Sessions) sessionRow(r sessionctl.Row, selected bool, w int) []string {
 	cw := max(w-base.GetHorizontalFrameSize(), 10)
 	ss := stateStyle(st, r.State())
 	glyph := ss.Render(r.State().Glyph())
-	where := sessionLabel(r.Info.Repo, r.Info.Name)
+	where := m.where(r.Info.Repo, r.Info.Name)
 	words := m.words(r)
 	age := sessionctl.Since(r.Changed(), m.now())
 	if age == "-" {
@@ -321,7 +349,7 @@ func (m *Sessions) signalsView(w, h int) []string {
 	whereW, wordsW := 10, 6
 	for _, s := range vis[start:end] {
 		_, words, _ := strings.Cut(s.Label(), " ")
-		whereW = max(whereW, ansi.StringWidth(s.Where()))
+		whereW = max(whereW, ansi.StringWidth(m.signalWhere(s)))
 		wordsW = max(wordsW, ansi.StringWidth(words))
 	}
 	whereW, wordsW = min(whereW, sigWhereMaxWidth), min(wordsW, sigWordsMaxWidth)
@@ -348,7 +376,7 @@ func (m *Sessions) signalRow(s signals.Signal, selected bool, w, whereW, wordsW 
 	}
 	glyph, words, _ := strings.Cut(s.Label(), " ")
 	when := signals.FormatTime(s.Time, m.now())
-	where := s.Where()
+	where := m.signalWhere(s)
 	var lines []string
 	if m.narrow() {
 		head := pad(when, sigTimeWidth) + " "
@@ -370,6 +398,21 @@ func (m *Sessions) signalRow(s signals.Signal, selected bool, w, whereW, wordsW 
 	return strings.Split(base.Render(strings.Join(lines, "\n")), "\n")
 }
 
+// signalWhere is a signal's "repo / session"; without the repository
+// when the tab is scoped to it.
+func (m *Sessions) signalWhere(s signals.Signal) string {
+	w := s.Where()
+	if m.scope != "" {
+		w = strings.TrimPrefix(w, signals.Sanitize(m.scope, 0)+" / ")
+	}
+	return w
+}
+
+// inlineConfirm reports whether the confirm shows in the tab rather than
+// in the frame's footer: on the repository page, whose footer is the
+// help.
+func (m *Sessions) inlineConfirm() bool { return m.confirm != nil && m.scope != "" }
+
 // truncate cuts s to n cells, ending in "…" when cut.
 func truncate(s string, n int) string { return ansi.Truncate(s, n, "…") }
 
@@ -384,7 +427,7 @@ func pad(s string, n int) string {
 // FooterLine is what replaces the help line: the end-session confirm
 // (section 5b). "" when there is none.
 func (m *Sessions) FooterLine(width int) string {
-	if m.confirm == nil {
+	if m.confirm == nil || m.inlineConfirm() {
 		return ""
 	}
 	return m.confirm.View(width)

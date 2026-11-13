@@ -116,8 +116,9 @@ func (a *fakeAttacher) Close() { a.once.Do(func() { close(a.closed) }) }
 
 // fakeSource is a Sessions tab Source: rows, or one session, r / main.
 type fakeSource struct {
-	att  *fakeAttacher
-	rows []sessionctl.Row
+	att      *fakeAttacher
+	rows     []sessionctl.Row
+	statuses map[string]openshell.SessionStatus
 }
 
 func (f *fakeSource) List(context.Context) ([]sessionctl.Row, error) {
@@ -129,7 +130,7 @@ func (f *fakeSource) List(context.Context) ([]sessionctl.Row, error) {
 		Status: &openshell.SessionStatus{Record: events.Record{State: events.StateIdle, Msg: "waiting"}},
 	}}, nil
 }
-func (f *fakeSource) Statuses() map[string]openshell.SessionStatus { return nil }
+func (f *fakeSource) Statuses() map[string]openshell.SessionStatus { return f.statuses }
 func (f *fakeSource) Follow() ([]signals.Signal, sessions.Feed) {
 	_, feed := (*signals.History)(nil).Follow(signals.Query{})
 	return nil, feed

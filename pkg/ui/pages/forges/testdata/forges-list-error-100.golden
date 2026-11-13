@@ -1,0 +1,20 @@
+
+  github · github.com                                       4 repos · 2 imported · synced 3m ago
+      danielboothcloud/dotfiles                                    not imported
+    ✓ danielboothcloud/pi-aio                                      ↑0 ↓2         synced 3m
+      danielboothcloud/quartermaster                               not imported
+    ✓ danielboothcloud/soft-serve                                  ↑3 ↓0         synced 3m
+
+┃ gitlab · gitlab.com           ✗ cannot list: dial tcp 127.0.0.1:1: connect: connection refused
+┃   Cannot list its repositories (r to sync and retry).
+
+
+
+
+
+
+
+
+
+
+ ✗ gitlab: cannot list: dial tcp 127.0.0.1:1: connect: connection refused

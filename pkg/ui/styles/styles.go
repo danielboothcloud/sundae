@@ -148,12 +148,13 @@ type Styles struct {
 
 	NoContent lipgloss.Style
 
-	StatusBar       lipgloss.Style
-	StatusBarKey    lipgloss.Style
-	StatusBarValue  lipgloss.Style
-	StatusBarInfo   lipgloss.Style
-	StatusBarBranch lipgloss.Style
-	StatusBarHelp   lipgloss.Style
+	StatusBar        lipgloss.Style
+	StatusBarKey     lipgloss.Style
+	StatusBarValue   lipgloss.Style
+	StatusBarInfo    lipgloss.Style
+	StatusBarBranch  lipgloss.Style
+	StatusBarHelp    lipgloss.Style
+	StatusBarSummary lipgloss.Style
 
 	Tabs         lipgloss.Style
 	TabInactive  lipgloss.Style
@@ -499,6 +500,10 @@ func DefaultStyles() *Styles {
 		Padding(0, 1).
 		Background(lipgloss.Color("62")).
 		Foreground(lipgloss.Color("230"))
+
+	s.StatusBarSummary = lipgloss.NewStyle().
+		Padding(0, 1).
+		Background(lipgloss.Color("235"))
 
 	s.StatusBarHelp = lipgloss.NewStyle().
 		Padding(0, 1).

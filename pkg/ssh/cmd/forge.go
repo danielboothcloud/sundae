@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"charm.land/lipgloss/v2/table"
@@ -303,35 +302,9 @@ func printSyncResults(cmd *cobra.Command, results []forge.RepoSyncResult) error 
 	return nil
 }
 
-// syncSummary describes a sync result in a few words, e.g.
-// "main fast-forwarded; dev diverged +1/-2; 2 tag(s) created".
-func syncSummary(r *forge.SyncResult) string {
-	if r == nil {
-		return "no result"
-	}
-	var parts []string
-	for _, b := range r.Branches {
-		switch b.Action {
-		case forge.BranchCreated, forge.BranchFastForwarded:
-			parts = append(parts, b.Name+" "+string(b.Action))
-		case forge.BranchAhead, forge.BranchDiverged:
-			parts = append(parts, fmt.Sprintf("%s %s +%d/-%d", b.Name, b.Action, b.Ahead, b.Behind))
-		case forge.BranchFailed:
-			parts = append(parts, b.Name+" failed: "+b.Error)
-		case forge.BranchUpToDate, forge.BranchLocalOnly:
-		}
-	}
-	if n := len(r.TagsCreated); n > 0 {
-		parts = append(parts, fmt.Sprintf("%d tag(s) created", n))
-	}
-	if n := len(r.TagsConflicting); n > 0 {
-		parts = append(parts, fmt.Sprintf("%d tag(s) differ from upstream, left alone: %s", n, strings.Join(r.TagsConflicting, ", ")))
-	}
-	if len(parts) == 0 {
-		return "up to date"
-	}
-	return strings.Join(parts, "; ")
-}
+// syncSummary describes a sync result in a few words; see
+// forge.SyncResult.Summary.
+func syncSummary(r *forge.SyncResult) string { return r.Summary() }
 
 func forgePushCommand() *cobra.Command {
 	var lease bool

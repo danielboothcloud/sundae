@@ -1,0 +1,6 @@
+  ┃ soft-serve          ✓ 2 sessions   github ↑3
+  ┃ about soft-serve
+    infra               ▲ 1 session    local
+    about infra
+    scratch                            local
+    about scratch

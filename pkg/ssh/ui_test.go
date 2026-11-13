@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -44,12 +45,22 @@ func frameRows() []sessionctl.Row {
 // as the Sessions tab's data (nil: no Sessions tab).
 func newTestUI(t *testing.T, width, height int, src sessions.Source) *UI {
 	t.Helper()
+	return newHomeUI(t, width, height, func(ctx context.Context, _ *backend.Backend) context.Context {
+		if src != nil {
+			ctx = context.WithValue(ctx, sessions.SourceKey, src)
+		}
+		return ctx
+	})
+}
+
+// newHomeUI returns a started home page TUI of width x height; setup
+// adds to its context (the tabs' sources) and to the backend.
+func newHomeUI(t *testing.T, width, height int, setup func(ctx context.Context, be *backend.Backend) context.Context) *UI {
+	t.Helper()
 	cfg, _, _, be := newTestBackend(t)
 	cfg.Name = "Soft Serve"
 	ctx := backend.WithContext(config.WithContext(context.Background(), cfg), be)
-	if src != nil {
-		ctx = context.WithValue(ctx, sessions.SourceKey, src)
-	}
+	ctx = setup(ctx, be)
 	c := common.NewCommon(ctx, width, height)
 	c.SetValue(common.ConfigKey, cfg)
 	ui := NewUI(c, "")
@@ -72,6 +83,13 @@ func runUI(ui *UI, cmd tea.Cmd, depth int) {
 	select {
 	case msg = <-done:
 	case <-time.After(100 * time.Millisecond):
+		// Keep what it returns later (a live update), for drainLate.
+		late := lateFor(ui)
+		go func() {
+			if m := <-done; m != nil {
+				late <- m
+			}
+		}()
 		return
 	}
 	switch msg := msg.(type) {
@@ -86,7 +104,42 @@ func runUI(ui *UI, cmd tea.Cmd, depth int) {
 	}
 }
 
-func uiKey(ui *UI, keys ...string) {
+var (
+	lateMu   sync.Mutex
+	lateMsgs = map[*UI]chan tea.Msg{}
+)
+
+// lateFor returns where the messages of the UI's commands that took
+// longer than runUI waits go.
+func lateFor(ui *UI) chan tea.Msg {
+	lateMu.Lock()
+	defer lateMu.Unlock()
+	ch, ok := lateMsgs[ui]
+	if !ok {
+		ch = make(chan tea.Msg, 64)
+		lateMsgs[ui] = ch
+	}
+	return ch
+}
+
+// drainLate feeds the UI the late messages that arrived.
+func drainLate(ui *UI) {
+	ch := lateFor(ui)
+	for {
+		select {
+		case msg := <-ch:
+			_, next := ui.Update(msg)
+			runUI(ui, next, 3)
+		default:
+			return
+		}
+	}
+}
+
+func uiKey(ui *UI, keys ...string) { uiKeyDepth(ui, 2, keys...) }
+
+// uiKeyDepth presses keys, following what each starts depth rounds.
+func uiKeyDepth(ui *UI, depth int, keys ...string) {
 	for _, k := range keys {
 		var msg tea.KeyPressMsg
 		switch k {
@@ -101,7 +154,7 @@ func uiKey(ui *UI, keys ...string) {
 			msg = tea.KeyPressMsg{Code: r[0], Text: k}
 		}
 		_, cmd := ui.Update(msg)
-		runUI(ui, cmd, 2)
+		runUI(ui, cmd, depth)
 	}
 }
 
