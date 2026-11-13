@@ -141,7 +141,7 @@ config:
 
 | Value | Required | What it is |
 | --- | --- | --- |
-| `image.repository`, `image.tag` | yes | The Sundae image pushed in step 1. |
+| `image.repository`, `image.tag` | from a checkout | The Sundae image pushed in step 1. The published chart sets both. |
 | `initialAdminKeys` | in practice | Admin public keys. Without one nobody can administer the server. |
 | `service.ssh.type`, `service.ssh.annotations` | in practice | How SSH is reached from outside the cluster. |
 | `config.ssh.public_url` | in practice | The external SSH address, shown in clone URLs. |
@@ -156,6 +156,17 @@ to render with a message naming the value when a required one is missing or
 a secret is put in the config.
 
 ## 4. Install
+
+From the published chart (built by CI with the images; `image.repository`
+and `image.tag` already point at that run's images):
+
+```sh
+helm upgrade --install sundae oci://ghcr.io/<owner>/charts/sundae \
+  --version <version> -n <namespace> --create-namespace -f my-cluster.local.yaml
+```
+
+Versions: `<x.y.z>` for `v*` tags, `<x.y.z>-<branch>.<sha>` for pushes to
+`main` and `develop`. Or from a checkout, with `image.*` set in your values:
 
 ```sh
 helm upgrade --install sundae helm/sundae -n <namespace> --create-namespace \
