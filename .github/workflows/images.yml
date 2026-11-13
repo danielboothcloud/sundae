@@ -107,7 +107,12 @@ jobs:
           # the images this run pushed (image.tag defaults to appVersion).
           owner="${OWNER,,}"
           yq -i ".image.repository = \"ghcr.io/${owner}/sundae\"" helm/sundae/values.yaml
+          # Fetch the dependencies Chart.lock pins (the OpenShell chart from
+          # ghcr.io/nvidia, the vendored helm/vendor/agent-sandbox) into
+          # helm/sundae/charts/, so the package embeds both.
+          helm dependency build helm/sundae
           helm lint helm/sundae
+          helm lint helm/sundae --set openshell.install=true --set agentSandbox.install=true --set config.openshell.image=example.com/sandbox:latest
           helm package helm/sundae --version "$VERSION" --app-version "$APP" -d dist
 
       - name: Push

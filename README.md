@@ -58,7 +58,8 @@ go build -o sundae ./cmd/sundae
 
 To run it in a container or on Kubernetes, build the image from the
 [`Containerfile`](Containerfile) and deploy it with the Helm chart in
-[`helm/sundae`](helm/sundae/README.md). [docker.md](docker.md) shows how to run the
+[`helm/sundae`](helm/sundae/README.md), which can also install the OpenShell
+gateway and Agent Sandbox for agent sessions. [docker.md](docker.md) shows how to run the
 image with Docker or Podman.
 
 ## Setting up a server
@@ -910,9 +911,12 @@ attach loses git access until the next one renews the file. Attach again, or
 raise `token_ttl` for long-running agents.
 
 **Sandbox egress.** The sandbox's network policy must allow git (and jj, which
-runs git) to reach Sundae's internal HTTP endpoint. Here is an example
-sandbox policy entry. Adjust the host, port and binary paths to your cluster
-and image, and the field names to your OpenShell version:
+runs git) to reach Sundae's internal HTTP endpoint. OpenShell's default policy
+denies all egress, and Sundae sets no policy, so put the rule in the sandbox
+image's `/etc/openshell/policy.yaml` or in a gateway-global policy (`openshell
+policy set --global`; see the Helm chart's README, "Sandbox egress"). Here is
+an example sandbox policy entry. Adjust the host, port and binary paths to
+your cluster and image, and the field names to your OpenShell version:
 
 ```yaml
 network_policies:

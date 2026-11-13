@@ -4,8 +4,34 @@ Sundae is running as StatefulSet {{ include "sundae.fullname" . }} in namespace 
   HTTP:  http://{{ include "sundae.fullname" . }}-http.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.http.port }} (in-cluster)
 
 The configuration is the ConfigMap {{ include "sundae.fullname" . }}-config, mounted read-only.
-{{- if .Values.config.openshell.enabled }}
-OpenShell sessions are enabled against {{ .Values.config.openshell.gateway_address }}.
+{{- if include "sundae.openshellEnabled" . }}
+{{- $os := (include "sundae.config" . | fromYaml).openshell }}
+OpenShell sessions are enabled against {{ $os.gateway_address }}.
+{{- if include "sundae.openshellEmbedded" . }}
+The gateway is part of this release: Service {{ include "sundae.openshellFullname" . }}.
+{{- if not .Values.agentSandbox.install }}
+It needs Agent Sandbox (agents.x-k8s.io) on the cluster; agentSandbox.install is off.
+{{- end }}
+{{- end }}
+{{- $u := urlParse $os.clone_url }}
+{{- $hostPort := splitList ":" $u.host }}
+
+Sandboxes clone and push over {{ $os.clone_url }}. OpenShell denies all
+sandbox egress by default, so the sandboxes' policy (in the image at
+/etc/openshell/policy.yaml, or a gateway-global policy) needs a rule like:
+
+network_policies:
+  sundae_git:
+    endpoints:
+      - host: {{ first $hostPort }}
+        port: {{ if gt (len $hostPort) 1 }}{{ last $hostPort }}{{ else }}80{{ end }}
+        protocol: rest
+        access: read-write
+    binaries:
+      - path: /usr/bin/git
+      - path: /usr/bin/jj
+
+with your image's real binary paths. See the chart README, "Sandbox egress".
 {{- end }}
 {{- if not (or .Values.initialAdminKeys .Values.config.initial_admin_keys .Values.initialAdminKeysSecret.name) }}
 

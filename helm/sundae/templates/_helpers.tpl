@@ -74,11 +74,78 @@ Loopback addresses are rejected: neither a Service nor a probe can reach them.
 {{- end }}
 
 {{/*
+Whether this release installs the OpenShell gateway (openshell.install).
+*/}}
+{{- define "sundae.openshellEmbedded" -}}
+{{- if (.Values.openshell | default dict).install -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
+Whether OpenShell sessions are on: config.openshell.enabled, or implied by
+openshell.install.
+*/}}
+{{- define "sundae.openshellEnabled" -}}
+{{- $os := .Values.config.openshell | default dict -}}
+{{- if or $os.enabled (include "sundae.openshellEmbedded" .) -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
+The embedded gateway's full name, computed as the OpenShell chart does
+(openshell.fullname), with the chart aliased "openshell" and its default
+nameOverride "openshell". Its Service has this name.
+*/}}
+{{- define "sundae.openshellFullname" -}}
+{{- $v := .Values.openshell | default dict -}}
+{{- if $v.fullnameOverride -}}
+{{- $v.fullnameOverride | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- $name := default "openshell" $v.nameOverride -}}
+{{- if contains $name .Release.Name -}}
+{{- .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+The embedded gateway's in-cluster gRPC address: its Service in the release
+namespace, https unless the OpenShell chart's server.disableTls is set.
+*/}}
+{{- define "sundae.openshellGatewayAddress" -}}
+{{- $v := .Values.openshell | default dict -}}
+{{- $server := $v.server | default dict -}}
+{{- $scheme := ternary "http" "https" (default false $server.disableTls) -}}
+{{- $port := ($v.service | default dict).port | default 8080 -}}
+{{- printf "%s://%s.%s.svc.cluster.local:%v" $scheme (include "sundae.openshellFullname" .) .Release.Namespace $port -}}
+{{- end }}
+
+{{/*
+The Secret with the gateway client certificate to mount: with the embedded
+gateway, the one its certgen hook (or cert-manager) creates,
+openshell.server.tls.clientTlsSecretName, unless TLS is off; otherwise
+openshell.clientTLS.secretName.
+*/}}
+{{- define "sundae.openshellClientTLSSecret" -}}
+{{- if include "sundae.openshellEmbedded" . -}}
+{{- $server := .Values.openshell.server | default dict -}}
+{{- if not $server.disableTls -}}
+{{- ($server.tls | default dict).clientTlsSecretName | default "openshell-client-tls" -}}
+{{- end -}}
+{{- else -}}
+{{- .Values.openshell.clientTLS.secretName -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Whether the OpenShell client TLS secret is mounted.
 */}}
 {{- define "sundae.openshellTLSMounted" -}}
-{{- $os := .Values.config.openshell | default dict -}}
-{{- if and $os.enabled .Values.openshell.clientTLS.secretName -}}
+{{- if and (include "sundae.openshellEnabled" .) (include "sundae.openshellClientTLSSecret" .) -}}
 true
 {{- end -}}
 {{- end }}
@@ -87,9 +154,8 @@ true
 Whether the OpenShell gateway token secret is mounted.
 */}}
 {{- define "sundae.openshellTokenMounted" -}}
-{{- $os := .Values.config.openshell | default dict -}}
 {{- $tok := .Values.openshell.gatewayToken | default dict -}}
-{{- if and $os.enabled $tok.secretName -}}
+{{- if and (include "sundae.openshellEnabled" .) $tok.secretName -}}
 true
 {{- end -}}
 {{- end }}
@@ -151,6 +217,8 @@ the mount directory when no key is set.
 {{/*
 The Sundae config file: .Values.config, plus
   - initial_admin_keys merged with .Values.initialAdminKeys;
+  - with openshell.install, openshell.enabled set and an empty
+    openshell.gateway_address pointed at the embedded gateway's Service;
   - when OpenShell is enabled and the client TLS secret is mounted, any empty
     openshell.tls_* path pointed at that mount;
   - when OpenShell is enabled and the gateway token secret is mounted, an
@@ -182,7 +250,11 @@ would reject at startup.
 {{- if get $os "token" -}}
 {{- fail "config.openshell.token must not be set: the config is rendered into a ConfigMap. Put the token in a Secret and set openshell.gatewayToken.secretName instead; the chart mounts it and sets config.openshell.token_file." -}}
 {{- end -}}
-{{- if get $os "enabled" -}}
+{{- if include "sundae.openshellEnabled" . -}}
+{{- $_ := set $os "enabled" true -}}
+{{- if and (include "sundae.openshellEmbedded" .) (not (get $os "gateway_address")) -}}
+{{- $_ := set $os "gateway_address" (include "sundae.openshellGatewayAddress" .) -}}
+{{- end -}}
 {{- if not (get $os "gateway_address") -}}
 {{- fail "config.openshell.gateway_address is required when config.openshell.enabled is true" -}}
 {{- end -}}

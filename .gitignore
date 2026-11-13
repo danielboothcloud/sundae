@@ -10,3 +10,7 @@ sundae_ed25519*
 
 # Cluster-specific Helm values (see helm/sundae/README.md)
 *.local.yaml
+
+# Chart dependencies, fetched and packaged by `helm dependency build helm/sundae`
+# (Chart.lock pins them).
+/helm/sundae/charts/

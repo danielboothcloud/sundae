@@ -181,7 +181,10 @@ spec:
         {{- if $openshellTLS }}
         - name: openshell-client-tls
           secret:
-            secretName: {{ .Values.openshell.clientTLS.secretName | quote }}
+            # With the embedded gateway, created by its pre-install/pre-upgrade
+            # certgen hook before this pod; otherwise it must already exist.
+            # Not optional: the pod waits for it rather than start without it.
+            secretName: {{ include "sundae.openshellClientTLSSecret" . | quote }}
             # Readable by the pod's fsGroup only.
             defaultMode: 0440
         {{- end }}

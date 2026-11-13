@@ -7,3 +7,24 @@ version: 0.1.0
 # built and pushed (see README.md).
 appVersion: "0.1.0"
 home: https://github.com/danielboothcloud/sundae
+
+# Optional components installed with the release, both off by default (see
+# README.md, "Embedded OpenShell and Agent Sandbox"). Run
+# `helm dependency build helm/sundae` before installing from this directory.
+dependencies:
+  # The NVIDIA OpenShell gateway (its chart is published as "helm-chart").
+  # Values go under `openshell`, next to Sundae's own openshell.clientTLS and
+  # openshell.gatewayToken.
+  - name: helm-chart
+    alias: openshell
+    version: 0.1.8
+    repository: oci://ghcr.io/nvidia/openshell
+    condition: openshell.install
+  # The Kubernetes Agent Sandbox controller and CRDs, which OpenShell's
+  # Kubernetes driver needs. Not published to any chart repository, so it is
+  # vendored from kubernetes-sigs/agent-sandbox v1.0.10 (../vendor/README.md).
+  - name: agent-sandbox
+    alias: agentSandbox
+    version: 0.1.4
+    repository: file://../vendor/agent-sandbox
+    condition: agentSandbox.install

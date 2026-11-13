@@ -165,10 +165,13 @@ config:
 
   # OpenShell agent sessions (ssh -t <server> session start <repo>).
   openshell:
+    # Implied by openshell.install (the embedded gateway).
     enabled: false
     # The gateway's gRPC address. http:// is plaintext; https:// or no scheme
-    # uses TLS. Required when enabled. For the OpenShell chart installed as
-    # release `openshell` in the same namespace (chart 0.1.8 defaults):
+    # uses TLS. Required when enabled, except with openshell.install, where
+    # empty means the embedded gateway's Service. For the OpenShell chart
+    # installed separately as release `openshell` in the same namespace
+    # (chart 0.1.8 defaults):
     # https://openshell.<namespace>.svc.cluster.local:8080
     gateway_address: ""
     workspace: "default"
@@ -397,14 +400,28 @@ config:
   # Repository created on boot when it does not exist. Empty disables it.
   default_repo: ""
 
-# Chart-side wiring for config.openshell. Only used when
-# config.openshell.enabled is true.
+# Chart-side wiring for config.openshell (clientTLS, gatewayToken), and the
+# embedded OpenShell gateway (install and every other key). The wiring is
+# only used when config.openshell.enabled or openshell.install is true.
 openshell:
+  # Install the NVIDIA OpenShell gateway with this release, in its namespace
+  # (the OpenShell chart oci://ghcr.io/nvidia/openshell/helm-chart 0.1.8, a
+  # dependency of this chart), and point Sundae at it. This implies
+  # config.openshell.enabled; an empty config.openshell.gateway_address
+  # becomes the gateway's Service,
+  # https://<release>-openshell.<namespace>.svc.cluster.local:8080, and the
+  # client certificate its certgen hook creates (server.tls.clientTlsSecretName,
+  # openshell-client-tls) is mounted; clientTLS.secretName below is then
+  # ignored. config.openshell.image is still required. The gateway's
+  # Kubernetes driver needs Agent Sandbox: set agentSandbox.install too,
+  # unless the cluster already runs it. See README.md, "Embedded OpenShell
+  # and Agent Sandbox".
+  install: false
   clientTLS:
     # An existing Secret in this namespace holding the gateway's client
     # certificate, with the keys ca.crt, tls.crt and tls.key. The OpenShell
     # chart creates it as openshell-client-tls. Set to "" to mount nothing
-    # (for a plaintext or token-only gateway).
+    # (for a plaintext or token-only gateway). Not used with install: true.
     secretName: openshell-client-tls
     mountPath: /etc/openshell-tls
   # Optional bearer token for the gateway, from an existing Secret in this
@@ -418,6 +435,70 @@ openshell:
     secretName: ""
     key: token
     mountPath: /etc/openshell-token
+
+  # Everything else under `openshell` is passed to the OpenShell chart (its
+  # values.yaml documents them all) and only used with install: true. The
+  # ones this chart sets or you will likely need:
+  agentSandbox:
+    preflight:
+      # The OpenShell chart refuses to render unless the cluster already
+      # serves agents.x-k8s.io/v1beta1 or v1alpha1. Off here, because it
+      # fails whenever the API is not visible at render time: with
+      # agentSandbox.install the CRDs come with this same release (helm
+      # template and Argo CD render before anything is applied, and helm
+      # upgrade does not install a subchart's crds/), and helm template or
+      # Argo CD cannot see the cluster's APIs at all. Turn it on only for
+      # helm install/upgrade against a cluster that runs Agent Sandbox from
+      # elsewhere.
+      enabled: false
+  server:
+    # StorageClass and default size of each sandbox's workspace volume
+    # (/sandbox: the checkouts and the sandbox user's home), one
+    # ReadWriteOnce PVC per sandbox. Use block storage. Empty: the cluster's
+    # default StorageClass and OpenShell's default size, 2Gi.
+    workspaceStorageClass: ""
+    workspaceDefaultStorageSize: ""
+    # The gateway's own SQLite volume. Block storage, not NFS. Empty: the
+    # cluster's default StorageClass, 1Gi. Immutable after install.
+    dataStorageClass: ""
+    credentialStorage:
+      # An existing Secret holding the key that encrypts provider credentials
+      # in the gateway's database: key `key-encryption-key`, a base64-encoded
+      # 32-byte value (`openssl rand -base64 32`). Empty: the OpenShell chart
+      # generates the Secret (kept on uninstall) and finds it again on upgrade
+      # with `lookup`. That only works with helm install/upgrade: helm
+      # template and Argo CD cannot look it up and render a new random key
+      # every time, which makes stored credentials unreadable. For GitOps,
+      # create the Secret yourself (e.g. an ExternalSecret in extraObjects)
+      # and name it here.
+      existingSecret: ""
+
+# The Kubernetes Agent Sandbox controller and its CRDs
+# (https://github.com/kubernetes-sigs/agent-sandbox v1.0.10, vendored in
+# helm/vendor/agent-sandbox), which OpenShell's Kubernetes driver needs.
+# Cluster-wide: install it once per cluster, and leave this off when the
+# cluster already has it. Every key other than `install` is passed to the
+# agent-sandbox chart.
+agentSandbox:
+  install: false
+  image:
+    # Required by the agent-sandbox chart. Matches the vendored chart.
+    tag: v1.0.10
+  namespace:
+    # The controller runs in this release's namespace (name ""), instead of
+    # the agent-sandbox chart's own agent-sandbox-system namespace.
+    create: false
+    name: ""
+  # The controller image is distroless and runs as UID 65532.
+  podSecurityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
 
 # Chart-side wiring for config.notifications. Only used when
 # config.notifications.ntfy.enabled is true.
