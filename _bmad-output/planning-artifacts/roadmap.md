@@ -28,6 +28,10 @@ Soft Serve becomes two things on one server, running in Kubernetes:
 | Project-init options | Deferred | `deferred-work.md` |
 | Deployment | No `openshell` or `soft-serve` namespace in `omni-ops-microcloud-k8s`; no mention in the `microcloud` repo. Prod cluster not checked. | — |
 
+### Build-out status (2026-11-13)
+
+Built on fakes and local harnesses, never run against a live OpenShell gateway or forge token: I4 config check, E forge sync, H1-H3 bus and ntfy, B1-B4 osewa sessions, profiles and parking, C1 status, H4 signals, the TUI (section 10), F1 S3 snapshots with snapshot-backed parking, F2 templates and per-repo profiles. Parked: D local CLI, C4 in-pod watcher, G local CI. Next: J5 (build images, deploy, run A1/A2 on the cluster).
+
 ## 3. Findings that constrain the design
 
 **F1. Agents do not survive detach today.**
