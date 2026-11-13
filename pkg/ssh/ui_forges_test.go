@@ -51,7 +51,7 @@ func (f *fakeForges) Repos(context.Context, string) ([]forge.RepoStatus, error) 
 	}, nil
 }
 func (f *fakeForges) Discover(context.Context, string) error { return nil }
-func (f *fakeForges) Import(context.Context, string, []string) ([]forge.ImportResult, error) {
+func (f *fakeForges) Import(context.Context, string, []string, proto.VCS) ([]forge.ImportResult, error) {
 	return nil, nil
 }
 

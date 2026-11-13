@@ -27,8 +27,8 @@ type Source interface {
 	Repos(ctx context.Context, forge string) ([]forge.RepoStatus, error)
 	// Discover lists a forge's repositories now.
 	Discover(ctx context.Context, forge string) error
-	// Import imports forge repositories by path.
-	Import(ctx context.Context, forge string, paths []string) ([]forge.ImportResult, error)
+	// Import imports forge repositories by path, as vcs repositories.
+	Import(ctx context.Context, forge string, paths []string, vcs proto.VCS) ([]forge.ImportResult, error)
 	// SyncForge syncs every repository imported from a forge.
 	SyncForge(ctx context.Context, forge string) ([]forge.RepoSyncResult, error)
 	// SyncRepo syncs one imported repository.
@@ -127,8 +127,8 @@ func (s *source) Discover(ctx context.Context, name string) error {
 	return err //nolint:wrapcheck
 }
 
-func (s *source) Import(ctx context.Context, name string, paths []string) ([]forge.ImportResult, error) {
-	return s.svc.Import(ctx, proto.UserFromContext(s.ctx), name, forge.ImportOptions{Paths: paths}) //nolint:wrapcheck
+func (s *source) Import(ctx context.Context, name string, paths []string, vcs proto.VCS) ([]forge.ImportResult, error) {
+	return s.svc.Import(ctx, proto.UserFromContext(s.ctx), name, forge.ImportOptions{Paths: paths, Vcs: vcs}) //nolint:wrapcheck
 }
 
 func (s *source) SyncForge(ctx context.Context, name string) ([]forge.RepoSyncResult, error) {

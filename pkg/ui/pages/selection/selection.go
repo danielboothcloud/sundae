@@ -63,6 +63,13 @@ type Selection struct {
 	newSession key.Binding
 	// newRepo is the Repositories tab's n key: the new-repository form.
 	newRepo key.Binding
+	// deleteRepo is the Repositories tab's D key: delete the selected
+	// repository, after a confirm.
+	deleteRepo key.Binding
+	// deleting is the delete confirm while it is open, and deleteTarget
+	// the repository it asks about.
+	deleting     *prompt.Confirm
+	deleteTarget string
 
 	// repoForm is the new-repository form while it is open; creating
 	// names the repository it is creating.
@@ -94,6 +101,7 @@ func New(c common.Common) *Selection {
 		cancel:     cancel,
 		newSession: key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "new session")),
 		newRepo:    key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new repository")),
+		deleteRepo: key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "delete repository")),
 	}
 
 	// The home tabs, in order. A feature's tab is added here and left out
@@ -216,7 +224,7 @@ func (s *Selection) IsFiltering() bool {
 func (s *Selection) Capturing() bool {
 	switch s.activePane {
 	case selectorPane:
-		return s.repoForm != nil
+		return s.repoForm != nil || s.deleting != nil
 	case sessionsPane:
 		return s.sessions != nil && s.sessions.Capturing()
 	case forgesPane:
@@ -231,6 +239,9 @@ func (s *Selection) capturingHelp() []key.Binding {
 	case selectorPane:
 		if s.creating != "" {
 			return nil
+		}
+		if s.deleting != nil {
+			return []key.Binding{s.deleting.Yes, s.deleting.No}
 		}
 		return s.repoForm.ShortHelp()
 	case forgesPane:
@@ -254,6 +265,8 @@ func (s *Selection) FooterLine(width int) string {
 	switch {
 	case s.activePane == selectorPane && s.creating != "":
 		return common.TruncateString("Creating "+s.creating+" …", max(width, 1))
+	case s.activePane == selectorPane && s.deleting != nil:
+		return s.deleting.View(max(width, 1))
 	case s.activePane == selectorPane && s.repoNotice != "":
 		line := common.TruncateString(s.repoNotice, max(width, 1))
 		if strings.HasPrefix(s.repoNotice, "✗") {
@@ -341,6 +354,9 @@ func (s *Selection) ShortHelp() []key.Binding {
 		if s.canCreate() {
 			kb = append(kb, s.newRepo)
 		}
+		if s.canDelete(s.SelectedRepo()) {
+			kb = append(kb, s.deleteRepo)
+		}
 	case forgesPane:
 		kb = kb[1:]
 		sh := s.forges.ShortHelp()
@@ -406,6 +422,9 @@ func (s *Selection) FullHelp() [][]key.Binding {
 			}
 			if s.canCreate() {
 				b[0] = append(b[0], s.newRepo)
+			}
+			if s.canDelete(s.SelectedRepo()) {
+				b[0] = append(b[0], s.deleteRepo)
 			}
 		}
 		b = append(b, []key.Binding{
@@ -538,6 +557,8 @@ func (s *Selection) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 		return s, tea.Batch(cmds...)
 	case repoCreatedMsg:
 		return s, s.onRepoCreated(msg)
+	case repoDeletedMsg:
+		return s, s.onRepoDeleted(msg)
 	case tea.KeyPressMsg:
 		if s.activePane == selectorPane {
 			s.repoNotice = ""
@@ -545,6 +566,9 @@ func (s *Selection) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 		if s.Capturing() {
 			// A form, confirm or filter of the tab has the keys.
 			if s.activePane == selectorPane {
+				if s.deleting != nil {
+					return s, s.onDeleteKey(msg)
+				}
 				return s, s.onRepoFormKey(msg)
 			}
 			if s.activePane == forgesPane {
@@ -558,6 +582,10 @@ func (s *Selection) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 		repoFiltering := s.activePane == selectorPane && s.FilterState() == list.Filtering
 		if s.activePane == selectorPane && !repoFiltering && key.Matches(msg, s.newRepo) && s.canCreate() {
 			s.openNewRepo()
+			return s, nil
+		}
+		if s.activePane == selectorPane && !repoFiltering && key.Matches(msg, s.deleteRepo) {
+			s.openDelete(s.SelectedRepo())
 			return s, nil
 		}
 		if s.activePane == selectorPane && !repoFiltering && s.sessions != nil && key.Matches(msg, s.newSession) {

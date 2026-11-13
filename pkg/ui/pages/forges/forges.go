@@ -18,6 +18,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/danielboothcloud/sundae/pkg/events"
 	"github.com/danielboothcloud/sundae/pkg/forge"
+	"github.com/danielboothcloud/sundae/pkg/proto"
 	"github.com/danielboothcloud/sundae/pkg/ui/common"
 	"github.com/danielboothcloud/sundae/pkg/ui/components/prompt"
 )
@@ -188,6 +189,11 @@ type Forges struct {
 	confirm *prompt.Confirm
 	onYes   func() tea.Cmd
 
+	// importForm asks how to import (jj or git) while it is open;
+	// onImport imports with the VCS chosen.
+	importForm *prompt.Form
+	onImport   func(vcs proto.VCS) tea.Cmd
+
 	notice notice
 }
 
@@ -227,7 +233,7 @@ func (m *Forges) Close() {
 
 // Capturing reports whether the tab takes every key: a confirm or the
 // filter is open.
-func (m *Forges) Capturing() bool { return m.confirm != nil || m.typing }
+func (m *Forges) Capturing() bool { return m.confirm != nil || m.importForm != nil || m.typing }
 
 // SetSize implements common.Component.
 func (m *Forges) SetSize(width, height int) { m.common.SetSize(width, height) }
@@ -508,6 +514,18 @@ func (m *Forges) onKey(msg tea.KeyPressMsg) tea.Cmd {
 			return yes()
 		}
 		return nil
+	case m.importForm != nil:
+		res, cmd := m.importForm.Update(msg)
+		switch res {
+		case prompt.Submitted:
+			vcs, _ := proto.ParseVCS(m.importForm.Field("vcs").Value())
+			do := m.onImport
+			m.importForm, m.onImport = nil, nil
+			return do(vcs)
+		case prompt.Cancelled:
+			m.importForm, m.onImport = nil, nil
+		}
+		return cmd
 	case m.typing:
 		return m.onFilterKey(msg)
 	}
@@ -593,7 +611,10 @@ func (m *Forges) onKey(msg tea.KeyPressMsg) tea.Cmd {
 		if m.busy[rk] != "" {
 			return nil
 		}
-		return m.importCmd(name, []forge.RepoStatus{r})
+		m.askImport("Import "+r.Path+" from "+name, func(vcs proto.VCS) tea.Cmd {
+			return m.importCmd(name, []forge.RepoStatus{r}, vcs)
+		})
+		return nil
 	case key.Matches(msg, m.keys.Sync):
 		if !r.Imported {
 			return m.syncForge(name)
@@ -674,15 +695,24 @@ func (m *Forges) importAll() tea.Cmd {
 	} else {
 		q += " from " + order[0]
 	}
-	m.confirm = prompt.NewConfirm(m.common, q+"?")
-	m.onYes = func() tea.Cmd {
+	m.askImport(q, func(vcs proto.VCS) tea.Cmd {
 		var cmds []tea.Cmd
 		for _, f := range order {
-			cmds = append(cmds, m.importCmd(f, byForge[f]))
+			cmds = append(cmds, m.importCmd(f, byForge[f], vcs))
 		}
 		return tea.Batch(cmds...)
-	}
+	})
 	return nil
+}
+
+// askImport opens the import form: what is imported, and as jj or git.
+func (m *Forges) askImport(what string, do func(vcs proto.VCS) tea.Cmd) {
+	vcs := prompt.ChoiceField("vcs", "VCS", []prompt.Option{
+		{Value: string(proto.VCSJJ), Detail: "jj git clone; bookmarks and change IDs"},
+		{Value: string(proto.VCSGit), Detail: "git clone; branches and commits"},
+	}, string(proto.DefaultVCS), false)
+	m.importForm = prompt.NewForm(m.common, what, "import", vcs)
+	m.onImport = do
 }
 
 func plural(n int, one, many string) string {
@@ -692,8 +722,9 @@ func plural(n int, one, many string) string {
 	return fmt.Sprintf("%d %s", n, many)
 }
 
-// importCmd imports repositories of a forge in the background.
-func (m *Forges) importCmd(forgeName string, repos []forge.RepoStatus) tea.Cmd {
+// importCmd imports repositories of a forge in the background, as vcs
+// repositories.
+func (m *Forges) importCmd(forgeName string, repos []forge.RepoStatus, vcs proto.VCS) tea.Cmd {
 	var keys, paths []string
 	for _, r := range repos {
 		rk := rowKey(forgeName, r.Path)
@@ -710,7 +741,7 @@ func (m *Forges) importCmd(forgeName string, repos []forge.RepoStatus) tea.Cmd {
 	}
 	ctx, src := m.ctx, m.src
 	return func() tea.Msg {
-		results, err := src.Import(ctx, forgeName, paths)
+		results, err := src.Import(ctx, forgeName, paths, vcs)
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -937,6 +968,8 @@ func (m *Forges) ShortHelp() []key.Binding {
 	switch {
 	case m.confirm != nil:
 		return []key.Binding{m.confirm.Yes, m.confirm.No}
+	case m.importForm != nil:
+		return m.importForm.ShortHelp()
 	case m.typing:
 		return []key.Binding{m.keys.Apply, m.keys.Cancel}
 	case m.statusErr != nil:
@@ -949,7 +982,7 @@ func (m *Forges) ShortHelp() []key.Binding {
 
 // FullHelp implements help.KeyMap.
 func (m *Forges) FullHelp() [][]key.Binding {
-	if m.confirm != nil || m.typing || m.statusErr != nil {
+	if m.confirm != nil || m.importForm != nil || m.typing || m.statusErr != nil {
 		return [][]key.Binding{m.ShortHelp()}
 	}
 	km := m.common.KeyMap

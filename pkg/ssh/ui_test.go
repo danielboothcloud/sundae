@@ -15,9 +15,11 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/danielboothcloud/sundae/pkg/backend"
 	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/db"
 	"github.com/danielboothcloud/sundae/pkg/events"
 	"github.com/danielboothcloud/sundae/pkg/openshell"
 	"github.com/danielboothcloud/sundae/pkg/sessionctl"
+	"github.com/danielboothcloud/sundae/pkg/store"
 	"github.com/danielboothcloud/sundae/pkg/ui/common"
 	"github.com/danielboothcloud/sundae/pkg/ui/pages/sessions"
 )
@@ -57,9 +59,12 @@ func newTestUI(t *testing.T, width, height int, src sessions.Source) *UI {
 // adds to its context (the tabs' sources) and to the backend.
 func newHomeUI(t *testing.T, width, height int, setup func(ctx context.Context, be *backend.Backend) context.Context) *UI {
 	t.Helper()
-	cfg, _, _, be := newTestBackend(t)
+	cfg, dbx, datastore, be := newTestBackend(t)
 	cfg.Name = "Sundae"
+	// As the SSH server's ContextMiddleware: backend, config, db and store.
 	ctx := backend.WithContext(config.WithContext(context.Background(), cfg), be)
+	ctx = context.WithValue(ctx, db.ContextKey, dbx)
+	ctx = context.WithValue(ctx, store.ContextKey, datastore)
 	ctx = setup(ctx, be)
 	c := common.NewCommon(ctx, width, height)
 	c.SetValue(common.ConfigKey, cfg)

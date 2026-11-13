@@ -26,6 +26,14 @@ func (m *Forges) View() string {
 		return ""
 	}
 	w, h := m.common.Width, m.common.Height
+	if m.importForm != nil {
+		// Placed as the Sessions tab places its forms.
+		lines := strings.Split(m.importForm.View(w-1), "\n")
+		for i, l := range lines {
+			lines[i] = " " + l
+		}
+		return lipgloss.NewStyle().Width(w).Height(h).MaxHeight(h).Render("\n" + strings.Join(lines, "\n"))
+	}
 	desc := m.common.Styles.RepoSelector.Normal.Desc
 	lines := []string{""}
 	switch {
