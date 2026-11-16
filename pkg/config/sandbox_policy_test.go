@@ -104,6 +104,9 @@ func TestValidateSandboxPolicy(t *testing.T) {
 		"access without rest": {mutate: func(c *Config) {
 			c.OpenShell.NetworkPolicies = ep(func(e *OpenShellNetworkEndpoint) { e.Access = "full" })
 		}, err: "access needs protocol: rest"},
+		"encoded slash without rest": {mutate: func(c *Config) {
+			c.OpenShell.NetworkPolicies = ep(func(e *OpenShellNetworkEndpoint) { e.AllowEncodedSlash = true })
+		}, err: "allow_encoded_slash needs protocol: rest"},
 		"unknown access": {mutate: func(c *Config) {
 			c.OpenShell.NetworkPolicies = ep(func(e *OpenShellNetworkEndpoint) { e.Protocol, e.Access = "rest", "write" })
 		}, err: `access "write" must be read-only, read-write, full`},
@@ -176,6 +179,7 @@ func testNetworkPolicies() []OpenShellNetworkPolicy {
 		{Name: "internal", Endpoints: []OpenShellNetworkEndpoint{
 			{Host: "*.corp.example.com", Ports: []int{80, 443}, AllowedIPs: []string{"10.0.0.0/8", "10.1.2.3"}},
 			{Host: "pypi.org", Port: 443, Protocol: "rest", Access: "read-only"},
+			{Host: "registry.npmjs.org", Port: 443, Protocol: "rest", Access: "full", AllowEncodedSlash: true},
 		}},
 	}
 }

@@ -128,6 +128,8 @@ func configuredRule(r config.OpenShellNetworkPolicy) v1.NetworkPolicyRule {
 			Protocol:   e.Protocol,
 			Access:     accessPresets[e.Access],
 			AllowedIPs: slices.Clone(e.AllowedIPs),
+
+			AllowEncodedSlash: e.AllowEncodedSlash,
 		}
 		for _, p := range e.Ports {
 			ep.Ports = append(ep.Ports, uint32(p)) //nolint:gosec // 1-65535, checked by config validation

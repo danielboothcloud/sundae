@@ -251,6 +251,8 @@ openshell:
   # an IP or *.domain) or allowed_ips, and port or ports. protocol is empty
   # (connections pass through the sandbox proxy uninspected; right for most
   # clients), rest (with access: read-only, read-write or full) or tcp.
+  # allow_encoded_slash: true (rest only) lets paths with %2F through, as
+  # npm sends for scoped packages.
   # binaries are the programs allowed; empty means any ("/**").
 {{- if .OpenShell.NetworkPolicies }}
   network_policies:
@@ -270,6 +272,9 @@ openshell:
           {{- end }}
           {{- if .Access }}
           access: {{ printf "%q" .Access }}
+          {{- end }}
+          {{- if .AllowEncodedSlash }}
+          allow_encoded_slash: true
           {{- end }}
           {{- if .AllowedIPs }}
           allowed_ips: [{{ range $i, $ip := .AllowedIPs }}{{ if $i }}, {{ end }}{{ printf "%q" $ip }}{{ end }}]

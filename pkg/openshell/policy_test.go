@@ -151,6 +151,7 @@ func TestBuildSandboxPolicyExtraRules(t *testing.T) {
 		{Name: "internal", Endpoints: []config.OpenShellNetworkEndpoint{
 			{Host: "*.corp.example.com", Ports: []int{80, 443}, AllowedIPs: []string{"10.0.0.0/8"}},
 			{Host: "pypi.org", Port: 443, Protocol: "rest", Access: "read-only"},
+			{Host: "registry.npmjs.org", Port: 443, Protocol: "rest", Access: "full", AllowEncodedSlash: true},
 			{Host: "redis.corp.example.com", Port: 6379, Protocol: "tcp"},
 		}},
 	}
@@ -173,6 +174,7 @@ func TestBuildSandboxPolicyExtraRules(t *testing.T) {
 			Endpoints: []v1.PolicyNetworkEndpoint{
 				{Host: "*.corp.example.com", Ports: []uint32{80, 443}, AllowedIPs: []string{"10.0.0.0/8"}},
 				{Host: "pypi.org", Port: 443, Protocol: "rest", Access: v1.NetworkAccessPresetReadOnly},
+				{Host: "registry.npmjs.org", Port: 443, Protocol: "rest", Access: v1.NetworkAccessPresetFull, AllowEncodedSlash: true},
 				{Host: "redis.corp.example.com", Port: 6379, Protocol: "tcp"},
 			},
 			// No binaries: any program.

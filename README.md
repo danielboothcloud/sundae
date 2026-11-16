@@ -960,6 +960,13 @@ openshell:
           access: read-only             # ...and allow only reads
         - host: files.pythonhosted.org
           port: 443
+    - name: npm
+      endpoints:
+        - host: registry.npmjs.org
+          port: 443
+          protocol: rest
+          access: full
+          allow_encoded_slash: true     # scoped packages: /@scope%2fname
 ```
 
 An endpoint needs a `host` or `allowed_ips` (IP addresses or CIDR ranges
@@ -967,11 +974,14 @@ every resolved address must be in; a wildcard host needs them to reach a
 private address, an exact name does not), and `port` or `ports`. `protocol`
 is empty (connections pass through the sandbox proxy uninspected, right for
 git, curl and most clients), `rest` (with `access`: `read-only`,
-`read-write` or `full`) or `tcp` (native TCP, for non-HTTP clients). Names
+`read-write` or `full`) or `tcp` (native TCP, for non-HTTP clients).
+OpenShell still parses HTTP on a default endpoint and rejects a path with an
+encoded slash (`%2F`), as npm sends for scoped packages: such an endpoint
+needs `protocol: rest` and `allow_encoded_slash: true`. Names
 may not start with `sundae_`. The environment form is
 `SUNDAE_OPENSHELL_NETWORK_POLICIES_<i>_NAME`, `..._BINARIES` (comma-separated)
 and `SUNDAE_OPENSHELL_NETWORK_POLICIES_<i>_ENDPOINTS_<j>_HOST`, `_PORT`,
-`_PORTS`, `_PROTOCOL`, `_ACCESS`, `_ALLOWED_IPS`. `sundae config check`
+`_PORTS`, `_PROTOCOL`, `_ACCESS`, `_ALLOWED_IPS`, `_ALLOW_ENCODED_SLASH`. `sundae config check`
 checks the rules; the gateway checks the whole policy again when it creates
 a sandbox.
 

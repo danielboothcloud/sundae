@@ -109,6 +109,11 @@ type OpenShellNetworkEndpoint struct {
 	// read-write or full. Required with rest, not allowed otherwise.
 	Access string `env:"ACCESS" yaml:"access"`
 
+	// AllowEncodedSlash lets requests whose path has an encoded slash
+	// (%2F) through, e.g. npm's scoped packages (/@scope%2fname). Only with
+	// protocol rest: OpenShell rejects such paths otherwise.
+	AllowEncodedSlash bool `env:"ALLOW_ENCODED_SLASH" yaml:"allow_encoded_slash"`
+
 	// AllowedIPs are IP addresses or CIDR ranges every address the host
 	// resolves to must be in.
 	AllowedIPs []string `env:"ALLOWED_IPS" envSeparator:"," yaml:"allowed_ips"`
@@ -242,6 +247,9 @@ func validateNetworkEndpoint(ep *OpenShellNetworkEndpoint) []error {
 	case ep.Protocol != NetworkProtocolREST:
 		errs = append(errs, errors.New("access needs protocol: rest"))
 	}
+	if ep.AllowEncodedSlash && ep.Protocol != NetworkProtocolREST {
+		errs = append(errs, errors.New("allow_encoded_slash needs protocol: rest"))
+	}
 
 	for k, ip := range ep.AllowedIPs {
 		ip = strings.TrimSpace(ip)
@@ -337,6 +345,9 @@ func (c *Config) sandboxPolicyEnviron() []string {
 			}
 			if len(ep.AllowedIPs) > 0 {
 				envs = append(envs, epre+"ALLOWED_IPS="+strings.Join(ep.AllowedIPs, ","))
+			}
+			if ep.AllowEncodedSlash {
+				envs = append(envs, epre+"ALLOW_ENCODED_SLASH=true")
 			}
 		}
 	}
