@@ -283,11 +283,7 @@ func (s *Selection) FooterLine(width int) string {
 	case s.activePane == selectorPane && s.deleting != nil:
 		return s.deleting.View(max(width, 1))
 	case s.activePane == selectorPane && s.repoNotice != "":
-		line := common.TruncateString(s.repoNotice, max(width, 1))
-		if strings.HasPrefix(s.repoNotice, "✗") {
-			return s.common.Styles.Prompt.Error.Render(line)
-		}
-		return s.common.Styles.Prompt.Notice.Render(line)
+		return s.common.NoticeView(s.repoNotice, false, width)
 	case s.activePane == sessionsPane && s.sessions != nil:
 		return s.sessions.FooterLine(width)
 	case s.activePane == forgesPane && s.forges != nil:

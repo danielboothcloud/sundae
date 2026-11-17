@@ -456,8 +456,8 @@ func TestForgesPushConfirmAndRefusal(t *testing.T) {
 		t.Fatalf("view:\n%s", view(m))
 	}
 	st := m.common.Styles
-	if want := st.Prompt.Notice.Render("Pushed main of github/danielboothcloud/sundae to github: 1111111..2222222."); !strings.Contains(m.View(), want) {
-		t.Fatalf("the notice is not in the prompt's notice style:\n%q", m.View())
+	if want := st.Prompt.Success.Render("✓ Pushed main of github/danielboothcloud/sundae to github: 1111111..2222222."); !strings.Contains(m.View(), want) {
+		t.Fatalf("the notice is not in the prompt's success style:\n%q", m.View())
 	}
 
 	// A refused push says why, in the tab.

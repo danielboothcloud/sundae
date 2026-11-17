@@ -695,8 +695,8 @@ func TestEndConfirm(t *testing.T) {
 	if !strings.Contains(view(m), "Ended infra / claude-1.") {
 		t.Fatalf("notice:\n%s", view(m))
 	}
-	if want := m.common.Styles.Prompt.Notice.Render("Ended infra / claude-1."); !strings.Contains(m.View(), want) {
-		t.Fatalf("the notice is not in the prompt's notice style:\n%q", m.View())
+	if want := m.common.Styles.Prompt.Success.Render("✓ Ended infra / claude-1."); !strings.Contains(m.View(), want) {
+		t.Fatalf("the notice is not in the prompt's success style:\n%q", m.View())
 	}
 }
 

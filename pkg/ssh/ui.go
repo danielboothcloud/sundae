@@ -95,13 +95,20 @@ func (ui *UI) selection() *selection.Selection {
 // footerView renders the footer: the help, or a line the home page puts in
 // its place (the end-session confirm), laid out as the footer lays out the
 // help.
+//
+// On the home page the action bar (the selected row's actions) comes
+// first. Its line is kept even when empty, so the tab's height does not
+// change as the selection moves.
 func (ui *UI) footerView() string {
 	if s := ui.selection(); s != nil && ui.activePage == selectionPage && ui.state == readyState {
 		st := ui.common.Styles
 		w := ui.common.Width - st.App.GetHorizontalFrameSize()
-		if line := s.FooterLine(w - st.Footer.GetHorizontalFrameSize()); line != "" {
-			return st.Footer.Width(w).Render(line)
+		inner := w - st.Footer.GetHorizontalFrameSize()
+		bar := st.Footer.Width(w).Render(s.ActionBar(inner))
+		if line := s.FooterLine(inner); line != "" {
+			return lipgloss.JoinVertical(lipgloss.Left, bar, st.Footer.Width(w).Render(line))
 		}
+		return lipgloss.JoinVertical(lipgloss.Left, bar, ui.footer.View())
 	}
 	return ui.footer.View()
 }

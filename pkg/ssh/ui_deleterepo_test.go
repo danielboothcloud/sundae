@@ -51,7 +51,7 @@ func TestDeleteRepoConfirmsAndDeletes(t *testing.T) {
 	uiKey(ui, "d")
 	uiKey(ui, "y")
 	waitScreen(t, ui, "Deleted mine.")
-	checkFooterLine(t, ui, "notice", ui.common.Styles.Prompt.Notice.Render("Deleted mine."))
+	checkFooterLine(t, ui, "notice", ui.common.Styles.Prompt.Success.Render("✓ Deleted mine."))
 	if _, err := be.Repository(ctx, "mine"); err == nil {
 		t.Fatal("repository still exists")
 	}
@@ -91,14 +91,15 @@ func confirmLine(ui *UI, question string) string {
 	return st.Prompt.Question.Render(q) + strings.Repeat(" ", w-lipgloss.Width(q)-lipgloss.Width(answer)) + answer
 }
 
-// checkFooterLine checks the footer shows line, laid out as the help
-// footer: the footer's style, padding and width.
+// checkFooterLine checks the footer's help line shows line, laid out as
+// the help footer: the footer's style, padding and width. The action bar
+// line above it is not checked.
 func checkFooterLine(t *testing.T, ui *UI, what, line string) {
 	t.Helper()
 	st := ui.common.Styles
 	want := st.Footer.Width(ui.common.Width - st.App.GetHorizontalFrameSize()).Render(line)
-	if got := ui.footerView(); got != want {
-		t.Fatalf("%s footer\n%q\nwant\n%q", what, got, want)
+	if got := ui.footerView(); !strings.HasSuffix(got, want) {
+		t.Fatalf("%s footer\n%q\nwant it to end with\n%q", what, got, want)
 	}
 	if got, help := lipgloss.Width(ui.footerView()), lipgloss.Width(ui.footer.View()); got != help {
 		t.Fatalf("%s footer is %d columns wide, the help footer %d", what, got, help)

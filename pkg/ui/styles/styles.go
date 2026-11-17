@@ -189,6 +189,8 @@ type Styles struct {
 		Question    lipgloss.Style
 		Notice      lipgloss.Style
 		Error       lipgloss.Style
+		// Success is a notice of a finished action.
+		Success lipgloss.Style
 		// Pointer marks the focused field or row (▸).
 		Pointer lipgloss.Style
 		// ModeNormal and ModeTyping are a form's mode badge.
@@ -607,6 +609,7 @@ func DefaultStyles() *Styles {
 	s.Prompt.Notice = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
 	s.Prompt.Error = lipgloss.NewStyle().
 		Foreground(s.ErrorTitle.GetBackground())
+	s.Prompt.Success = lipgloss.NewStyle().Foreground(lipgloss.Color("114"))
 	s.Prompt.Pointer = s.RepoSelector.Active.Title
 	s.Prompt.ModeNormal = lipgloss.NewStyle().
 		Background(s.ActiveBorderColor).

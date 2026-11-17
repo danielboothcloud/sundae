@@ -102,14 +102,10 @@ func (m *Sessions) View() string {
 		}
 		lines = append(lines, "", " "+m.confirm.View(w-2))
 	} else if m.notice.text != "" {
-		style := m.common.Styles.Prompt.Notice
-		if m.notice.err {
-			style = m.common.Styles.Prompt.Error
-		}
 		for len(lines) < h-2 {
 			lines = append(lines, "")
 		}
-		lines = append(lines, "", " "+style.Render(common.TruncateString(m.notice.text, w-1)))
+		lines = append(lines, "", " "+m.common.NoticeView(m.notice.text, m.notice.err, w-1))
 	}
 	if len(lines) > h {
 		lines = lines[:max(h, 0)]
@@ -130,18 +126,18 @@ func indent(lines []string, pad string) []string {
 // progress lines, the latest at the bottom.
 func (m *Sessions) opView(w int) []string {
 	st := m.common.Styles
-	lines := []string{" " + st.RepoSelector.Normal.Title.Render(common.TruncateString(m.op.title, w-1)), ""}
+	lines := []string{" " + st.Prompt.ActiveLabel.Render(common.TruncateString(m.op.title, w-1)), ""}
 	progress := m.opLines
 	if room := m.common.Height - 4; room > 0 && len(progress) > room {
 		progress = progress[len(progress)-room:]
 	}
 	for _, l := range progress {
-		lines = append(lines, "   "+st.RepoSelector.Normal.Desc.Render(common.TruncateString(l, w-3)))
+		lines = append(lines, "   "+st.Prompt.Detail.Render(common.TruncateString(l, w-3)))
 	}
 	if len(m.opLines) == 0 {
-		lines = append(lines, "   "+st.RepoSelector.Normal.Desc.Render("…"))
+		lines = append(lines, "   "+st.Prompt.Detail.Render("…"))
 	}
-	lines = append(lines, "", " "+footer.NewHelp(m.common).ShortHelpView([]key.Binding{m.keys.Cancel}))
+	lines = append(lines, "", " "+footer.ShortView(m.common, []key.Binding{m.keys.Cancel}, 0))
 	return lines
 }
 

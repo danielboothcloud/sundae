@@ -14,10 +14,10 @@
     ● gateway / main                                              working   5m
       bash
 
-    ● sundae / tui                                                working   5m
-      Running go test ./pkg/ui/...
 
    Signals · infra / claude-1
      No signals from this session yet.
+
+   ▸ infra / claude-1  z park • A add repos • u sync with forge • space more
 
    j/k move • enter attach • n new • / filter • l history • H/L tabs • ? more

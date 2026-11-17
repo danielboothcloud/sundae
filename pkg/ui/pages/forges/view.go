@@ -74,11 +74,7 @@ func (m *Forges) View() string {
 func (m *Forges) bottomLine(w int) string {
 	st := m.common.Styles
 	if m.notice.text != "" {
-		style := st.Prompt.Notice
-		if m.notice.err {
-			style = st.Prompt.Error
-		}
-		return " " + style.Render(common.TruncateString(m.notice.text, w-1))
+		return " " + m.common.NoticeView(m.notice.text, m.notice.err, w-1)
 	}
 	it, ok := m.selected()
 	if !ok {

@@ -3,9 +3,8 @@
 
   • Repositories    Sessions    About
 
-
-    No ite╭──────────────────────────────────────────────────────────╮
-          │ Commands                                                 │
+          ╭──────────────────────────────────────────────────────────╮
+    No ite│ Commands                                                 │
           │ : █                                                      │
           │ > 1      Go to Repositories                              │
           │   2      Go to Sessions                                  │
@@ -17,6 +16,7 @@
           │   c      Sessions › Copy attach command                  │
           │   d      Sessions › End                                  │
           ╰──────────────────────────────────────────────────────────╯
+
 
 
 
