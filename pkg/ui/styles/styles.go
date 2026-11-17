@@ -180,6 +180,11 @@ type Styles struct {
 		Question    lipgloss.Style
 		Notice      lipgloss.Style
 		Error       lipgloss.Style
+		// Pointer marks the focused field or row (▸).
+		Pointer lipgloss.Style
+		// ModeNormal and ModeTyping are a form's mode badge.
+		ModeNormal lipgloss.Style
+		ModeTyping lipgloss.Style
 	}
 
 	// ActionMenu styles the selected row's action menu (space or .) and
@@ -569,16 +574,28 @@ func DefaultStyles() *Styles {
 		Width(1).
 		Foreground(selectorColor)
 
+	// Prompts are read, not skimmed: every part is bright enough to read
+	// on a dark terminal. Labels and values are near white, details a
+	// light grey, the focused field the selected repository's pink.
 	s.Prompt.Title = s.RepoSelector.Normal.Title
-	s.Prompt.Label = s.RepoSelector.Normal.Desc
+	s.Prompt.Label = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
 	s.Prompt.ActiveLabel = s.RepoSelector.Active.Title
-	s.Prompt.Value = lipgloss.NewStyle()
+	s.Prompt.Value = lipgloss.NewStyle().Foreground(lipgloss.Color("255"))
 	s.Prompt.ActiveValue = s.RepoSelector.Active.Title
-	s.Prompt.Detail = s.RepoSelector.Normal.Desc
-	s.Prompt.Question = s.HelpKey
-	s.Prompt.Notice = s.HelpKey
+	s.Prompt.Detail = lipgloss.NewStyle().Foreground(lipgloss.Color("247"))
+	s.Prompt.Question = lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Bold(true)
+	s.Prompt.Notice = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
 	s.Prompt.Error = lipgloss.NewStyle().
 		Foreground(s.ErrorTitle.GetBackground())
+	s.Prompt.Pointer = s.RepoSelector.Active.Title
+	s.Prompt.ModeNormal = lipgloss.NewStyle().
+		Background(s.ActiveBorderColor).
+		Foreground(lipgloss.Color("230")).
+		Bold(true)
+	s.Prompt.ModeTyping = lipgloss.NewStyle().
+		Background(lipgloss.Color("170")).
+		Foreground(lipgloss.Color("230")).
+		Bold(true)
 
 	s.ActionMenu.Box = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).

@@ -3,10 +3,10 @@
 
   • Repositories    Sessions    About
 
-   New repository
+   New repository                                                      NORMAL
 
-     Name
-     Description
+   ▸ Name            (empty)   / to edit
+     Description     (empty)
      VCS             ‹ jj ›   jj git clone
      Template        ‹ none ›   empty repository
      Profile         ‹ none ›   sessions.repos, else the default
@@ -20,4 +20,4 @@
 
 
 
-   ↑↓ field • ←→ change • enter create • esc cancel
+   j/k field • / type • enter create • esc cancel

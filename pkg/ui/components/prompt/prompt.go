@@ -3,6 +3,12 @@
 // a yes/no toggle),
 // and a one-line yes/no Confirm. They are embedded by pages, which forward
 // messages to them and act on the Result.
+//
+// A Form is modal. In normal mode j/k (or ↑↓, tab) move between fields,
+// h/l (or ←→) change a choice or toggle, space picks, enter submits and esc
+// cancels. On a text field or a list that can be filtered, / or i starts
+// typing: keys then go to the field until enter or esc ends typing. A
+// badge in the form's title line says which mode it is in.
 package prompt
 
 import (
@@ -392,12 +398,14 @@ func (f *Field) focusable() bool { return f.kind != Fixed }
 type KeyMap struct {
 	Field  key.Binding
 	Change key.Binding
+	Type   key.Binding
+	Done   key.Binding
 	Submit key.Binding
 	Cancel key.Binding
 }
 
-// Form is a titled list of fields. Up and down move between fields, left
-// and right change a choice or toggle, enter submits and esc cancels.
+// Form is a titled list of fields; see the package documentation for its
+// keys.
 type Form struct {
 	common common.Common
 	// Title is shown above the fields.
@@ -414,6 +422,8 @@ type Form struct {
 	fields []*Field
 	focus  int
 	err    error
+	// typing is whether keys go to the focused field (typing mode).
+	typing bool
 }
 
 // NewForm returns a form of fields, focused on the first that can take
@@ -430,8 +440,10 @@ func NewForm(c common.Common, title, submit string, fields ...*Field) *Form {
 		}
 	}
 	f.KeyMap = KeyMap{
-		Field:  key.NewBinding(key.WithKeys("up", "down", "tab", "shift+tab"), key.WithHelp("↑↓", "field")),
-		Change: key.NewBinding(key.WithKeys("left", "right"), key.WithHelp("←→", "change")),
+		Field:  key.NewBinding(key.WithKeys("j", "k", "up", "down", "tab", "shift+tab"), key.WithHelp("j/k", "field")),
+		Change: key.NewBinding(key.WithKeys("h", "l", "left", "right"), key.WithHelp("h/l", "change")),
+		Type:   key.NewBinding(key.WithKeys("/", "i"), key.WithHelp("/", "type")),
+		Done:   key.NewBinding(key.WithKeys("enter", "esc"), key.WithHelp("enter", "done")),
 		Submit: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", submit)),
 		Cancel: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
 	}
@@ -469,9 +481,7 @@ func (f *Form) move(d int) {
 	if n == 0 {
 		return
 	}
-	if cur := f.Focused(); cur != nil && cur.kind == Text {
-		cur.input.Blur()
-	}
+	f.stopTyping()
 	i := f.focus
 	for range n {
 		i = (i + d + n) % n
@@ -480,25 +490,83 @@ func (f *Form) move(d int) {
 			break
 		}
 	}
-	if cur := f.Focused(); cur != nil && cur.kind == Text {
+}
+
+// typeable reports whether the field takes typing: free text, or a list
+// that can be filtered.
+func (f *Field) typeable() bool {
+	return f.kind == Text || f.kind == Multi || (f.kind == Choice && f.filterable)
+}
+
+// Typing reports whether the form is in typing mode: keys go to the
+// focused field.
+func (f *Form) Typing() bool { return f.typing }
+
+// StartTyping puts the form in typing mode on the focused field, when it
+// takes typing.
+func (f *Form) StartTyping() {
+	cur := f.Focused()
+	if cur == nil || !cur.typeable() {
+		return
+	}
+	f.typing = true
+	if cur.kind == Text {
 		cur.input.Focus()
 		cur.input.CursorEnd()
 	}
 }
 
-// ShortHelp returns the form's keys for the help line.
-func (f *Form) ShortHelp() []key.Binding {
-	if cur := f.Focused(); cur != nil && cur.kind == Multi {
-		move := key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑↓", "move"))
-		toggle := key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "pick"))
-		filter := key.NewBinding(key.WithKeys("backspace"), key.WithHelp("type", "filter"))
-		cancel := f.KeyMap.Cancel
-		if cur.filter != "" {
-			cancel = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear filter"))
-		}
-		return []key.Binding{move, toggle, filter, f.KeyMap.Submit, cancel}
+// stopTyping returns the form to normal mode.
+func (f *Form) stopTyping() {
+	if cur := f.Focused(); cur != nil && cur.kind == Text {
+		cur.input.Blur()
 	}
-	return []key.Binding{f.KeyMap.Field, f.KeyMap.Change, f.KeyMap.Submit, f.KeyMap.Cancel}
+	f.typing = false
+}
+
+// typeable reports whether any field of the form takes typing.
+func (f *Form) typeable() bool {
+	for _, fd := range f.fields {
+		if fd.typeable() {
+			return true
+		}
+	}
+	return false
+}
+
+// ShortHelp returns the form's keys for the help line: what the keys do
+// in the current mode, on the focused field.
+func (f *Form) ShortHelp() []key.Binding {
+	b := func(k, desc string) key.Binding { return key.NewBinding(key.WithKeys(k), key.WithHelp(k, desc)) }
+	cur := f.Focused()
+	if f.typing && cur != nil {
+		switch cur.kind {
+		case Multi:
+			return []key.Binding{b("type", "filter"), b("↑↓", "move"), b("space", "pick"), b("enter", "done")}
+		case Choice:
+			return []key.Binding{b("type", "filter"), b("enter", "done"), b("esc", "done")}
+		}
+		return []key.Binding{b("type", "text"), b("enter", "done"), b("tab", "next field")}
+	}
+	cancel := f.KeyMap.Cancel
+	if cur != nil && cur.filter != "" {
+		cancel = b("esc", "clear filter")
+	}
+	if cur != nil && cur.kind == Multi {
+		return []key.Binding{b("j/k", "move"), b("space", "pick"), b("/", "filter"), f.KeyMap.Submit, cancel}
+	}
+	keys := []key.Binding{f.KeyMap.Field}
+	if cur != nil && (cur.kind == Choice || cur.kind == Toggle) {
+		keys = append(keys, f.KeyMap.Change)
+	}
+	if cur != nil && cur.typeable() {
+		t := f.KeyMap.Type
+		if cur.kind == Choice {
+			t.SetHelp("/", "filter")
+		}
+		keys = append(keys, t)
+	}
+	return append(keys, f.KeyMap.Submit, cancel)
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
@@ -508,7 +576,7 @@ func itoa(n int) string { return strconv.Itoa(n) }
 func (f *Form) Update(msg tea.Msg) (Result, tea.Cmd) {
 	km, ok := msg.(tea.KeyPressMsg)
 	if !ok {
-		if cur := f.Focused(); cur != nil && cur.kind == Text {
+		if cur := f.Focused(); f.typing && cur != nil && cur.kind == Text {
 			var cmd tea.Cmd
 			cur.input, cmd = cur.input.Update(msg)
 			return Pending, cmd
@@ -516,34 +584,19 @@ func (f *Form) Update(msg tea.Msg) (Result, tea.Cmd) {
 		return Pending, nil
 	}
 	cur := f.Focused()
-	if cur != nil && cur.kind == Multi {
-		switch km.String() {
-		case "up", "ctrl+p":
-			if cur.cursor > 0 {
-				cur.cursor--
-				cur.clampCursor()
-			} else {
-				f.move(-1)
-			}
-			return Pending, nil
-		case "down", "ctrl+n":
-			if cur.cursor < len(cur.rows())-1 {
-				cur.cursor++
-				cur.clampCursor()
-			} else {
-				f.move(1)
-			}
-			return Pending, nil
-		}
+	if f.typing && cur != nil {
+		changed, cmd := f.updateTyping(km, cur)
+		f.changed(cur, changed)
+		return Pending, cmd
 	}
-	switch km.String() {
+	k := km.String()
+	if cur != nil && cur.kind == Multi && cur.moveCursor(k) {
+		return Pending, nil
+	}
+	switch k {
 	case "esc":
-		if cur != nil && cur.kind == Multi && cur.filter != "" {
-			cur.setMultiFilter("")
-			return Pending, nil
-		}
-		if cur != nil && cur.kind == Choice && cur.filter != "" {
-			cur.setFilter("")
+		if cur != nil && cur.filter != "" {
+			cur.clearFilter()
 			return Pending, nil
 		}
 		return Cancelled, nil
@@ -554,10 +607,13 @@ func (f *Form) Update(msg tea.Msg) (Result, tea.Cmd) {
 		}
 		f.err = nil
 		return Submitted, nil
-	case "up", "shift+tab":
+	case "/", "i":
+		f.StartTyping()
+		return Pending, nil
+	case "k", "up", "shift+tab":
 		f.move(-1)
 		return Pending, nil
-	case "down", "tab":
+	case "j", "down", "tab":
 		f.move(1)
 		return Pending, nil
 	}
@@ -565,52 +621,21 @@ func (f *Form) Update(msg tea.Msg) (Result, tea.Cmd) {
 		return Pending, nil
 	}
 	changed := false
-	var cmd tea.Cmd
 	switch cur.kind {
 	case Choice:
-		switch km.String() {
-		case "left":
+		switch k {
+		case "h", "left":
 			changed = cur.step(-1)
-		case "right":
+		case "l", "right":
 			changed = cur.step(1)
-		case "backspace":
-			if cur.filterable && cur.filter != "" {
-				r := []rune(cur.filter)
-				cur.setFilter(string(r[:len(r)-1]))
-				changed = true
-			}
-		default:
-			if cur.filterable && km.Text != "" {
-				cur.setFilter(cur.filter + km.Text)
-				changed = true
-			}
 		}
 	case Multi:
-		switch km.String() {
-		case "space", " ":
-			if rr := cur.rows(); cur.cursor < len(rr) {
-				i := rr[cur.cursor].opt
-				v := cur.options[i].Value
-				cur.toggle(v, !cur.isPicked(v))
-				// The cursor follows the option to its new row; an
-				// unpicked option the filter hides leaves the list.
-				cur.cursorTo(i)
-				cur.clampCursor()
-				changed = true
-			}
-		case "backspace":
-			if cur.filter != "" {
-				r := []rune(cur.filter)
-				cur.setMultiFilter(string(r[:len(r)-1]))
-			}
-		default:
-			if km.Text != "" && km.Text != " " {
-				cur.setMultiFilter(cur.filter + km.Text)
-			}
+		if k == "space" || k == " " {
+			changed = cur.pickCursor()
 		}
 	case Toggle:
-		switch km.String() {
-		case "left", "right", "space", " ":
+		switch k {
+		case "h", "l", "left", "right", "space", " ":
 			cur.on = !cur.on
 			changed = true
 		case "y":
@@ -618,21 +643,138 @@ func (f *Form) Update(msg tea.Msg) (Result, tea.Cmd) {
 		case "n":
 			changed, cur.on = cur.on, false
 		}
+	}
+	f.changed(cur, changed)
+	return Pending, nil
+}
+
+// updateTyping handles a key in typing mode: enter and esc end typing,
+// tab moves on, and the rest goes to the field.
+func (f *Form) updateTyping(km tea.KeyPressMsg, cur *Field) (bool, tea.Cmd) {
+	k := km.String()
+	switch k {
+	case "enter", "esc":
+		f.stopTyping()
+		return false, nil
+	case "tab":
+		f.move(1)
+		return false, nil
+	case "shift+tab":
+		f.move(-1)
+		return false, nil
+	}
+	switch cur.kind {
 	case Text:
+		switch k {
+		case "up":
+			f.move(-1)
+			return false, nil
+		case "down":
+			f.move(1)
+			return false, nil
+		}
 		before := cur.input.Value()
-		cur.input, cmd = cur.input.Update(msg)
+		var cmd tea.Cmd
+		cur.input, cmd = cur.input.Update(km)
 		if cur.input.Value() != before {
 			cur.edited = true
-			changed = true
+			return true, cmd
+		}
+		return false, cmd
+	case Choice:
+		switch {
+		case k == "backspace":
+			if cur.filter != "" {
+				r := []rune(cur.filter)
+				cur.setFilter(string(r[:len(r)-1]))
+				return true, nil
+			}
+		case k == "left" || k == "right":
+			d := 1
+			if k == "left" {
+				d = -1
+			}
+			return cur.step(d), nil
+		case km.Text != "":
+			cur.setFilter(cur.filter + km.Text)
+			return true, nil
+		}
+	case Multi:
+		if cur.moveCursor(map[string]string{"up": "up", "down": "down", "ctrl+p": "up", "ctrl+n": "down"}[k]) {
+			return false, nil
+		}
+		switch {
+		case k == "space" || k == " ":
+			return cur.pickCursor(), nil
+		case k == "backspace":
+			if cur.filter != "" {
+				r := []rune(cur.filter)
+				cur.setMultiFilter(string(r[:len(r)-1]))
+			}
+		case km.Text != "":
+			cur.setMultiFilter(cur.filter + km.Text)
 		}
 	}
-	if changed {
-		f.err = nil
-		if f.OnChange != nil {
-			f.OnChange(f, cur.Key)
-		}
+	return false, nil
+}
+
+// changed clears the error and calls OnChange when the user changed cur.
+func (f *Form) changed(cur *Field, changed bool) {
+	if !changed {
+		return
 	}
-	return Pending, cmd
+	f.err = nil
+	if f.OnChange != nil {
+		f.OnChange(f, cur.Key)
+	}
+}
+
+// moveCursor moves a Multi field's cursor for k ("up", "down", "j", "k",
+// ctrl+p, ctrl+n), and reports whether it did. At the list's ends it
+// reports false, so the form moves to the next field.
+func (f *Field) moveCursor(k string) bool {
+	switch k {
+	case "up", "k", "ctrl+p":
+		if f.cursor > 0 {
+			f.cursor--
+			f.clampCursor()
+			return true
+		}
+		return k == "ctrl+p"
+	case "down", "j", "ctrl+n":
+		if f.cursor < len(f.rows())-1 {
+			f.cursor++
+			f.clampCursor()
+			return true
+		}
+		return k == "ctrl+n"
+	}
+	return false
+}
+
+// pickCursor toggles the option under a Multi field's cursor.
+func (f *Field) pickCursor() bool {
+	rr := f.rows()
+	if f.cursor >= len(rr) {
+		return false
+	}
+	i := rr[f.cursor].opt
+	v := f.options[i].Value
+	f.toggle(v, !f.isPicked(v))
+	// The cursor follows the option to its new row; an unpicked option
+	// the filter hides leaves the list.
+	f.cursorTo(i)
+	f.clampCursor()
+	return true
+}
+
+// clearFilter clears a Choice or Multi field's filter.
+func (f *Field) clearFilter() {
+	if f.kind == Multi {
+		f.setMultiFilter("")
+	} else {
+		f.setFilter("")
+	}
 }
 
 // check validates every field, then the form.
@@ -671,28 +813,44 @@ func (e *multiError) Error() string {
 	return "pick at least one of " + strings.ToLower(e.label) + " (space toggles)"
 }
 
-// View renders the form in width columns, with the shared prompt styles.
+// View renders the form in width columns, with the shared prompt styles:
+// the title with the mode badge, then the fields, the focused one marked
+// with a pointer and a hint of what / does on it.
 func (f *Form) View(width int) string {
 	ps := f.common.Styles.Prompt
+	w := max(width, 1)
 	labelW := 0
 	for _, fd := range f.fields {
 		labelW = max(labelW, lipgloss.Width(fd.Label))
 	}
 	labelW += 3
-	lines := []string{ps.Title.Render(f.Title), ""}
+	lines := []string{f.titleLine(w), ""}
 	for i, fd := range f.fields {
 		focused := i == f.focus
 		labelStyle, valueStyle := ps.Label, ps.Value
+		pointer := "  "
 		if focused {
 			labelStyle, valueStyle = ps.ActiveLabel, ps.ActiveValue
+			pointer = ps.Pointer.Render("▸") + " "
 		}
 		label := labelStyle.Width(labelW).Render(fd.Label)
 		var value string
+		var extra []string
 		switch fd.kind {
 		case Fixed:
 			value = ps.Value.Render(fd.fixed)
 		case Text:
-			value = fd.input.View()
+			switch {
+			case focused && f.typing:
+				value = fd.input.View()
+			case fd.input.Value() == "":
+				value = ps.Detail.Render("(empty)")
+			default:
+				value = valueStyle.Render(fd.input.Value())
+			}
+			if focused && !f.typing {
+				extra = append(extra, "/ to edit")
+			}
 		case Choice:
 			o, ok := fd.Selected()
 			name := "(no match)"
@@ -700,19 +858,22 @@ func (f *Form) View(width int) string {
 				name = o.label()
 			}
 			value = valueStyle.Render("‹ " + name + " ›")
-			var extra []string
-			if fd.filter != "" {
-				extra = append(extra, "/"+fd.filter)
+			if fd.filter != "" || (focused && f.typing) {
+				cursor := ""
+				if focused && f.typing {
+					cursor = "█"
+				}
+				extra = append(extra, "/"+fd.filter+cursor)
 			}
 			if ok && o.Detail != "" {
 				extra = append(extra, o.Detail)
 			}
-			if len(extra) > 0 {
-				value += "   " + ps.Detail.Render(strings.Join(extra, "  "))
+			if focused && !f.typing && fd.filterable && fd.filter == "" {
+				extra = append(extra, "/ to filter")
 			}
 		case Multi:
 			if focused {
-				lines = append(lines, fd.multiView(f.common.Styles, label, labelW, width)...)
+				lines = append(lines, fd.multiView(f.common.Styles, pointer+label, labelW, width, f.typing)...)
 				continue
 			}
 			value = valueStyle.Render(fd.summary())
@@ -723,12 +884,34 @@ func (f *Form) View(width int) string {
 			}
 			value = valueStyle.Render(v)
 		}
-		lines = append(lines, common.TruncateString("  "+label+value, max(width, 1)))
+		if len(extra) > 0 {
+			value += "   " + ps.Detail.Render(strings.Join(extra, "  "))
+		}
+		lines = append(lines, common.TruncateString(pointer+label+value, w))
 	}
 	if f.err != nil {
-		lines = append(lines, "", ps.Error.Render(common.TruncateString("✗ "+f.err.Error(), max(width, 1))))
+		lines = append(lines, "", ps.Error.Render(common.TruncateString("✗ "+f.err.Error(), w)))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// titleLine is the form's title with the mode badge (NORMAL or TYPING) at
+// the right end of width columns. Forms with nothing to type show no badge.
+func (f *Form) titleLine(width int) string {
+	ps := f.common.Styles.Prompt
+	title := ps.Title.Render(f.Title)
+	if !f.typeable() {
+		return title
+	}
+	badge := ps.ModeNormal.Render(" NORMAL ")
+	if f.typing {
+		badge = ps.ModeTyping.Render(" TYPING ")
+	}
+	gap := width - lipgloss.Width(title) - lipgloss.Width(badge)
+	if gap < 2 {
+		return title
+	}
+	return title + strings.Repeat(" ", gap) + badge
 }
 
 // Confirm is a one-line yes/no question; no is the default. y confirms,
@@ -788,14 +971,19 @@ func (f *Field) summary() string {
 
 // multiView renders a focused Multi field: the label with the filter and
 // the picked count, then the list's visible rows, with more-indicators.
-func (f *Field) multiView(st *styles.Styles, label string, labelW, width int) []string {
+func (f *Field) multiView(st *styles.Styles, label string, labelW, width int, typing bool) []string {
 	ps := st.Prompt
 	w := max(width, 1)
-	filter := ps.Detail.Render("type to filter")
-	if f.filter != "" {
-		filter = ps.ActiveValue.Render(f.filter)
+	var filter string
+	switch {
+	case typing:
+		filter = ps.Detail.Render("filter: ") + ps.ActiveValue.Render(f.filter+"█")
+	case f.filter != "":
+		filter = ps.Detail.Render("filter: ") + ps.ActiveValue.Render(f.filter)
+	default:
+		filter = ps.Detail.Render("/ to filter")
 	}
-	head := "  " + label + ps.Detail.Render("filter: ") + filter + ps.ActiveValue.Render("█")
+	head := label + filter
 	count := ps.Detail.Render(itoa(len(f.picked)) + " of " + itoa(len(f.options)) + " picked")
 	if gap := w - 1 - lipgloss.Width(head) - lipgloss.Width(count); gap >= 2 {
 		head += strings.Repeat(" ", gap) + count
@@ -825,9 +1013,9 @@ func (f *Field) multiView(st *styles.Styles, label string, labelW, width int) []
 		}
 		pointer, style := "  ", ps.Value
 		if r == f.cursor {
-			pointer, style = "▸ ", ps.ActiveValue
+			pointer, style = ps.Pointer.Render("▸")+" ", ps.ActiveValue
 		}
-		line := indent + style.Render(pointer+mark+o.label())
+		line := indent + pointer + style.Render(mark+o.label())
 		if rw.hidden {
 			line += "  " + ps.Detail.Render("(hidden by filter)")
 		} else if o.Detail != "" {

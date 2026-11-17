@@ -103,7 +103,8 @@ func TestRestoreConflictConfirm(t *testing.T) {
 	src.prepErrs = []error{conflict}
 	m = loaded(t, 120, 30, src)
 	run(m, keys(m, "n"), 1)
-	keys(m, "down", "down", "down", "left") // do not attach
+	keys(m, "j", "j", " ")            // pick infra
+	keys(m, "tab", "tab", "tab", "h") // do not attach
 	run(m, keys(m, "enter"), 3)
 	if m.confirm == nil || m.op != nil {
 		t.Fatalf("no confirm:\n%s", view(m))
@@ -115,7 +116,7 @@ func TestRestoreConflictConfirm(t *testing.T) {
 	// Yes starts it again, restoring over the files.
 	src.prepErrs = []error{conflict}
 	run(m, keys(m, "n"), 1)
-	keys(m, "down", "down", "down", "left")
+	keys(m, "j", "j", " ", "tab", "tab", "tab", "h")
 	run(m, keys(m, "enter"), 3)
 	run(m, keys(m, "y"), 3)
 	if len(src.prepared) != 3 || src.prepared[2].Restore != openshell.RestoreOver || !src.prepared[2].Create {

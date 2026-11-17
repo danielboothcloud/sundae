@@ -173,18 +173,25 @@ func TestNewRepoFormValidation(t *testing.T) {
 	if s := screenText(ui); !strings.Contains(s, "✗ enter a name") {
 		t.Fatalf("empty name:\n%s", s)
 	}
-	// q, digits and ? are text while the form is open.
+	// In normal mode q, digits and ? do nothing; / starts typing, and
+	// then they are text.
 	typeText(ui, "q1?")
-	if ui.activePage != selectionPage || !strings.Contains(screenText(ui), "Name            q1?") {
+	if ui.activePage != selectionPage || !strings.Contains(screenText(ui), "Name            (empty)") {
+		t.Fatalf("normal mode:\n%s", screenText(ui))
+	}
+	uiKey(ui, "/")
+	typeText(ui, "q1?")
+	if ui.activePage != selectionPage || !strings.Contains(screenText(ui), "Name            q1?") || !strings.Contains(screenText(ui), "TYPING") {
 		t.Fatalf("typing:\n%s", screenText(ui))
 	}
-	press(ui, tea.KeyEnter, 1)
+	press(ui, tea.KeyEnter, 2) // end typing, submit
 	if s := screenText(ui); !strings.Contains(s, "✗ repo can only contain letters") {
 		t.Fatalf("bad name:\n%s", s)
 	}
+	uiKey(ui, "/")
 	press(ui, tea.KeyBackspace, 3)
 	typeText(ui, "scratch")
-	press(ui, tea.KeyEnter, 1)
+	press(ui, tea.KeyEnter, 2)
 	if s := screenText(ui); !strings.Contains(s, "✗ scratch already exists") {
 		t.Fatalf("existing name:\n%s", s)
 	}
@@ -231,8 +238,10 @@ func TestNewRepoFormCreates(t *testing.T) {
 	ui, src, be, _ := newRepoUI(t, 80, true)
 	ctx := context.Background()
 	uiKey(ui, "n")
+	uiKey(ui, "/")
 	typeText(ui, "apps/web")
-	press(ui, tea.KeyDown, 1)
+	press(ui, tea.KeyDown, 1) // ends typing, next field
+	uiKey(ui, "/")
 	typeText(ui, "The web app")
 	press(ui, tea.KeyDown, 1)
 	press(ui, tea.KeyRight, 1) // VCS: git
@@ -280,6 +289,7 @@ func TestNewRepoFormCreates(t *testing.T) {
 func TestNewRepoFormStartsSession(t *testing.T) {
 	ui, src, _, _ := newRepoUI(t, 80, true)
 	uiKey(ui, "n")
+	uiKey(ui, "/")
 	typeText(ui, "svc")
 	press(ui, tea.KeyDown, 4)
 	press(ui, tea.KeyRight, 2) // Profile: shell
@@ -300,6 +310,7 @@ func TestNewRepoFormStartsSession(t *testing.T) {
 func TestNewRepoFormErrorKeepsForm(t *testing.T) {
 	ui, _, _, cfg := newRepoUI(t, 80, true)
 	uiKey(ui, "n")
+	uiKey(ui, "/")
 	typeText(ui, "x")
 	press(ui, tea.KeyDown, 3)
 	press(ui, tea.KeyRight, 1) // go-service

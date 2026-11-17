@@ -30,6 +30,10 @@ func press(k string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: tea.KeyRight}
 	case "backspace":
 		return tea.KeyPressMsg{Code: tea.KeyBackspace}
+	case "tab":
+		return tea.KeyPressMsg{Code: tea.KeyTab}
+	case "space":
+		return tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
 	}
 	r := []rune(k)
 	return tea.KeyPressMsg{Code: r[0], Text: k}
@@ -107,11 +111,25 @@ func TestFormTextEditAndValidation(t *testing.T) {
 	if name.Edited() {
 		t.Fatal("edited before typing")
 	}
+	// In normal mode keys do not reach the text.
+	f.Update(press("backspace"))
+	f.Update(press("x"))
+	if name.Edited() || name.Value() != "claude-1" || f.Typing() {
+		t.Fatalf("normal mode typed: %q", name.Value())
+	}
+	f.Update(press("/"))
+	if !f.Typing() {
+		t.Fatal("/ did not start typing")
+	}
 	for range len("claude-1") {
 		f.Update(press("backspace"))
 	}
 	if !name.Edited() || name.Value() != "" {
 		t.Fatalf("value %q edited %v", name.Value(), name.Edited())
+	}
+	// enter ends typing; a second enter submits.
+	if res, _ := f.Update(press("enter")); res != Pending || f.Typing() {
+		t.Fatalf("enter while typing: %v typing %v", res, f.Typing())
 	}
 	if res, _ := f.Update(press("enter")); res != Pending {
 		t.Fatalf("submitted with an empty name: %v", res)
@@ -119,6 +137,7 @@ func TestFormTextEditAndValidation(t *testing.T) {
 	if f.Err() == nil || !strings.Contains(f.View(80), "name is required") {
 		t.Fatalf("error not shown: %v\n%s", f.Err(), f.View(80))
 	}
+	f.Update(press("i"))
 	for _, r := range "tui" {
 		f.Update(press(string(r)))
 	}
@@ -131,10 +150,13 @@ func TestFormTextEditAndValidation(t *testing.T) {
 		}
 		return nil
 	}
+	f.Update(press("enter")) // ends typing
 	if res, _ := f.Update(press("enter")); res != Pending || f.Err() == nil {
 		t.Fatalf("form validation ignored: %v %v", res, f.Err())
 	}
+	f.Update(press("/"))
 	f.Update(press("2"))
+	f.Update(press("esc")) // esc ends typing, it does not cancel
 	if res, _ := f.Update(press("enter")); res != Submitted {
 		t.Fatalf("result %v, err %v", res, f.Err())
 	}
@@ -147,6 +169,12 @@ func TestFormFilterableChoice(t *testing.T) {
 	opts := []Option{{Value: "dotfiles"}, {Value: "infra"}, {Value: "sundae"}, {Value: "scratch"}}
 	f := NewForm(newCommon(), "New session", "create", ChoiceField("repo", "Repository", opts, "", true))
 	repo := f.Field("repo")
+	f.Update(press("l"))
+	if got := repo.Value(); got != "infra" {
+		t.Fatalf("after l: %q", got)
+	}
+	f.Update(press("h"))
+	f.Update(press("/"))
 	f.Update(press("s"))
 	if got := repo.Value(); got != "dotfiles" {
 		t.Fatalf("after s: %q", got)
@@ -159,14 +187,19 @@ func TestFormFilterableChoice(t *testing.T) {
 	if _, ok := repo.Selected(); ok {
 		t.Fatal("a choice matches scx")
 	}
+	if res, _ := f.Update(press("enter")); res != Pending || f.Typing() {
+		t.Fatal("enter while typing did not just end typing")
+	}
 	if res, _ := f.Update(press("enter")); res != Pending || f.Err() == nil {
 		t.Fatal("submitted without a choice")
 	}
+	f.Update(press("/"))
 	f.Update(press("backspace"))
 	f.Update(press("backspace"))
-	f.Update(press("right"))
+	f.Update(press("esc")) // ends typing, keeps the filter
+	f.Update(press("l"))
 	if got := repo.Value(); got != "dotfiles" {
-		t.Fatalf("after s, right: %q (wraps from scratch)", got)
+		t.Fatalf("after s, l: %q (wraps from scratch)", got)
 	}
 	if res, _ := f.Update(press("esc")); res != Pending {
 		t.Fatal("esc with a filter cancelled the form")
@@ -177,17 +210,34 @@ func TestFormFilterableChoice(t *testing.T) {
 }
 
 func TestFormView(t *testing.T) {
-	got := ansi.Strip(newTestForm().View(80))
+	f := newTestForm()
+	got := ansi.Strip(f.View(60))
 	want := strings.Join([]string{
-		"New session",
+		"New session" + strings.Repeat(" ", 60-11-8) + " NORMAL ",
 		"",
 		"  Repository   sundae",
-		"  Name         claude-1 ",
+		"▸ Name         claude-1   / to edit",
 		"  Profile      ‹ codex ›   img-codex · codex",
 		"  Attach       yes",
 	}, "\n")
 	if got != want {
 		t.Fatalf("view:\n%s\nwant:\n%s", got, want)
+	}
+	f.Update(press("/"))
+	got = ansi.Strip(f.View(60))
+	if !strings.Contains(got, "TYPING") || !strings.Contains(got, "▸ Name         claude-1 ") || strings.Contains(got, "/ to edit") {
+		t.Fatalf("typing view:\n%s", got)
+	}
+	f.Update(press("esc"))
+	f.Update(press("j"))
+	got = ansi.Strip(f.View(60))
+	if !strings.Contains(got, "▸ Profile") || !strings.Contains(got, "  Name         claude-1\n") {
+		t.Fatalf("after j:\n%s", got)
+	}
+	// A form with nothing to type has no badge.
+	plain := NewForm(newCommon(), "Import", "import", ToggleField("t", "T", false))
+	if v := ansi.Strip(plain.View(60)); strings.Contains(v, "NORMAL") {
+		t.Fatalf("badge without typing:\n%s", v)
 	}
 }
 
@@ -215,15 +265,15 @@ func TestConfirm(t *testing.T) {
 }
 
 // TestConfirmLooksLikeTheHelp checks the confirm's colours: the question
-// in the help's key colour and the answers exactly as the help footer
-// renders the confirm's keys.
+// in the prompt's question colour and the answers exactly as the help
+// footer renders the confirm's keys.
 func TestConfirmLooksLikeTheHelp(t *testing.T) {
 	c := NewConfirm(newCommon(), "Delete mine?")
 	st := c.common.Styles
 	sep := footer.NewHelp(c.common).Styles.ShortSeparator.Render(" • ")
 	answer := st.HelpKey.Render("y") + " " + st.HelpValue.Render("yes") + sep +
 		st.HelpKey.Render("N") + " " + st.HelpValue.Render("no")
-	want := st.HelpKey.Render("Delete mine?") + strings.Repeat(" ", 40-12-12) + answer
+	want := st.Prompt.Question.Render("Delete mine?") + strings.Repeat(" ", 40-12-12) + answer
 	if got := c.View(40); got != want {
 		t.Fatalf("view\n%q\nwant\n%q", got, want)
 	}
@@ -243,6 +293,8 @@ func TestFormStyles(t *testing.T) {
 	v := f.View(80)
 	for _, want := range []string{
 		ps.Title.Render("New session"),
+		ps.ModeNormal.Render(" NORMAL "),
+		ps.Pointer.Render("▸"),
 		ps.Label.Width(13).Render("Repository"),
 		ps.ActiveLabel.Width(13).Render("Name"),
 		ps.ActiveValue.Render("claude-1"),
@@ -254,9 +306,14 @@ func TestFormStyles(t *testing.T) {
 			t.Fatalf("view lacks %q:\n%q", want, v)
 		}
 	}
+	f.Update(press("/"))
+	if !strings.Contains(f.View(80), ps.ModeTyping.Render(" TYPING ")) {
+		t.Fatalf("no typing badge:\n%q", f.View(80))
+	}
 	for range len("claude-1") {
 		f.Update(press("backspace"))
 	}
+	f.Update(press("enter"))
 	f.Update(press("enter"))
 	if want := ps.Error.Render("✗ name is required"); !strings.Contains(f.View(80), want) {
 		t.Fatalf("view lacks %q:\n%q", want, f.View(80))
@@ -280,6 +337,7 @@ func TestTextFieldCharLimit(t *testing.T) {
 			fd.SetCharLimit(tc.limit)
 		}
 		f := NewForm(newCommon(), "New repository", "create", fd)
+		f.StartTyping()
 		for _, r := range long {
 			f.Update(press(string(r)))
 		}
@@ -303,7 +361,7 @@ func TestMultiField(t *testing.T) {
 	}
 	// Picked first, then the rest; the cursor starts on the top row.
 	view := ansi.Strip(f.View(80))
-	for _, want := range []string{"filter: type to filter█", "1 of 4 picked", "▸ [x] lib", "  [ ] app", "  [ ] infra", "  [ ] gone"} {
+	for _, want := range []string{"▸ Repositories   / to filter", "1 of 4 picked", "▸ [x] lib", "  [ ] app", "  [ ] infra", "  [ ] gone"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("no %q in:\n%s", want, view)
 		}
@@ -311,22 +369,28 @@ func TestMultiField(t *testing.T) {
 	if strings.Index(view, "[x] lib") > strings.Index(view, "[ ] app") {
 		t.Fatalf("picked not first:\n%s", view)
 	}
-	// ↓ moves, space toggles; the cursor follows the option.
-	f.Update(press("down")) // app
+	// j moves, space toggles; the cursor follows the option.
+	f.Update(press("j"))    // app
 	f.Update(press("down")) // infra
-	f.Update(press(" "))
+	f.Update(press("space"))
 	if strings.Join(m.Values(), ",") != "lib,infra" || changes != 1 {
 		t.Fatalf("values %v changes %d", m.Values(), changes)
 	}
 	if o, _ := m.Selected(); o.Value != "infra" {
 		t.Fatalf("cursor on %s", o.Value)
 	}
-	// ctrl+p moves up; ↑ at the top stays in the form's first field.
-	f.Update(press("ctrl+p"))
+	// k moves up.
+	f.Update(press("k"))
 	if o, _ := m.Selected(); o.Value != "lib" {
 		t.Fatalf("cursor on %s", o.Value)
 	}
-	// Typing filters; picked options hidden by it stay, marked.
+	// In normal mode letters do not filter.
+	f.Update(press("a"))
+	if m.filter != "" {
+		t.Fatalf("normal mode filtered %q", m.filter)
+	}
+	// / starts typing; picked options hidden by the filter stay, marked.
+	f.Update(press("/"))
 	for _, k := range []string{"a", "p"} {
 		f.Update(press(k))
 	}
@@ -334,7 +398,7 @@ func TestMultiField(t *testing.T) {
 		t.Fatalf("filtered %v %v", o, ok)
 	}
 	view = ansi.Strip(f.View(80))
-	for _, want := range []string{"filter: ap█", "[x] lib  (hidden by filter)", "▸ [ ] app"} {
+	for _, want := range []string{"filter: ap█", "TYPING", "[x] lib  (hidden by filter)", "▸ [ ] app"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("no %q in:\n%s", want, view)
 		}
@@ -349,32 +413,40 @@ func TestMultiField(t *testing.T) {
 		}
 		return strings.Join(s, ",")
 	}
-	if h := helps(); !strings.Contains(h, "space pick") || !strings.Contains(h, "esc clear filter") || !strings.Contains(h, "↑↓ move") {
-		t.Fatalf("help %s", h)
+	if h := helps(); !strings.Contains(h, "space pick") || !strings.Contains(h, "enter done") || !strings.Contains(h, "type filter") {
+		t.Fatalf("typing help %s", h)
 	}
-	// backspace edits, esc clears the filter, not the form.
+	// backspace edits; enter ends typing and keeps the filter.
 	f.Update(press("backspace"))
 	if !strings.Contains(ansi.Strip(f.View(80)), "filter: a█") {
 		t.Fatalf("backspace:\n%s", ansi.Strip(f.View(80)))
 	}
+	f.Update(press("enter"))
+	if f.Typing() || m.filter != "a" {
+		t.Fatalf("enter: typing %v filter %q", f.Typing(), m.filter)
+	}
+	if h := helps(); !strings.Contains(h, "esc clear filter") || !strings.Contains(h, "j/k move") {
+		t.Fatalf("normal help %s", h)
+	}
+	// esc clears the filter, not the form.
 	if res, _ := f.Update(press("esc")); res != Pending || m.filter != "" {
 		t.Fatal("esc with a filter cancelled the form")
 	}
-	// ↓ at the bottom moves to the next field; tab does too, from anywhere.
+	// j at the bottom moves to the next field; tab does too, from anywhere.
 	for range 4 {
-		f.Update(press("down"))
+		f.Update(press("j"))
 	}
 	if f.Focused() == m {
-		t.Fatal("down at the bottom stayed")
+		t.Fatal("j at the bottom stayed")
 	}
 	// Unfocused, the field is a short summary.
 	view = ansi.Strip(f.View(80))
 	if !strings.Contains(view, "Repositories   lib, infra") || strings.Contains(view, "[ ]") {
 		t.Fatalf("blurred:\n%s", view)
 	}
-	f.Update(press("up"))
+	f.Update(press("k"))
 	if f.Focused() != m {
-		t.Fatal("up did not return")
+		t.Fatal("k did not return")
 	}
 	f.Update(press("tab"))
 	if f.Focused() == m {

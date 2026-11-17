@@ -816,16 +816,20 @@ func TestNewSessionForm(t *testing.T) {
 	}
 	f := m.form
 	repos := f.Field("repos")
-	// The selected session's repository is picked; the session is named
-	// after it, from its profile.
-	if strings.Join(repos.Values(), ",") != "sundae" || f.Field("profile").Value() != "claude" || f.Field("name").Value() != "sundae" {
-		t.Fatalf("defaults: %v %s %s", repos.Values(), f.Field("profile").Value(), f.Field("name").Value())
+	// Nothing is picked: the user picks the repositories. The name is the
+	// next free default.
+	if len(repos.Values()) != 0 || f.Field("name").Value() != "main-2" {
+		t.Fatalf("defaults: %v %s", repos.Values(), f.Field("name").Value())
 	}
 	golden(t, "new-session-80", view(m))
 
-	// Pick a second repository: ↓ to infra, space; it joins the picked
-	// ones at the top.
-	keys(m, "down", "down", "down", " ")
+	// Pick sundae (j to it, space), then infra; picked ones move to the
+	// top, in the order picked. The session is named after the first.
+	keys(m, "j", "j", "j", " ")
+	if strings.Join(repos.Values(), ",") != "sundae" || f.Field("profile").Value() != "claude" || f.Field("name").Value() != "sundae" {
+		t.Fatalf("after sundae: %v %s %s", repos.Values(), f.Field("profile").Value(), f.Field("name").Value())
+	}
+	keys(m, "j", "j", "j", " ")
 	if strings.Join(repos.Values(), ",") != "sundae,infra" || !strings.Contains(view(m), "▸ [x] infra") {
 		t.Fatalf("picked %v:\n%s", repos.Values(), view(m))
 	}
@@ -835,33 +839,36 @@ func TestNewSessionForm(t *testing.T) {
 		t.Fatalf("summary:\n%s", view(m))
 	}
 	// Changing the profile does not rename.
-	keys(m, "down", "right")
+	keys(m, "j", "l")
 	if f.Field("profile").Value() != "shell" || f.Field("name").Value() != "sundae" {
 		t.Fatalf("after profile change: %s %s", f.Field("profile").Value(), f.Field("name").Value())
 	}
-	// An invalid name is refused.
-	keys(m, "up")
+	// An invalid name is refused. / starts typing in the name; enter ends
+	// typing, a second enter submits.
+	keys(m, "k", "/")
 	for range len("sundae") {
 		keys(m, "backspace")
 	}
 	typeText(m, "Bad")
-	keys(m, "enter")
+	keys(m, "enter", "enter")
 	if m.form == nil || !strings.Contains(view(m), "session name must be") {
 		t.Fatalf("invalid name accepted:\n%s", view(m))
 	}
 	// An existing one too.
+	keys(m, "/")
 	for range 3 {
 		keys(m, "backspace")
 	}
 	typeText(m, "tui")
-	keys(m, "enter")
+	keys(m, "enter", "enter")
 	if m.form == nil || !strings.Contains(view(m), "session tui already exists") {
 		t.Fatalf("existing name accepted:\n%s", view(m))
 	}
-	keys(m, "backspace")
+	keys(m, "/", "backspace")
 	typeText(m, "2")
+	keys(m, "esc") // ends typing, keeps the form
 	// Do not attach: start in the background.
-	keys(m, "down", "down", "left")
+	keys(m, "j", "j", "h")
 	cmd := keys(m, "enter")
 	if m.form != nil || m.op == nil {
 		t.Fatal("submit did not start the session")
@@ -880,7 +887,6 @@ func TestNewSessionForm(t *testing.T) {
 
 	// Nothing picked is refused; esc cancels the form.
 	run(m, keys(m, "n"), 1)
-	keys(m, " ") // unpick the preselected one
 	keys(m, "enter")
 	if m.form == nil || !strings.Contains(view(m), "pick at least one") {
 		t.Fatalf("empty pick accepted:\n%s", view(m))
@@ -899,8 +905,8 @@ func TestNewSessionFormRepoPicker(t *testing.T) {
 	if f.Focused().Key != "repos" {
 		t.Fatalf("focused %s", f.Focused().Key)
 	}
-	// Typing filters; space picks what is shown.
-	keys(m, " ") // unpick the default
+	// / starts filtering; space picks what is shown.
+	keys(m, "/")
 	typeText(m, "sundae")
 	keys(m, " ")
 	if strings.Join(f.Field("repos").Values(), ",") != "sundae" || f.Field("profile").Value() != "claude" || f.Field("name").Value() != "sundae" {
@@ -920,9 +926,10 @@ func TestEditSessionRepos(t *testing.T) {
 	if strings.Contains(m.form.View(76), "[ ] infra") {
 		t.Fatal("infra offered again")
 	}
+	keys(m, "/")
 	typeText(m, "sund")
 	keys(m, " ")
-	run(m, keys(m, "enter"), 2)
+	run(m, keys(m, "enter", "enter"), 2)
 	if len(src.prepared) != 1 || src.prepared[0].Create || src.prepared[0].Name != "claude-1" || strings.Join(src.prepared[0].Repos, ",") != "sundae" {
 		t.Fatalf("prepared %+v", src.prepared)
 	}
@@ -944,6 +951,7 @@ func TestStartAndAttach(t *testing.T) {
 	m.handoff = h
 	src.gate = make(chan struct{})
 	run(m, keys(m, "n"), 1)
+	keys(m, "j", "j", " ") // pick infra
 	cmd := keys(m, "enter")
 	if !strings.Contains(view(m), "Starting infra / infra …") {
 		t.Fatalf("progress:\n%s", view(m))

@@ -1251,17 +1251,11 @@ func (m *Sessions) onAction(msg actionMsg) tea.Cmd {
 
 // newSessionForm returns the new-session form (section 5a): its
 // repositories (any number; with fixed, the prefilled one only), name,
-// profile and whether to attach.
+// profile and whether to attach. Only the prefilled repositories are picked
+// (the Repositories tab's s key, a repository page's Sessions tab, a
+// session's "new like this"); otherwise the user picks them.
 func (m *Sessions) newSessionForm(repos []string, pre prefill) *prompt.Form {
 	picked := pre.repos
-	if len(picked) == 0 && len(repos) > 0 {
-		picked = []string{repos[0]}
-		if r, ok := m.selected(); ok {
-			if rr := rowRepos(r); len(rr) > 0 && slices.Contains(repos, rr[0]) {
-				picked = []string{rr[0]}
-			}
-		}
-	}
 	var repoField *prompt.Field
 	if pre.fixed && len(picked) == 1 {
 		repoField = prompt.FixedField("repos", "Repositories", picked[0])

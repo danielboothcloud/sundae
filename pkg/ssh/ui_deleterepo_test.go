@@ -88,7 +88,7 @@ func confirmLine(ui *UI, question string) string {
 	answer := st.HelpKey.Render("y") + " " + st.HelpValue.Render("yes") + sep +
 		st.HelpKey.Render("N") + " " + st.HelpValue.Render("no")
 	q := common.TruncateString(question, w-lipgloss.Width(answer)-2)
-	return st.HelpKey.Render(q) + strings.Repeat(" ", w-lipgloss.Width(q)-lipgloss.Width(answer)) + answer
+	return st.Prompt.Question.Render(q) + strings.Repeat(" ", w-lipgloss.Width(q)-lipgloss.Width(answer)) + answer
 }
 
 // checkFooterLine checks the footer shows line, laid out as the help
