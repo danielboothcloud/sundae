@@ -25,7 +25,7 @@ var errNoTerminal = errors.New("requires a terminal (ssh -t)")
 // newOpenShellClient creates the OpenShell client for a command invocation.
 // Tests may replace it.
 var newOpenShellClient = func(cfg *config.Config) (openshell.Client, error) {
-	return openshell.New(cfg.OpenShell)
+	return openshell.NewClient(cfg)
 }
 
 // SessionCommand returns the command that manages OpenShell agent sessions.

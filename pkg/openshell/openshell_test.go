@@ -15,6 +15,7 @@ import (
 	"github.com/NVIDIA/OpenShell/sdk/go/openshell/v1/fake"
 	"github.com/NVIDIA/OpenShell/sdk/go/openshell/v1/types"
 	"github.com/danielboothcloud/sundae/pkg/config"
+	sbx "github.com/danielboothcloud/sundae/pkg/sandbox"
 )
 
 var dnsLabel = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
@@ -108,7 +109,7 @@ func TestResumeSandbox(t *testing.T) {
 
 	fc.AddSandbox("default", &types.Sandbox{Name: "sundae-a-r", Labels: labels, Status: types.SandboxStatus{Phase: types.SandboxStopped}})
 	sb, err := c.ResumeSandbox(ctx, "sundae-a-r", labels)
-	if err != nil || sb.Status.Phase != types.SandboxReady {
+	if err != nil || sb.Phase != sbx.Ready {
 		t.Fatalf("stopped: sb=%v err=%v", sb, err)
 	}
 	if _, err := c.ResumeSandbox(ctx, "sundae-a-r", map[string]string{LabelUserID: "2"}); err != ErrNotOwned {
@@ -144,7 +145,7 @@ func TestEnsureSandboxLostCreateRace(t *testing.T) {
 	c := newSDKClient("default", &raceGet{SandboxInterface: fc.Sandboxes(), missing: 1}, nil, nil, nil)
 
 	sb, created, err := c.EnsureSandbox(ctx, "sundae-a-r", req)
-	if err != nil || created || sb.Status.Phase != types.SandboxReady {
+	if err != nil || created || sb.Phase != sbx.Ready {
 		t.Fatalf("race: sb=%v created=%v err=%v", sb, created, err)
 	}
 	// The loser must not delete the winner's sandbox.
@@ -217,7 +218,7 @@ func TestEnsureSandboxRuntimeClass(t *testing.T) {
 			if (sb.Spec.Template != nil) != tc.wantTmpl {
 				t.Fatalf("template = %+v", sb.Spec.Template)
 			}
-			if got := SandboxRuntimeClass(sb); got != tc.req.RuntimeClass {
+			if got := SandboxRuntimeClass(fromSDK(sb)); got != tc.req.RuntimeClass {
 				t.Fatalf("runtime class = %q, want %q", got, tc.req.RuntimeClass)
 			}
 			if tc.wantTmpl && (sb.Spec.Template.RuntimeClassName != tc.req.RuntimeClass || sb.Spec.Template.Image != tc.req.Image) {
@@ -232,7 +233,7 @@ func TestEnsureSandboxRuntimeClass(t *testing.T) {
 				t.Fatalf("again: created=%v err=%v", created, err)
 			}
 			sb, _ = fc.Sandboxes().Get(ctx, "default", name)
-			if got := SandboxRuntimeClass(sb); got != tc.req.RuntimeClass {
+			if got := SandboxRuntimeClass(fromSDK(sb)); got != tc.req.RuntimeClass {
 				t.Fatalf("runtime class changed to %q", got)
 			}
 		})
@@ -246,11 +247,11 @@ func TestSandboxRuntimeClass(t *testing.T) {
 	}{
 		"nil":         {nil, ""},
 		"no template": {&Sandbox{}, ""},
-		"template":    {&Sandbox{Spec: types.SandboxSpec{Template: &types.SandboxTemplate{RuntimeClassName: "kata"}}}, "kata"},
+		"template":    {&Sandbox{RuntimeClass: "kata"}, "kata"},
 		"annotation":  {&Sandbox{Annotations: map[string]string{AnnotationRuntimeClass: "kata"}}, "kata"},
 		"template wins": {&Sandbox{
-			Annotations: map[string]string{AnnotationRuntimeClass: "other"},
-			Spec:        types.SandboxSpec{Template: &types.SandboxTemplate{RuntimeClassName: "kata"}},
+			Annotations:  map[string]string{AnnotationRuntimeClass: "other"},
+			RuntimeClass: "kata",
 		}, "kata"},
 	}
 	for name, tc := range cases {
@@ -270,11 +271,11 @@ func TestEnsureSandboxStates(t *testing.T) {
 
 	// New.
 	sb, created, err := c.EnsureSandbox(ctx, "sundae-a-r", req)
-	if err != nil || !created || sb.Status.Phase != types.SandboxReady {
+	if err != nil || !created || sb.Phase != sbx.Ready {
 		t.Fatalf("new: sb=%v created=%v err=%v", sb, created, err)
 	}
-	if sb.Spec.Template == nil || sb.Spec.Template.Image != "img" {
-		t.Fatalf("new: image not set: %+v", sb.Spec.Template)
+	if sb.Image != "img" {
+		t.Fatalf("new: image not set: %+v", sb)
 	}
 
 	// Ready → resumed as is.
@@ -287,7 +288,7 @@ func TestEnsureSandboxStates(t *testing.T) {
 		t.Fatal(err)
 	}
 	sb, created, err = c.EnsureSandbox(ctx, "sundae-a-r", req)
-	if err != nil || created || sb.Status.Phase != types.SandboxReady {
+	if err != nil || created || sb.Phase != sbx.Ready {
 		t.Fatalf("stopped: sb=%v created=%v err=%v", sb, created, err)
 	}
 
@@ -300,7 +301,7 @@ func TestEnsureSandboxStates(t *testing.T) {
 			Status: types.SandboxStatus{Phase: phase},
 		})
 		sb, created, err := c.EnsureSandbox(ctx, name, req)
-		if err != nil || created || sb.Status.Phase != types.SandboxReady {
+		if err != nil || created || sb.Phase != sbx.Ready {
 			t.Fatalf("%q: sb=%v created=%v err=%v", phase, sb, created, err)
 		}
 	}

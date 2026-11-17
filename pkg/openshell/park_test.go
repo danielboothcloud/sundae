@@ -11,6 +11,7 @@ import (
 	v1 "github.com/NVIDIA/OpenShell/sdk/go/openshell/v1"
 	"github.com/NVIDIA/OpenShell/sdk/go/openshell/v1/fake"
 	"github.com/NVIDIA/OpenShell/sdk/go/openshell/v1/types"
+	sbx "github.com/danielboothcloud/sundae/pkg/sandbox"
 )
 
 // suspendRecorder is the fake's sandbox client, recording resume options.
@@ -29,18 +30,18 @@ func newSuspendRecorder(fc *fake.Client) *suspendRecorder {
 	return &suspendRecorder{SandboxInterface: fc.Sandboxes(), sr: fc.SandboxSuspendResume(), fc: fc}
 }
 
-func (s *suspendRecorder) Suspend(ctx context.Context, ws, name string) (*Sandbox, error) {
+func (s *suspendRecorder) Suspend(ctx context.Context, ws, name string) (*v1.Sandbox, error) {
 	return s.sr.Suspend(ctx, ws, name) //nolint:wrapcheck
 }
 
-func (s *suspendRecorder) Resume(ctx context.Context, ws, name string, opts ...v1.ResumeOptions) (*Sandbox, error) {
+func (s *suspendRecorder) Resume(ctx context.Context, ws, name string, opts ...v1.ResumeOptions) (*v1.Sandbox, error) {
 	s.mu.Lock()
 	s.resumes = append(s.resumes, opts...)
 	s.mu.Unlock()
 	return s.sr.Resume(ctx, ws, name, opts...) //nolint:wrapcheck
 }
 
-func (s *suspendRecorder) WaitSuspended(ctx context.Context, ws, name string, opts ...v1.WaitOptions) (*Sandbox, error) {
+func (s *suspendRecorder) WaitSuspended(ctx context.Context, ws, name string, opts ...v1.WaitOptions) (*v1.Sandbox, error) {
 	s.mu.Lock()
 	s.waits++
 	s.mu.Unlock()
@@ -68,18 +69,18 @@ func TestSuspendAndResumeSandbox(t *testing.T) {
 	// Suspend waits until the sandbox is Suspended.
 	add("sundae-a-r", types.SandboxReady)
 	sb, err := c.SuspendSandbox(ctx, "sundae-a-r")
-	if err != nil || sb.Status.Phase != types.SandboxSuspended || rec.waits != 1 {
+	if err != nil || sb.Phase != sbx.Suspended || rec.waits != 1 {
 		t.Fatalf("suspend: sb=%v err=%v waits=%d", sb, err, rec.waits)
 	}
 
 	// EnsureSandbox and ResumeSandbox resume a Suspended sandbox, always
 	// with RestartIfRestoreFails.
 	sb, created, err := c.EnsureSandbox(ctx, "sundae-a-r", req)
-	if err != nil || created || sb.Status.Phase != types.SandboxReady {
+	if err != nil || created || sb.Phase != sbx.Ready {
 		t.Fatalf("ensure suspended: sb=%v created=%v err=%v", sb, created, err)
 	}
 	add("sundae-a-s", types.SandboxSuspended)
-	if sb, err := c.ResumeSandbox(ctx, "sundae-a-s", labels); err != nil || sb.Status.Phase != types.SandboxReady {
+	if sb, err := c.ResumeSandbox(ctx, "sundae-a-s", labels); err != nil || sb.Phase != sbx.Ready {
 		t.Fatalf("resume suspended: sb=%v err=%v", sb, err)
 	}
 	if len(rec.resumes) != 2 || !rec.resumes[0].RestartIfRestoreFails || !rec.resumes[1].RestartIfRestoreFails {
@@ -89,7 +90,7 @@ func TestSuspendAndResumeSandbox(t *testing.T) {
 	// Suspending: wait for the suspend to finish, then resume.
 	add("sundae-a-t", types.SandboxSuspending)
 	waits := rec.waits
-	if sb, err := c.ResumeSandbox(ctx, "sundae-a-t", labels); err != nil || sb.Status.Phase != types.SandboxReady {
+	if sb, err := c.ResumeSandbox(ctx, "sundae-a-t", labels); err != nil || sb.Phase != sbx.Ready {
 		t.Fatalf("resume suspending: sb=%v err=%v", sb, err)
 	}
 	if rec.waits != waits+1 || len(rec.resumes) != 3 {

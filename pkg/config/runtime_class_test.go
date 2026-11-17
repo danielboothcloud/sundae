@@ -31,8 +31,8 @@ func TestProfileRuntimeClass(t *testing.T) {
 	is := is.New(t)
 	cfg := DefaultConfig()
 	cfg.Sessions.Profiles = map[string]SessionProfile{
-		"podman": {RuntimeClass: RuntimeClassKata},
-		"runc":   {RuntimeClass: RuntimeClassDefault},
+		"podman": {OpenShell: &ProfileOpenShell{RuntimeClass: RuntimeClassKata}},
+		"runc":   {OpenShell: &ProfileOpenShell{RuntimeClass: RuntimeClassDefault}},
 		"shell":  {},
 	}
 

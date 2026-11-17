@@ -41,7 +41,7 @@ func (c *localSandbox) mapArg(a string) string {
 }
 
 func (c *localSandbox) Run(ctx context.Context, _ string, command []string, opts ExecOptions) (*ExecResult, error) {
-	if err := gatewayLimits(command, opts); err != nil {
+	if err := gatewayLimits(command, toSDKExec(opts)); err != nil {
 		return nil, err
 	}
 	args := make([]string, len(command))

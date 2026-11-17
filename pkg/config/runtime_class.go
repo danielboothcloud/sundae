@@ -57,9 +57,15 @@ func ResolveRuntimeClass(names ...string) string {
 }
 
 // ProfileRuntimeClass returns the RuntimeClass name a new sandbox of the
-// named profile is created with: the profile's runtime_class, else
+// named profile is created with, in the profile's runtime: for
+// RuntimeOpenShell, the profile's openshell.runtime_class, else
 // openshell.runtime_class. "" means the default runtime. An unknown or
-// empty profile name uses openshell.runtime_class.
+// empty profile name uses sessions.runtime's.
 func (c *Config) ProfileRuntimeClass(profile string) string {
-	return ResolveRuntimeClass(c.Sessions.Profiles[profile].RuntimeClass, c.OpenShell.RuntimeClass)
+	switch c.ProfileRuntime(profile) {
+	case RuntimeOpenShell:
+		return ResolveRuntimeClass(c.Sessions.Profiles[profile].OpenShellRuntimeClass(), c.OpenShell.RuntimeClass)
+	default:
+		return ""
+	}
 }

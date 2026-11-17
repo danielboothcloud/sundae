@@ -166,11 +166,11 @@ func TestGitIdentityEnvLimits(t *testing.T) {
 		e[k] = v
 	}
 	command := []string{"sh", "-c", gitIdentityCloneScript, gitIdentityCloneName, "jj", "http://sundae.svc:23232/" + strings.Repeat("r/", 100) + "r.git", "/sandbox/x"}
-	if err := gatewayLimits(command, ExecOptions{Env: e, WorkDir: SandboxRoot}); err != nil {
+	if err := gatewayLimits(command, toSDKExec(ExecOptions{Env: e, WorkDir: SandboxRoot})); err != nil {
 		t.Fatal(err)
 	}
 	command = []string{"sh", "-c", gitIdentityScript, gitIdentityName, "/sandbox/x"}
-	if err := gatewayLimits(command, ExecOptions{Env: e, WorkDir: SandboxRoot}); err != nil {
+	if err := gatewayLimits(command, toSDKExec(ExecOptions{Env: e, WorkDir: SandboxRoot})); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"charm.land/log/v2"
-	v1 "github.com/NVIDIA/OpenShell/sdk/go/openshell/v1"
 	"github.com/danielboothcloud/sundae/pkg/config"
 	"github.com/danielboothcloud/sundae/pkg/events"
+	sbx "github.com/danielboothcloud/sundae/pkg/sandbox"
 )
 
 // Monitor polling bounds.
@@ -296,8 +296,8 @@ func (m *Monitor) sessionOf(sb *Sandbox) events.Session {
 	return events.NewSession(sb.Annotations[AnnotationUser], name, sb.Name, m.SessionRepos(sb))
 }
 
-func isParkedPhase(p v1.SandboxPhase) bool {
-	return p == v1.SandboxSuspended || p == v1.SandboxSuspending
+func isParkedPhase(p sbx.Phase) bool {
+	return p == sbx.Suspended || p == sbx.Suspending
 }
 
 // Sandbox lifecycle words, shown after a session's state.
@@ -318,10 +318,10 @@ const PhaseSnapshot = "Snapshot"
 // WordParkedSnapshot for PhaseSnapshot, WordStarting for one being
 // provisioned or started, else "".
 func PhaseWord(phase string) string {
-	switch v1.SandboxPhase(phase) {
-	case v1.SandboxSuspended, v1.SandboxSuspending:
+	switch sbx.Phase(phase) {
+	case sbx.Suspended, sbx.Suspending:
 		return WordParked
-	case v1.SandboxProvisioning, v1.SandboxStarting:
+	case sbx.Provisioning, sbx.Starting:
 		return WordStarting
 	case PhaseSnapshot:
 		return WordParkedSnapshot
@@ -367,11 +367,11 @@ func (m *Monitor) reconcile(sbs []*Sandbox) []string {
 		e.st.Profile = sb.Annotations[AnnotationProfile]
 
 		prev := e.st.Phase
-		phase := sb.Status.Phase
+		phase := sb.Phase
 		e.st.Phase = string(phase)
 		e.st.Parked = isParkedPhase(phase)
-		if phase == v1.SandboxReady {
-			if prev != "" && prev != string(v1.SandboxReady) {
+		if phase == sbx.Ready {
+			if prev != "" && prev != string(sbx.Ready) {
 				// Resumed or started again: a new idle window.
 				e.lastActive = now
 			}
@@ -574,7 +574,7 @@ func (m *Monitor) observe(sandbox, id string, ls osewaList, pollErr error) {
 func parkable(e *entry, bridges int, now time.Time, after time.Duration, fallback bool) (bool, string) {
 	st := e.st
 	switch {
-	case st.Phase != string(v1.SandboxReady):
+	case st.Phase != string(sbx.Ready):
 		return false, "the sandbox is " + st.Phase
 	case st.Unsuspendable != "" && !fallback:
 		return false, "the gateway cannot suspend it"
@@ -757,9 +757,9 @@ func (m *Monitor) park(ctx context.Context, client Client, sandbox string, auto 
 		case err == nil:
 			m.mu.Lock()
 			if e := m.entries[sandbox]; e != nil {
-				e.st.Phase = string(v1.SandboxSuspended)
-				if sb != nil && sb.Status.Phase != "" {
-					e.st.Phase = string(sb.Status.Phase)
+				e.st.Phase = string(sbx.Suspended)
+				if sb != nil && sb.Phase != "" {
+					e.st.Phase = string(sb.Phase)
 				}
 				e.st.Parked = true
 			}
@@ -827,8 +827,8 @@ func (m *Monitor) parkToSnapshot(ctx context.Context, client Client, sandbox, op
 	if !ok {
 		return fmt.Errorf("openshell: sandbox %q was not created by Sundae; not parking it", sandbox)
 	}
-	if sb.Status.Phase != v1.SandboxReady {
-		return fmt.Errorf("openshell: sandbox %q is %s; only a running session can be parked", sandbox, sb.Status.Phase)
+	if sb.Phase != sbx.Ready {
+		return fmt.Errorf("openshell: sandbox %q is %s; only a running session can be parked", sandbox, sb.Phase)
 	}
 	sess := m.sessionOf(sb)
 	info := taken
@@ -858,8 +858,9 @@ func (m *Monitor) parkToSnapshot(ctx context.Context, client Client, sandbox, op
 		Record:  rec,
 		Size:    info.Size,
 	}
-	if sb.Spec.Template != nil {
-		marker.Image = sb.Spec.Template.Image
+	marker.Image = sb.Image
+	if r := SandboxRuntime(sb); r != config.RuntimeOpenShell {
+		marker.Runtime = r
 	}
 	// Record the default runtime too, so a later openshell.runtime_class
 	// or profile change does not move the session to another runtime.
@@ -985,7 +986,7 @@ func (m *Monitor) noteReady(sandbox string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if e := m.entries[sandbox]; e != nil {
-		e.st.Phase = string(v1.SandboxReady)
+		e.st.Phase = string(sbx.Ready)
 		e.st.Parked = false
 		e.lastActive = m.now()
 	}

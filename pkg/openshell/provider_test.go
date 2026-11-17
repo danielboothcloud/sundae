@@ -108,7 +108,7 @@ func newProviderHarness(t *testing.T, providers ...string) (*harness, *providerG
 	t.Helper()
 	cfg := newHarnessConfig()
 	cfg.Sessions.Profiles = map[string]config.SessionProfile{
-		"agent": {Command: "claude", Providers: providers},
+		"agent": {Command: "claude", OpenShell: &config.ProfileOpenShell{Providers: providers}},
 		"shell": {},
 	}
 	fc := fake.NewClient()
@@ -129,7 +129,7 @@ func (h *harness) sandbox(t *testing.T, name string) *Sandbox {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return sb
+	return fromSDK(sb)
 }
 
 // A profile's providers are attached when its session's sandbox is
@@ -148,8 +148,8 @@ func TestStartAttachesProfileProviders(t *testing.T) {
 		t.Fatalf("session = %+v", s)
 	}
 	sb := h.sandbox(t, s.Sandbox)
-	if !slices.Equal(sb.Spec.Providers, []string{"my-claude", "my-github"}) || sb.Annotations[AnnotationProviders] != "my-claude,my-github" {
-		t.Fatalf("providers = %v, annotations = %v", sb.Spec.Providers, sb.Annotations)
+	if !slices.Equal(sb.Providers, []string{"my-claude", "my-github"}) || sb.Annotations[AnnotationProviders] != "my-claude,my-github" {
+		t.Fatalf("providers = %v, annotations = %v", sb.Providers, sb.Annotations)
 	}
 	if calls := gw.takeCalls(); len(calls) != 0 {
 		t.Fatalf("a new sandbox needs no attach: %v", calls)
@@ -175,8 +175,8 @@ func TestStartAttachesProfileProviders(t *testing.T) {
 		t.Fatal(err)
 	}
 	sb = h.sandbox(t, s.Sandbox)
-	if len(sb.Spec.Providers) != 0 || sb.Annotations[AnnotationProviders] != "" || len(s.Providers) != 0 {
-		t.Fatalf("plain: providers = %v, annotations = %v", sb.Spec.Providers, sb.Annotations)
+	if len(sb.Providers) != 0 || sb.Annotations[AnnotationProviders] != "" || len(s.Providers) != 0 {
+		t.Fatalf("plain: providers = %v, annotations = %v", sb.Providers, sb.Annotations)
 	}
 	if args := h.exec.last(s.Sandbox, osewaNewName).args(); args[4] != osewaSessionEnvFile {
 		t.Fatalf("plain: osewa new args = %q", args)
@@ -224,7 +224,7 @@ func TestReconcileProviders(t *testing.T) {
 	}
 	setProviders := func(ps ...string) {
 		p := h.mgr.sessions.Profiles["agent"]
-		p.Providers = ps
+		p.OpenShell = &config.ProfileOpenShell{Providers: ps}
 		h.mgr.sessions.Profiles["agent"] = p
 	}
 	resume := func(op string) (*Session, string, error) {
@@ -239,7 +239,7 @@ func TestReconcileProviders(t *testing.T) {
 		}
 		return s, progress.String(), err
 	}
-	attached := func() []string { return h.sandbox(t, s.Sandbox).Spec.Providers }
+	attached := func() []string { return h.sandbox(t, s.Sandbox).Providers }
 
 	// Unchanged: nothing to do, not even a read.
 	if _, progress, err := resume("attach"); err != nil || strings.Contains(progress, "provider") {
@@ -395,7 +395,7 @@ func TestReconcileProvidersRestartedProgram(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := h.mgr.sessions.Profiles["agent"]
-	p.Providers = []string{"my-claude", "my-github"}
+	p.OpenShell = &config.ProfileOpenShell{Providers: []string{"my-claude", "my-github"}}
 	h.mgr.sessions.Profiles["agent"] = p
 	h.exec.boxes[s.Sandbox].sessions[s.OsewaID] = false
 

@@ -307,7 +307,7 @@ func loadProviderSyncKey(path string) ([]byte, error) {
 func ProfilesByProvider(sc config.SessionsConfig) map[string][]string {
 	m := map[string][]string{}
 	for _, name := range slices.Sorted(maps.Keys(sc.Profiles)) {
-		for _, p := range sc.Profiles[name].Providers {
+		for _, p := range sc.Profiles[name].OpenShellProviders() {
 			m[p] = append(m[p], name)
 		}
 	}

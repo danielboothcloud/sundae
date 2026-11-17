@@ -290,6 +290,9 @@ type ParkedSnapshot struct {
 	// is created with it again. Empty in a marker written before Sundae
 	// recorded runtimes: the session's profile then decides.
 	RuntimeClass string `json:"runtime_class,omitempty"`
+	// Runtime is the session runtime the sandbox ran in, so it is created
+	// in it again; empty means config.RuntimeOpenShell.
+	Runtime string `json:"runtime,omitempty"`
 	// Parked is when the session was parked.
 	Parked time.Time `json:"parked"`
 	// Op is who parked it: ParkAuto or ParkManual.
@@ -298,6 +301,14 @@ type ParkedSnapshot struct {
 	Record events.Record `json:"record"`
 	// Size is the snapshot's size.
 	Size int64 `json:"size"`
+}
+
+// SessionRuntime returns the runtime the session ran in.
+func (p ParkedSnapshot) SessionRuntime() string {
+	if p.Runtime == "" {
+		return config.RuntimeOpenShell
+	}
+	return p.Runtime
 }
 
 // AllRepos returns the parked session's repositories, in order.

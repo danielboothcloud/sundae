@@ -17,6 +17,7 @@ import (
 	"github.com/danielboothcloud/sundae/pkg/openshell"
 	"github.com/danielboothcloud/sundae/pkg/proto"
 	"github.com/danielboothcloud/sundae/pkg/s3store/s3test"
+	sbx "github.com/danielboothcloud/sundae/pkg/sandbox"
 	"github.com/danielboothcloud/sundae/pkg/sshutils"
 	"github.com/matryer/is"
 )
@@ -124,14 +125,14 @@ func TestSessionEndSnapshotAndForce(t *testing.T) {
 	is.True(err != nil)
 	is.True(strings.Contains(err.Error(), "the snapshot of /sandbox failed")) // got: err
 	is.True(strings.Contains(err.Error(), "session end r --force"))
-	is.Equal(fc.phase(openshell.SessionSandboxName("alice", "r")), types.SandboxReady)
+	is.Equal(fc.phase(openshell.SessionSandboxName("alice", "r")), sbx.Ready)
 
 	// --force ends it without one.
 	_, stderr, err := runSessionCmd(t, ctx, "end", "r", "--force")
 	is.NoErr(err)
 	is.True(strings.Contains(stderr, "ending the session without it (--force)"))
 	is.True(strings.Contains(stderr, "Session ended"))
-	is.Equal(fc.phase(openshell.SessionSandboxName("alice", "r")), types.SandboxPhase(""))
+	is.Equal(fc.phase(openshell.SessionSandboxName("alice", "r")), sbx.Phase(""))
 
 	// With S3 back, end saves /sandbox and start restores it.
 	srv.SetFail(nil)
@@ -175,14 +176,14 @@ func TestSessionStartRestorePrompt(t *testing.T) {
 	// Without a terminal, the error says what to do.
 	_, err := run(noPty, "", "start", "r", "-d")
 	is.True(err != nil && strings.Contains(err.Error(), "--restore") && strings.Contains(err.Error(), "--fresh")) // got: err
-	is.Equal(fc.phase(openshell.SessionSandboxName("alice", "r")), types.SandboxPhase(""))
+	is.Equal(fc.phase(openshell.SessionSandboxName("alice", "r")), sbx.Phase(""))
 
 	// No: nothing is started.
 	stderr, err := run(tty, "n\r", "start", "r", "-d")
 	is.True(err != nil)
 	is.True(strings.Contains(stderr, "Restore the snapshot over them? [y/N] n\r\n")) // got: stderr
 	is.Equal(len(scripts.restored), 0)
-	is.Equal(fc.phase(openshell.SessionSandboxName("alice", "r")), types.SandboxPhase(""))
+	is.Equal(fc.phase(openshell.SessionSandboxName("alice", "r")), sbx.Phase(""))
 
 	// Ctrl-C cancels.
 	_, err = run(tty, "\x03", "start", "r", "-d")
@@ -193,7 +194,7 @@ func TestSessionStartRestorePrompt(t *testing.T) {
 	is.NoErr(err)
 	is.True(strings.Contains(stderr, "Restored /sandbox from s3://snapshots/"+cmdSnapKey)) // got: stderr
 	is.Equal(scripts.restored, []string{"archive of " + cmdSandbox})
-	is.Equal(fc.phase(openshell.SessionSandboxName("alice", "r")), types.SandboxReady)
+	is.Equal(fc.phase(openshell.SessionSandboxName("alice", "r")), sbx.Ready)
 }
 
 func TestSessionParkToSnapshotAndList(t *testing.T) {
@@ -209,7 +210,7 @@ func TestSessionParkToSnapshotAndList(t *testing.T) {
 	_, stderr, err := runSessionCmd(t, ctx, "park", "r")
 	is.NoErr(err)
 	is.True(strings.Contains(stderr, "parked to an S3 snapshot: its sandbox was deleted and its program stopped")) // got: stderr
-	is.Equal(fc.phase(openshell.SessionSandboxName("alice", "r")), types.SandboxPhase(""))
+	is.Equal(fc.phase(openshell.SessionSandboxName("alice", "r")), sbx.Phase(""))
 	_, ok := srv.Object(cmdMarkerKey)
 	is.True(ok)
 	_, stderr, err = runSessionCmd(t, ctx, "park", "r")
@@ -238,7 +239,7 @@ func TestSessionParkToSnapshotAndList(t *testing.T) {
 	is.True(strings.Contains(stderr, "was parked to a snapshot of /sandbox"))
 	is.True(strings.Contains(stderr, "Started bash -l again: it was not running when the session resumed (the session was parked to a snapshot")) // got: stderr
 	is.Equal(scripts.restored, []string{"archive of " + cmdSandbox})
-	is.Equal(fc.phase(openshell.SessionSandboxName("alice", "r")), types.SandboxReady)
+	is.Equal(fc.phase(openshell.SessionSandboxName("alice", "r")), sbx.Ready)
 	_, ok = srv.Object(cmdMarkerKey)
 	is.True(!ok)
 

@@ -16,9 +16,9 @@ import (
 	"time"
 
 	"charm.land/log/v2"
-	"github.com/NVIDIA/OpenShell/sdk/go/openshell/v1/types"
 	"github.com/danielboothcloud/sundae/pkg/config"
 	"github.com/danielboothcloud/sundae/pkg/events"
+	sbx "github.com/danielboothcloud/sundae/pkg/sandbox"
 )
 
 // localClient runs a sandbox's commands on this machine, with HOME (and
@@ -33,7 +33,7 @@ type localClient struct {
 }
 
 func (c *localClient) Run(ctx context.Context, _ string, command []string, opts ExecOptions) (*ExecResult, error) {
-	if err := gatewayLimits(command, opts); err != nil {
+	if err := gatewayLimits(command, toSDKExec(opts)); err != nil {
 		return nil, err
 	}
 	env := maps.Clone(c.supervisorEnv)
@@ -74,7 +74,7 @@ func (c *localClient) ListSandboxes(context.Context, map[string]string) ([]*Sand
 		Labels:      map[string]string{LabelManaged: "true", LabelUserID: "1"},
 		Annotations: map[string]string{AnnotationUser: "alice", AnnotationRepo: "r", AnnotationSession: "main"},
 	}
-	sb.Status.Phase = types.SandboxReady
+	sb.Phase = sbx.Ready
 	return []*Sandbox{sb}, nil
 }
 

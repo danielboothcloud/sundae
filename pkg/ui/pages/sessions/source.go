@@ -133,7 +133,7 @@ type Profile struct {
 // NewClient creates the OpenShell client of an operation. Tests may
 // replace it.
 var NewClient = func(cfg *config.Config) (openshell.Client, error) {
-	return openshell.New(cfg.OpenShell)
+	return openshell.NewClient(cfg)
 }
 
 // SourceKey is the key of a Source in the context of common.Common. When

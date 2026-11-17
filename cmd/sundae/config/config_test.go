@@ -195,7 +195,8 @@ forges:
 sessions:
   profiles:
     claude:
-      providers: [my-github, manual-one]
+      openshell:
+        providers: [my-github, manual-one]
 `)
 		is.NoErr(check(p))
 
@@ -230,6 +231,57 @@ sessions:
 			}
 		}
 		is.True(!strings.Contains(msg, "ghp_secret"))
+	})
+
+	t.Run("session runtimes", func(t *testing.T) {
+		is := is.New(t)
+		p := filepath.Join(td, "runtimes.yaml")
+		writeFile(t, p, `sessions:
+  runtime: openshell
+  profiles:
+    claude:
+      runtime: openshell
+      openshell:
+        runtime_class: kata
+`)
+		is.NoErr(check(p))
+
+		// The old per-profile keys name where they moved.
+		writeFile(t, p, `sessions:
+  profiles:
+    claude:
+      providers: [my-github]
+      runtime_class: kata
+`)
+		err := check(p)
+		is.True(err != nil)
+		for _, want := range []string{
+			"line 4: sessions.profiles.<name>.providers has moved to sessions.profiles.<name>.openshell.providers",
+			"line 5: sessions.profiles.<name>.runtime_class has moved to sessions.profiles.<name>.openshell.runtime_class",
+		} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%q missing from:\n%s", want, err)
+			}
+		}
+
+		// OpenShell settings on a profile of another runtime.
+		writeFile(t, p, `sessions:
+  runtime: pod
+  profiles:
+    claude:
+      openshell:
+        providers: [my-github]
+`)
+		err = check(p)
+		is.True(err != nil)
+		for _, want := range []string{
+			`sessions.runtime "pod" is not implemented yet`,
+			"sessions.profiles.claude.openshell is set, but the profile's runtime is pod",
+		} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%q missing from:\n%s", want, err)
+			}
+		}
 	})
 
 	t.Run("sessions signals", func(t *testing.T) {

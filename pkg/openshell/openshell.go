@@ -27,18 +27,24 @@ import (
 
 	v1 "github.com/NVIDIA/OpenShell/sdk/go/openshell/v1"
 	"github.com/danielboothcloud/sundae/pkg/config"
+	sbx "github.com/danielboothcloud/sundae/pkg/sandbox"
 )
 
-// Re-exported SDK types so callers don't need to import the SDK directly.
+// Runtime-neutral types, re-exported so callers need not import
+// pkg/sandbox.
 type (
-	// Sandbox is an OpenShell sandbox.
-	Sandbox = v1.Sandbox
+	// Sandbox is a session's sandbox, in any runtime.
+	Sandbox = sbx.Sandbox
+	// SandboxRequest describes the sandbox to create when none exists.
+	SandboxRequest = sbx.Request
 	// ExecOptions configures a command execution in a sandbox.
-	ExecOptions = v1.ExecOptions
+	ExecOptions = sbx.ExecOptions
 	// ExecResult is the collected output of a completed command.
-	ExecResult = v1.ExecResult
+	ExecResult = sbx.ExecResult
 	// InteractiveSession is a bidirectional, resizable command stream.
-	InteractiveSession = v1.InteractiveSession
+	InteractiveSession = sbx.InteractiveSession
+	// ProviderChanges is what SyncProviders changed.
+	ProviderChanges = sbx.ProviderChanges
 )
 
 const (
@@ -58,14 +64,17 @@ const (
 	AnnotationProfile = "sundae.profile"
 	// AnnotationProviders holds the OpenShell providers the profile listed
 	// when the sandbox was created, comma-separated; absent for none. The
-	// sandbox's Spec.Providers is what is attached now: start and attach
-	// reconcile it with the profile's current list.
+	// sandbox's Providers are what is attached now: start and attach
+	// reconcile them with the profile's current list.
 	AnnotationProviders = "sundae.providers"
 	// AnnotationRuntimeClass holds the Kubernetes RuntimeClass the sandbox
-	// was created with (openshell.runtime_class or the profile's
-	// runtime_class); absent for the default runtime. The sandbox keeps
-	// that runtime for its lifetime.
+	// was created with (the runtime's runtime_class or the profile's);
+	// absent for the default runtime. The sandbox keeps that runtime for
+	// its lifetime.
 	AnnotationRuntimeClass = "sundae.runtime-class"
+	// AnnotationRuntime holds the session runtime the sandbox was created
+	// in (config.Runtime*); absent means config.RuntimeOpenShell.
+	AnnotationRuntime = "sundae.runtime"
 
 	// DefaultSessionName is the session name used when none is given and
 	// none can be derived from a repository.
@@ -82,16 +91,16 @@ const (
 // openshell.ready_timeout. A first start pulls the image and seeds the
 // workspace volume from the image's /sandbox; a large image or /sandbox
 // can need a longer timeout.
-var ErrReadyTimeout = errors.New("ready timeout")
+var ErrReadyTimeout = sbx.ErrReadyTimeout
 
 // ErrNotOwned is returned when a sandbox with the expected name exists but
 // belongs to someone else.
-var ErrNotOwned = errors.New("openshell: sandbox name is in use by another owner")
+var ErrNotOwned = sbx.ErrNotOwned
 
-// ErrSuspendUnsupported is returned by SuspendSandbox when the client has no
-// way to suspend sandboxes. IsSuspendUnsupported also recognises the
+// ErrSuspendUnsupported is returned by SuspendSandbox when the runtime has
+// no way to suspend sandboxes. IsSuspendUnsupported also recognises the
 // gateway's own refusals.
-var ErrSuspendUnsupported = errors.New("openshell: sandbox suspend is not supported")
+var ErrSuspendUnsupported = sbx.ErrSuspendUnsupported
 
 // resumeRestartIfRestoreFails is the RestartIfRestoreFails option every
 // resume of a suspended sandbox uses. When the isolation backend cannot
@@ -102,8 +111,8 @@ var ErrSuspendUnsupported = errors.New("openshell: sandbox suspend is not suppor
 // ended, losing more than the clean restart does.
 const resumeRestartIfRestoreFails = true
 
-// IsSuspendUnsupported reports whether err means the gateway cannot suspend
-// sandboxes: ErrSuspendUnsupported, an Unimplemented status, or the
+// IsSuspendUnsupported reports whether err means the runtime cannot
+// suspend sandboxes: ErrSuspendUnsupported, an Unimplemented status, or the
 // FailedPrecondition the OpenShell gateway (0.1.8, compute/mod.rs
 // require_suspend_resume) returns when its compute driver lacks the
 // suspend-resume capability, which the SDK reports as a Conflict.
@@ -118,40 +127,6 @@ func IsSuspendUnsupported(err error) bool {
 	msg := strings.ToLower(se.Message)
 	return strings.Contains(msg, "not support") || strings.Contains(msg, "unsupported")
 }
-
-// SandboxRequest describes the sandbox to create when none exists.
-type SandboxRequest struct {
-	// Image is the sandbox base image.
-	Image string
-	// RuntimeClass is the Kubernetes RuntimeClass the sandbox is created
-	// with, sent as the template's runtime_class_name; OpenShell's
-	// Kubernetes driver gives it precedence over its
-	// default_runtime_class_name. Empty sends none: the driver's or the
-	// cluster's default runtime. An existing sandbox keeps its runtime.
-	RuntimeClass string
-	// Labels are set on creation. The LabelUserID label is also used to verify
-	// ownership of an existing sandbox.
-	Labels map[string]string
-	// Annotations are set on creation.
-	Annotations map[string]string
-	// Providers are the OpenShell providers attached to the sandbox on
-	// creation. An existing sandbox's are left alone; see SyncProviders.
-	Providers []string
-	// Policy is the sandbox's policy on creation (see BuildSandboxPolicy);
-	// nil sends none, so the image's /etc/openshell/policy.yaml or
-	// OpenShell's default applies. An existing sandbox keeps the policy it
-	// has. Read only.
-	Policy *SandboxPolicy
-}
-
-// ProviderChanges is what SyncProviders changed.
-type ProviderChanges struct {
-	// Attached and Detached are the providers attached and detached.
-	Attached, Detached []string
-}
-
-// Changed reports whether any provider was attached or detached.
-func (c ProviderChanges) Changed() bool { return len(c.Attached)+len(c.Detached) > 0 }
 
 // MissingProviderError is returned when the gateway refuses to attach a
 // provider because it does not exist.
@@ -201,59 +176,29 @@ func isVersionConflict(err error) bool {
 	return se.GRPCCode == grpcAborted || (se.ErrorInfo != nil && se.ErrorInfo.Reason == "RESOURCE_VERSION_CONFLICT")
 }
 
-// Client is the narrow OpenShell surface Sundae needs. It is satisfied by
-// the SDK-backed client returned from New, and in tests by one built on the
-// SDK's fake sandbox client.
+// Client is what the session Manager and Monitor need from the session
+// runtimes: a sbx.Runtime that can also sync OpenShell providers. It is
+// satisfied by the OpenShell runtime (New), by a Router over several
+// runtimes (NewClient), and in tests by clients built on the SDK's fake
+// sandbox client.
 type Client interface {
-	// EnsureSandbox returns a ready sandbox named name, creating it from req
-	// when absent and starting it when stopped. created reports whether the
-	// sandbox was created by this call. A half-made sandbox is deleted when
-	// creation or the ready-wait fails.
-	EnsureSandbox(ctx context.Context, name string, req SandboxRequest) (sb *Sandbox, created bool, err error)
-	// GetSandbox returns the named sandbox. Absence is reported with an error
-	// for which IsNotFound returns true.
-	GetSandbox(ctx context.Context, name string) (*Sandbox, error)
-	// ListSandboxes returns sandboxes carrying all the given labels.
-	ListSandboxes(ctx context.Context, labels map[string]string) ([]*Sandbox, error)
-	// ResumeSandbox returns the existing sandbox named name, ready, starting
-	// it when stopped. It never creates one: absence is reported with an
-	// error for which IsNotFound returns true. labels[LabelUserID], when set,
-	// must match the sandbox's, or ErrNotOwned is returned.
-	ResumeSandbox(ctx context.Context, name string, labels map[string]string) (*Sandbox, error)
-	// DeleteSandbox deletes the named sandbox. An absent sandbox is not an
-	// error.
-	DeleteSandbox(ctx context.Context, name string) error
-	// SyncProviders makes the OpenShell providers attached to sb exactly
-	// want: it attaches the missing ones, in order, and detaches the
-	// others. sb is the sandbox as last read; it is read again once when a
-	// concurrent change conflicts. A provider the gateway says does not
-	// exist stops it with a *MissingProviderError. What it changed before
-	// an error is returned with it.
-	SyncProviders(ctx context.Context, sb *Sandbox, want []string) (ProviderChanges, error)
-	// SuspendSandbox parks the named sandbox: it suspends it, which keeps
-	// its memory where the compute driver supports that, and waits until it
-	// is Suspended. A gateway that cannot suspend returns an error for which
-	// IsSuspendUnsupported returns true. EnsureSandbox and ResumeSandbox
-	// resume a suspended sandbox.
-	SuspendSandbox(ctx context.Context, name string) (*Sandbox, error)
-	// Upload copies the local file at localPath to remotePath in the
-	// sandbox, replacing it. Missing parent directories are created.
-	Upload(ctx context.Context, name, localPath, remotePath string) error
-	// Run runs a command to completion in the sandbox.
-	Run(ctx context.Context, name string, command []string, opts ExecOptions) (*ExecResult, error)
-	// Interactive starts an interactive command with a PTY of cols x rows.
-	Interactive(ctx context.Context, name string, command []string, cols, rows uint32, opts ExecOptions) (InteractiveSession, error)
-	// Close releases the client's resources.
-	Close() error
+	sbx.Runtime
+	sbx.ProviderSyncer
 }
 
-// IsNotFound reports whether err means the resource does not exist.
-func IsNotFound(err error) bool { return v1.IsNotFound(err) }
+// IsNotFound reports whether err means the sandbox does not exist.
+func IsNotFound(err error) bool { return errors.Is(err, sbx.ErrNotFound) || v1.IsNotFound(err) }
 
-// New returns an SDK-backed Client for the given configuration. The gRPC
+// New returns the OpenShell runtime for the given configuration. The gRPC
 // connection is established lazily on first use. A token_file is read here,
-// on every call, so a rotated token takes effect for the next client.
+// on every call, so a rotated token takes effect for the next client. It
+// creates sandboxes without a policy; NewClient gives them
+// openshell.sandbox_policy's.
 func New(cfg config.OpenShellConfig) (Client, error) {
+	return newOpenShell(cfg)
+}
+
+func newOpenShell(cfg config.OpenShellConfig) (*sdkClient, error) {
 	c, err := newSDK(cfg)
 	if err != nil {
 		return nil, err
@@ -318,6 +263,12 @@ type sdkClient struct {
 	// readyTimeout bounds how long a start waits for a sandbox to become
 	// ready (openshell.ready_timeout).
 	readyTimeout time.Duration
+	// policy is the policy of the sandboxes the client creates (see
+	// BuildSandboxPolicy); nil sends none, so the image's
+	// /etc/openshell/policy.yaml or OpenShell's default applies. policyErr
+	// is why it could not be built, returned by EnsureSandbox.
+	policy    *SandboxPolicy
+	policyErr error
 }
 
 var _ Client = (*sdkClient)(nil)
@@ -337,6 +288,9 @@ func newSDKClient(workspace string, sandboxes v1.SandboxInterface, exec v1.ExecI
 }
 
 func (c *sdkClient) EnsureSandbox(ctx context.Context, name string, req SandboxRequest) (*Sandbox, bool, error) {
+	if c.policyErr != nil {
+		return nil, false, c.policyErr
+	}
 	sb, err := c.sandboxes.Get(ctx, c.workspace, name)
 	switch {
 	case IsNotFound(err):
@@ -349,18 +303,18 @@ func (c *sdkClient) EnsureSandbox(ctx context.Context, name string, req SandboxR
 }
 
 // existing resumes a sandbox that already exists, after checking ownership.
-func (c *sdkClient) existing(ctx context.Context, sb *Sandbox, req SandboxRequest) (*Sandbox, bool, error) {
-	if !owns(sb, req.Labels) {
+func (c *sdkClient) existing(ctx context.Context, sb *v1.Sandbox, req SandboxRequest) (*Sandbox, bool, error) {
+	if !owns(sb.Labels, req.Labels) {
 		return nil, false, ErrNotOwned
 	}
 
-	sb, err := c.resume(ctx, sb)
-	return sb, false, err
+	out, err := c.resume(ctx, sb)
+	return out, false, err
 }
 
 // create creates the sandbox and waits for it, deleting it on failure.
 func (c *sdkClient) create(ctx context.Context, name string, req SandboxRequest) (*Sandbox, bool, error) {
-	spec := &v1.SandboxSpec{Providers: slices.Clone(req.Providers), Policy: req.Policy}
+	spec := &v1.SandboxSpec{Providers: slices.Clone(req.Providers), Policy: c.policy}
 	if req.Image != "" || req.RuntimeClass != "" {
 		spec.Template = &v1.SandboxTemplate{Image: req.Image, RuntimeClassName: req.RuntimeClass}
 	}
@@ -393,10 +347,10 @@ func (c *sdkClient) create(ctx context.Context, name string, req SandboxRequest)
 }
 
 // resume brings an existing sandbox to the Ready phase.
-func (c *sdkClient) resume(ctx context.Context, sb *Sandbox) (*Sandbox, error) {
+func (c *sdkClient) resume(ctx context.Context, sb *v1.Sandbox) (*Sandbox, error) {
 	switch sb.Status.Phase {
 	case v1.SandboxReady:
-		return sb, nil
+		return fromSDK(sb), nil
 	case v1.SandboxStopped:
 		if _, err := c.sandboxes.Start(ctx, c.workspace, sb.Name); err != nil {
 			return nil, fmt.Errorf("openshell: start sandbox %q: %w", sb.Name, err)
@@ -439,7 +393,7 @@ func (c *sdkClient) waitSuspended(ctx context.Context, name string) (*Sandbox, e
 	if err != nil {
 		return nil, fmt.Errorf("openshell: wait for sandbox %q to suspend: %w", name, err)
 	}
-	return sb, nil
+	return fromSDK(sb), nil
 }
 
 func (c *sdkClient) SuspendSandbox(ctx context.Context, name string) (*Sandbox, error) {
@@ -463,7 +417,7 @@ func (c *sdkClient) waitReady(ctx context.Context, name string) (*Sandbox, error
 		}
 		return nil, fmt.Errorf("openshell: wait for sandbox %q: %w", name, err)
 	}
-	return sb, nil
+	return fromSDK(sb), nil
 }
 
 // cleanup deletes a half-made sandbox. It uses a fresh context so it still
@@ -475,7 +429,11 @@ func (c *sdkClient) cleanup(name string) {
 }
 
 func (c *sdkClient) GetSandbox(ctx context.Context, name string) (*Sandbox, error) {
-	return c.sandboxes.Get(ctx, c.workspace, name) //nolint:wrapcheck
+	sb, err := c.sandboxes.Get(ctx, c.workspace, name)
+	if err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+	return fromSDK(sb), nil
 }
 
 func (c *sdkClient) ListSandboxes(ctx context.Context, labels map[string]string) ([]*Sandbox, error) {
@@ -487,8 +445,8 @@ func (c *sdkClient) ListSandboxes(ctx context.Context, labels map[string]string)
 	// Filter client-side too: not every implementation honors the selector.
 	out := make([]*Sandbox, 0, len(sbs))
 	for _, sb := range sbs {
-		if hasLabels(sb, labels) {
-			out = append(out, sb)
+		if hasLabels(sb.Labels, labels) {
+			out = append(out, fromSDK(sb))
 		}
 	}
 	return out, nil
@@ -501,7 +459,7 @@ func (c *sdkClient) ResumeSandbox(ctx context.Context, name string, labels map[s
 		return nil, err //nolint:wrapcheck
 	case err != nil:
 		return nil, fmt.Errorf("openshell: get sandbox %q: %w", name, err)
-	case !owns(sb, labels):
+	case !owns(sb.Labels, labels):
 		return nil, ErrNotOwned
 	}
 	return c.resume(ctx, sb)
@@ -523,27 +481,28 @@ func (c *sdkClient) DeleteSandbox(ctx context.Context, name string) error {
 // again and the difference recomputed, once.
 func (c *sdkClient) SyncProviders(ctx context.Context, sb *Sandbox, want []string) (ProviderChanges, error) {
 	var changes ProviderChanges
-	name := sb.Name
+	name, have := sb.Name, sb.Providers
 	for attempt := 0; ; attempt++ {
-		err := c.syncProviders(ctx, sb, want, &changes)
+		err := c.syncProviders(ctx, name, have, want, &changes)
 		if err == nil || attempt > 0 || !isVersionConflict(err) {
 			return changes, err
 		}
-		if sb, err = c.sandboxes.Get(ctx, c.workspace, name); err != nil {
+		cur, err := c.sandboxes.Get(ctx, c.workspace, name)
+		if err != nil {
 			return changes, fmt.Errorf("openshell: get sandbox %q: %w", name, err)
 		}
+		have = cur.Spec.Providers
 	}
 }
 
-func (c *sdkClient) syncProviders(ctx context.Context, sb *Sandbox, want []string, changes *ProviderChanges) error {
-	have := sb.Spec.Providers
+func (c *sdkClient) syncProviders(ctx context.Context, name string, have, want []string, changes *ProviderChanges) error {
 	for _, p := range want {
 		if slices.Contains(have, p) {
 			continue
 		}
-		r, err := c.sandboxes.AttachProvider(ctx, c.workspace, sb.Name, p, 0)
+		r, err := c.sandboxes.AttachProvider(ctx, c.workspace, name, p, 0)
 		if err != nil {
-			return fmt.Errorf("openshell: attach provider %q to sandbox %q: %w", p, sb.Name, asMissingProvider(err))
+			return fmt.Errorf("openshell: attach provider %q to sandbox %q: %w", p, name, asMissingProvider(err))
 		}
 		if r.Attached {
 			changes.Attached = append(changes.Attached, p)
@@ -553,9 +512,9 @@ func (c *sdkClient) syncProviders(ctx context.Context, sb *Sandbox, want []strin
 		if slices.Contains(want, p) {
 			continue
 		}
-		r, err := c.sandboxes.DetachProvider(ctx, c.workspace, sb.Name, p, 0)
+		r, err := c.sandboxes.DetachProvider(ctx, c.workspace, name, p, 0)
 		if err != nil {
-			return fmt.Errorf("openshell: detach provider %q from sandbox %q: %w", p, sb.Name, err)
+			return fmt.Errorf("openshell: detach provider %q from sandbox %q: %w", p, name, err)
 		}
 		if r.Detached {
 			changes.Detached = append(changes.Detached, p)
@@ -565,11 +524,48 @@ func (c *sdkClient) syncProviders(ctx context.Context, sb *Sandbox, want []strin
 }
 
 func (c *sdkClient) Run(ctx context.Context, name string, command []string, opts ExecOptions) (*ExecResult, error) {
-	return c.exec.Run(ctx, c.workspace, name, command, opts) //nolint:wrapcheck
+	res, err := c.exec.Run(ctx, c.workspace, name, command, toSDKExec(opts))
+	if err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+	return &ExecResult{ExitCode: res.ExitCode, Stdout: res.Stdout, Stderr: res.Stderr}, nil
 }
 
 func (c *sdkClient) Interactive(ctx context.Context, name string, command []string, cols, rows uint32, opts ExecOptions) (InteractiveSession, error) {
-	return c.exec.Interactive(ctx, c.workspace, name, command, cols, rows, opts) //nolint:wrapcheck
+	is, err := c.exec.Interactive(ctx, c.workspace, name, command, cols, rows, toSDKExec(opts))
+	if err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+	return is, nil
+}
+
+// toSDKExec converts exec options to the SDK's.
+func toSDKExec(o ExecOptions) v1.ExecOptions {
+	return v1.ExecOptions{Env: o.Env, WorkDir: o.WorkDir, NoLoginShell: o.NoLoginShell}
+}
+
+// fromSDK converts an OpenShell sandbox to the runtime-neutral Sandbox.
+func fromSDK(sb *v1.Sandbox) *Sandbox {
+	if sb == nil {
+		return nil
+	}
+	out := &Sandbox{
+		Name:        sb.Name,
+		Runtime:     config.RuntimeOpenShell,
+		Labels:      sb.Labels,
+		Annotations: sb.Annotations,
+		Phase:       sbx.Phase(sb.Status.Phase),
+		Providers:   slices.Clone(sb.Spec.Providers),
+		CreatedAt:   sb.CreatedAt,
+	}
+	if t := sb.Spec.Template; t != nil {
+		out.Image = t.Image
+		out.RuntimeClass = t.RuntimeClassName
+	}
+	if out.RuntimeClass == "" {
+		out.RuntimeClass = sb.Annotations[AnnotationRuntimeClass]
+	}
+	return out
 }
 
 func (c *sdkClient) Close() error {
@@ -580,31 +576,47 @@ func (c *sdkClient) Close() error {
 }
 
 // SandboxRuntimeClass returns the Kubernetes RuntimeClass sb was created
-// with: its template's runtime_class_name, else its AnnotationRuntimeClass.
-// "" means the default runtime, or a sandbox created before Sundae
-// recorded runtimes.
+// with: the one its runtime reports, else its AnnotationRuntimeClass. ""
+// means the default runtime, or a sandbox created before Sundae recorded
+// runtimes.
 func SandboxRuntimeClass(sb *Sandbox) string {
 	if sb == nil {
 		return ""
 	}
-	if sb.Spec.Template != nil && sb.Spec.Template.RuntimeClassName != "" {
-		return sb.Spec.Template.RuntimeClassName
+	if sb.RuntimeClass != "" {
+		return sb.RuntimeClass
 	}
 	return sb.Annotations[AnnotationRuntimeClass]
 }
 
-// owns reports whether sb carries the ownership label from want.
-func owns(sb *Sandbox, want map[string]string) bool {
+// SandboxRuntime returns the session runtime sb runs in: the one its
+// runtime reports, else its AnnotationRuntime, else
+// config.RuntimeOpenShell.
+func SandboxRuntime(sb *Sandbox) string {
+	switch {
+	case sb == nil:
+		return config.RuntimeOpenShell
+	case sb.Runtime != "":
+		return sb.Runtime
+	case sb.Annotations[AnnotationRuntime] != "":
+		return sb.Annotations[AnnotationRuntime]
+	}
+	return config.RuntimeOpenShell
+}
+
+// owns reports whether a sandbox's labels carry the ownership label from
+// want.
+func owns(labels, want map[string]string) bool {
 	id, ok := want[LabelUserID]
 	if !ok {
 		return true
 	}
-	return sb.Labels[LabelUserID] == id
+	return labels[LabelUserID] == id
 }
 
-func hasLabels(sb *Sandbox, labels map[string]string) bool {
+func hasLabels(have, labels map[string]string) bool {
 	for k, v := range labels {
-		if sb.Labels[k] != v {
+		if have[k] != v {
 			return false
 		}
 	}

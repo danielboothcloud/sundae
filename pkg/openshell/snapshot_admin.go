@@ -124,7 +124,7 @@ func (m *Manager) snapshotState(ctx context.Context, user proto.User, sandbox st
 		return SnapshotEnded, nil
 	case err != nil:
 		return "", fmt.Errorf("openshell: get sandbox %q: %w", sandbox, err)
-	case !owns(sb, ownerLabels(user)):
+	case !owns(sb.Labels, ownerLabels(user)):
 		// Not the user's sandbox: their session of that name has ended.
 		return SnapshotEnded, nil
 	}

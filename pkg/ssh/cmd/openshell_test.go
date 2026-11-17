@@ -42,7 +42,7 @@ func TestOpenShellProvidersCommand(t *testing.T) {
 		{Name: "taken", Type: "anthropic", CredentialsDir: dir},
 	}
 	cfg.Sessions.Profiles = map[string]config.SessionProfile{
-		"claude": {Providers: []string{"my-github", "by-hand"}},
+		"claude": {OpenShell: &config.ProfileOpenShell{Providers: []string{"my-github", "by-hand"}}},
 	}
 
 	fc := fake.NewClient()

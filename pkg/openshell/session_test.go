@@ -486,7 +486,10 @@ func newHarnessWith(t *testing.T, cfg *config.Config) *harness {
 	t.Cleanup(func() { _ = fc.Close() })
 	ex := newFakeExec()
 	tokens := newFakeTokens()
-	mgr := NewManager(newSDKClient("default", fc.Sandboxes(), ex, fc.Files(), nil), tokens, cfg)
+	client := newSDKClient("default", fc.Sandboxes(), ex, fc.Files(), nil)
+	// As NewClient does.
+	client.policy, client.policyErr = BuildSandboxPolicy(cfg)
+	mgr := NewManager(client, tokens, cfg)
 	return &harness{fc: fc, exec: ex, tokens: tokens, mgr: mgr}
 }
 
@@ -1012,8 +1015,8 @@ func TestStartRuntimeClass(t *testing.T) {
 		cfg := newHarnessConfig()
 		cfg.OpenShell.RuntimeClass = global
 		cfg.Sessions.Profiles = map[string]config.SessionProfile{
-			"podman": {RuntimeClass: config.RuntimeClassKata},
-			"runc":   {RuntimeClass: config.RuntimeClassDefault},
+			"podman": {OpenShell: &config.ProfileOpenShell{RuntimeClass: config.RuntimeClassKata}},
+			"runc":   {OpenShell: &config.ProfileOpenShell{RuntimeClass: config.RuntimeClassDefault}},
 			"shell":  {},
 		}
 		return cfg
@@ -1039,6 +1042,9 @@ func TestStartRuntimeClass(t *testing.T) {
 			if sb.Spec.Template == nil || sb.Spec.Template.RuntimeClassName != tc.want {
 				t.Fatalf("template = %+v", sb.Spec.Template)
 			}
+			if s.Runtime != config.RuntimeOpenShell || sb.Annotations[AnnotationRuntime] != config.RuntimeOpenShell {
+				t.Fatalf("runtime = %q, annotation %q", s.Runtime, sb.Annotations[AnnotationRuntime])
+			}
 			if got, ok := sb.Annotations[AnnotationRuntimeClass]; got != tc.want || ok != (tc.want != "") {
 				t.Fatalf("annotations = %v", sb.Annotations)
 			}
@@ -1054,13 +1060,13 @@ func TestStartRuntimeClass(t *testing.T) {
 		}
 		// The profile changes to another runtime; the session is
 		// resumed in the sandbox it has.
-		cfg.Sessions.Profiles["podman"] = config.SessionProfile{RuntimeClass: "gvisor"}
+		cfg.Sessions.Profiles["podman"] = config.SessionProfile{OpenShell: &config.ProfileOpenShell{RuntimeClass: "gvisor"}}
 		h.mgr = NewManager(h.mgr.client, h.tokens, cfg)
 		if _, err := h.mgr.Start(ctx, StartOptions{User: alice, Repo: "r"}); err != nil {
 			t.Fatal(err)
 		}
 		sb, _ := h.fc.Sandboxes().Get(ctx, "default", s.Sandbox)
-		if got := SandboxRuntimeClass(sb); got != config.RuntimeClassKata {
+		if got := SandboxRuntimeClass(fromSDK(sb)); got != config.RuntimeClassKata {
 			t.Fatalf("runtime class = %q", got)
 		}
 	})

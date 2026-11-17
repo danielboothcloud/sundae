@@ -20,6 +20,7 @@ import (
 	"github.com/danielboothcloud/sundae/pkg/events"
 	"github.com/danielboothcloud/sundae/pkg/openshell"
 	"github.com/danielboothcloud/sundae/pkg/proto"
+	sbx "github.com/danielboothcloud/sundae/pkg/sandbox"
 	"github.com/danielboothcloud/sundae/pkg/sshutils"
 	"github.com/matryer/is"
 )
@@ -71,10 +72,10 @@ func notFound() error { return &types.StatusError{Code: types.ErrorNotFound, Mes
 // unpark resumes a parked sandbox, as the SDK client does. Call with mu
 // held.
 func (f *fakeOpenShell) unpark(sb *openshell.Sandbox) {
-	if sb.Status.Phase != types.SandboxSuspended {
+	if sb.Phase != sbx.Suspended {
 		return
 	}
-	sb.Status.Phase = types.SandboxReady
+	sb.Phase = sbx.Ready
 	f.resumes++
 	if f.cleanRestart {
 		delete(f.osewa, sb.Name)
@@ -92,8 +93,8 @@ func (f *fakeOpenShell) EnsureSandbox(_ context.Context, name string, req opensh
 		return sb, false, nil
 	}
 	sb := &openshell.Sandbox{Name: name, Labels: req.Labels, Annotations: req.Annotations}
-	sb.Spec.Providers = req.Providers
-	sb.Status.Phase = types.SandboxReady
+	sb.Providers = req.Providers
+	sb.Phase = sbx.Ready
 	f.sandboxes[name] = sb
 	return sb, true, nil
 }
@@ -102,7 +103,7 @@ func (f *fakeOpenShell) SyncProviders(_ context.Context, sb *openshell.Sandbox, 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if cur, ok := f.sandboxes[sb.Name]; ok {
-		cur.Spec.Providers = want
+		cur.Providers = want
 	}
 	return openshell.ProviderChanges{}, nil
 }
@@ -132,16 +133,16 @@ func (f *fakeOpenShell) SuspendSandbox(_ context.Context, name string) (*openshe
 		return nil, notFound()
 	}
 	f.suspends++
-	sb.Status.Phase = types.SandboxSuspended
+	sb.Phase = sbx.Suspended
 	return sb, nil
 }
 
 // phase returns a sandbox's phase.
-func (f *fakeOpenShell) phase(name string) types.SandboxPhase {
+func (f *fakeOpenShell) phase(name string) sbx.Phase {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if sb, ok := f.sandboxes[name]; ok {
-		return sb.Status.Phase
+		return sb.Phase
 	}
 	return ""
 }
@@ -473,7 +474,7 @@ func TestSessionListAndEnd(t *testing.T) {
 			openshell.AnnotationRepo: "gone", openshell.AnnotationSession: "gone",
 		},
 	}
-	sb.Status.Phase = types.SandboxReady
+	sb.Phase = sbx.Ready
 	fc.sandboxes[name] = sb
 
 	// Two sessions of r.

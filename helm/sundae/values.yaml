@@ -213,7 +213,7 @@ config:
     # session in the sandbox, so it outlives the SSH connection.
     command: "bash -l"
     # OpenShell providers Sundae creates on the gateway and keeps up to date,
-    # for profiles to attach (sessions.profiles.<name>.providers). Each one's
+    # for profiles to attach (sessions.profiles.<name>.openshell.providers). Each one's
     # credentials are read from credentials_dir: one file per credential,
     # named for its key (an environment variable name, e.g. GITHUB_TOKEN),
     # holding the value. Mount a Secret there with `secretMounts` below
@@ -270,6 +270,10 @@ config:
   # What runs in the sandboxes: several named sessions per repository
   # (session start <repo> --name <name>), each from a profile.
   sessions:
+    # Where sessions run unless their profile sets `runtime`: "openshell"
+    # (the OpenShell gateway, config.openshell). An existing session keeps
+    # the runtime it was created in.
+    runtime: openshell
     osewa:
       # The pinned osewa builds this image carries, uploaded to sandboxes
       # whose image lacks osewa (the sandbox image in deploy/sandbox has it).
@@ -299,25 +303,25 @@ config:
       # only: the feed is empty after a restart. At most 100000.
       keep: 1000
     # Named presets for `session start --profile <name>`. Empty image and
-    # command fall back to openshell.image and openshell.command.
-    # `providers` names OpenShell providers (declared in
-    # config.openshell.providers, or created on the gateway with
-    # `openshell provider create`) to attach to this profile's sandboxes
-    # only; their programs get the credentials as placeholders the sandbox
-    # proxy resolves. The provider profiles' binaries and endpoints, or
-    # config.openshell.network_policies, must allow the requests. See the
-    # top-level README,
-    # "Providers". `runtime_class` is the Kubernetes RuntimeClass of this
-    # profile's new sandboxes; empty uses config.openshell.runtime_class,
-    # and "default" uses the default runtime.
+    # command fall back to openshell.image and openshell.command; `runtime`
+    # overrides sessions.runtime. `openshell` holds settings for profiles
+    # whose runtime is openshell: `providers` names OpenShell providers
+    # (declared in config.openshell.providers, or created on the gateway
+    # with `openshell provider create`) to attach to this profile's
+    # sandboxes only; their programs get the credentials as placeholders
+    # the sandbox proxy resolves. The provider profiles' binaries and
+    # endpoints, or config.openshell.network_policies, must allow the
+    # requests. See the top-level README, "Providers". `runtime_class` is
+    # the Kubernetes RuntimeClass of this profile's new sandboxes; empty
+    # uses config.openshell.runtime_class, and "default" uses the default
+    # runtime.
     profiles: {}
     #  claude:
     #    image: ghcr.io/me/agent-claude:latest
     #    command: claude
-    #    providers: [my-claude, my-github]
-    #  podman:
-    #    image: ghcr.io/me/agent-podman:latest
-    #    runtime_class: kata-containers
+    #    openshell:
+    #      providers: [my-claude, my-github]
+    #      runtime_class: kata-containers
     # The profile for sessions started without --profile, by repository name
     # glob ("*" does not cross "/", "**" does; the most specific match wins).
     repos: {}

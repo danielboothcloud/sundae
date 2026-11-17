@@ -99,30 +99,36 @@ func TestValidateSessions(t *testing.T) {
 		},
 		"profile providers": {
 			func(c *Config) {
-				c.Sessions.Profiles["claude"] = SessionProfile{Providers: []string{"my-claude", " my-github ", "my-claude"}}
+				c.Sessions.Profiles["claude"] = SessionProfile{OpenShell: &ProfileOpenShell{Providers: []string{"my-claude", " my-github ", "my-claude"}}}
 			}, "",
 		},
 		"profile provider empty": {
-			func(c *Config) { c.Sessions.Profiles["claude"] = SessionProfile{Providers: []string{"ok", "  "}} },
-			`sessions.profiles.claude.providers[1] "" is not a valid OpenShell provider name`,
+			func(c *Config) {
+				c.Sessions.Profiles["claude"] = SessionProfile{OpenShell: &ProfileOpenShell{Providers: []string{"ok", "  "}}}
+			},
+			`sessions.profiles.claude.openshell.providers[1] "" is not a valid OpenShell provider name`,
 		},
 		"profile provider comma": {
-			func(c *Config) { c.Sessions.Profiles["claude"] = SessionProfile{Providers: []string{"a,b"}} },
-			`sessions.profiles.claude.providers[0] "a,b" is not a valid OpenShell provider name`,
+			func(c *Config) {
+				c.Sessions.Profiles["claude"] = SessionProfile{OpenShell: &ProfileOpenShell{Providers: []string{"a,b"}}}
+			},
+			`sessions.profiles.claude.openshell.providers[0] "a,b" is not a valid OpenShell provider name`,
 		},
 		"profile provider space": {
-			func(c *Config) { c.Sessions.Profiles["claude"] = SessionProfile{Providers: []string{"my claude"}} },
-			`sessions.profiles.claude.providers[0] "my claude"`,
+			func(c *Config) {
+				c.Sessions.Profiles["claude"] = SessionProfile{OpenShell: &ProfileOpenShell{Providers: []string{"my claude"}}}
+			},
+			`sessions.profiles.claude.openshell.providers[0] "my claude"`,
 		},
 		"profile provider too long": {
 			func(c *Config) {
-				c.Sessions.Profiles["claude"] = SessionProfile{Providers: []string{strings.Repeat("p", MaxProviderNameLen+1)}}
+				c.Sessions.Profiles["claude"] = SessionProfile{OpenShell: &ProfileOpenShell{Providers: []string{strings.Repeat("p", MaxProviderNameLen+1)}}}
 			},
-			"sessions.profiles.claude.providers[0]",
+			"sessions.profiles.claude.openshell.providers[0]",
 		},
 		"profile provider longest": {
 			func(c *Config) {
-				c.Sessions.Profiles["claude"] = SessionProfile{Providers: []string{strings.Repeat("p", MaxProviderNameLen)}}
+				c.Sessions.Profiles["claude"] = SessionProfile{OpenShell: &ProfileOpenShell{Providers: []string{strings.Repeat("p", MaxProviderNameLen)}}}
 			}, "",
 		},
 		"profile too many providers": {
@@ -131,37 +137,47 @@ func TestValidateSessions(t *testing.T) {
 				for i := range MaxProviders + 1 {
 					ps = append(ps, fmt.Sprintf("p%d", i))
 				}
-				c.Sessions.Profiles["claude"] = SessionProfile{Providers: ps}
+				c.Sessions.Profiles["claude"] = SessionProfile{OpenShell: &ProfileOpenShell{Providers: ps}}
 			},
-			"sessions.profiles.claude.providers lists 33 providers; OpenShell attaches at most 32 to a sandbox",
+			"sessions.profiles.claude.openshell.providers lists 33 providers; OpenShell attaches at most 32 to a sandbox",
 		},
 		"profile runtime class": {
-			func(c *Config) { c.Sessions.Profiles["claude"] = SessionProfile{RuntimeClass: " kata-qemu.v2 "} }, "",
+			func(c *Config) {
+				c.Sessions.Profiles["claude"] = SessionProfile{OpenShell: &ProfileOpenShell{RuntimeClass: " kata-qemu.v2 "}}
+			}, "",
 		},
 		"profile runtime class default": {
-			func(c *Config) { c.Sessions.Profiles["claude"] = SessionProfile{RuntimeClass: RuntimeClassDefault} }, "",
+			func(c *Config) {
+				c.Sessions.Profiles["claude"] = SessionProfile{OpenShell: &ProfileOpenShell{RuntimeClass: RuntimeClassDefault}}
+			}, "",
 		},
 		"profile runtime class upper case": {
-			func(c *Config) { c.Sessions.Profiles["claude"] = SessionProfile{RuntimeClass: "Kata"} },
-			`sessions.profiles.claude.runtime_class "Kata" is not a Kubernetes RuntimeClass name`,
+			func(c *Config) {
+				c.Sessions.Profiles["claude"] = SessionProfile{OpenShell: &ProfileOpenShell{RuntimeClass: "Kata"}}
+			},
+			`sessions.profiles.claude.openshell.runtime_class "Kata" is not a Kubernetes RuntimeClass name`,
 		},
 		"profile runtime class underscore": {
-			func(c *Config) { c.Sessions.Profiles["claude"] = SessionProfile{RuntimeClass: "kata_qemu"} },
-			`sessions.profiles.claude.runtime_class "kata_qemu"`,
+			func(c *Config) {
+				c.Sessions.Profiles["claude"] = SessionProfile{OpenShell: &ProfileOpenShell{RuntimeClass: "kata_qemu"}}
+			},
+			`sessions.profiles.claude.openshell.runtime_class "kata_qemu"`,
 		},
 		"profile runtime class trailing hyphen": {
-			func(c *Config) { c.Sessions.Profiles["claude"] = SessionProfile{RuntimeClass: "kata-"} },
-			`sessions.profiles.claude.runtime_class "kata-"`,
+			func(c *Config) {
+				c.Sessions.Profiles["claude"] = SessionProfile{OpenShell: &ProfileOpenShell{RuntimeClass: "kata-"}}
+			},
+			`sessions.profiles.claude.openshell.runtime_class "kata-"`,
 		},
 		"profile runtime class too long": {
 			func(c *Config) {
-				c.Sessions.Profiles["claude"] = SessionProfile{RuntimeClass: strings.Repeat("k", MaxRuntimeClassLen+1)}
+				c.Sessions.Profiles["claude"] = SessionProfile{OpenShell: &ProfileOpenShell{RuntimeClass: strings.Repeat("k", MaxRuntimeClassLen+1)}}
 			},
-			"sessions.profiles.claude.runtime_class",
+			"sessions.profiles.claude.openshell.runtime_class",
 		},
 		"profile runtime class longest": {
 			func(c *Config) {
-				c.Sessions.Profiles["claude"] = SessionProfile{RuntimeClass: strings.Repeat("k", MaxRuntimeClassLen)}
+				c.Sessions.Profiles["claude"] = SessionProfile{OpenShell: &ProfileOpenShell{RuntimeClass: strings.Repeat("k", MaxRuntimeClassLen)}}
 			}, "",
 		},
 		"repo without profile": {
@@ -206,13 +222,13 @@ func TestValidateProfileProviders(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.DataPath = t.TempDir()
 	cfg.Sessions.Profiles = map[string]SessionProfile{
-		"claude": {Providers: []string{" my-claude", "my-github", "my-claude ", "my-github"}},
+		"claude": {OpenShell: &ProfileOpenShell{Providers: []string{" my-claude", "my-github", "my-claude ", "my-github"}}},
 		"shell":  {},
 	}
 	is.NoErr(cfg.Validate())
 	// Trimmed and deduplicated, in order.
-	is.Equal(cfg.Sessions.Profiles["claude"].Providers, []string{"my-claude", "my-github"})
-	is.Equal(cfg.Sessions.Profiles["shell"].Providers, nil)
+	is.Equal(cfg.Sessions.Profiles["claude"].OpenShellProviders(), []string{"my-claude", "my-github"})
+	is.Equal(cfg.Sessions.Profiles["shell"].OpenShellProviders(), nil)
 }
 
 func TestRepoProfile(t *testing.T) {
@@ -247,10 +263,10 @@ func TestSessionsConfigFileRoundTrip(t *testing.T) {
 	cfg.Sessions.Suspend = SessionSuspendConfig{Enabled: false, After: 2 * time.Hour}
 	cfg.Sessions.Signals.Keep = 250
 	cfg.Sessions.Profiles = map[string]SessionProfile{
-		"claude": {Image: "ghcr.io/me/agent-claude:latest", Command: `claude --model "opus"`, Providers: []string{"my-claude", "gh.work"}},
+		"claude": {Image: "ghcr.io/me/agent-claude:latest", Command: `claude --model "opus"`, OpenShell: &ProfileOpenShell{Providers: []string{"my-claude", "gh.work"}}},
 		"shell":  {},
-		"podman": {RuntimeClass: RuntimeClassKata},
-		"runc":   {RuntimeClass: RuntimeClassDefault},
+		"podman": {Runtime: RuntimeOpenShell, OpenShell: &ProfileOpenShell{RuntimeClass: RuntimeClassKata}},
+		"runc":   {OpenShell: &ProfileOpenShell{RuntimeClass: RuntimeClassDefault}},
 	}
 	cfg.Sessions.Repos = map[string]SessionRepoDefaults{"infra/*": {Profile: "claude"}}
 	is.NoErr(cfg.WriteConfig())
@@ -263,10 +279,12 @@ func TestSessionsConfigFileRoundTrip(t *testing.T) {
 	is.Equal(got.Sessions.Suspend, SessionSuspendConfig{Enabled: false, After: 2 * time.Hour, Fallback: SuspendFallbackNone})
 	is.Equal(got.Sessions.Signals.Keep, 250)
 	is.Equal(got.Sessions.Profiles["claude"], cfg.Sessions.Profiles["claude"])
-	is.Equal(got.Sessions.Profiles["shell"].Providers, nil)
-	is.Equal(got.Sessions.Profiles["shell"].RuntimeClass, "")
-	is.Equal(got.Sessions.Profiles["podman"].RuntimeClass, RuntimeClassKata)
-	is.Equal(got.Sessions.Profiles["runc"].RuntimeClass, RuntimeClassDefault)
+	is.Equal(got.Sessions.Profiles["shell"].OpenShellProviders(), nil)
+	is.Equal(got.Sessions.Profiles["shell"].OpenShellRuntimeClass(), "")
+	is.Equal(got.Sessions.Profiles["podman"].OpenShellRuntimeClass(), RuntimeClassKata)
+	is.Equal(got.Sessions.Profiles["runc"].OpenShellRuntimeClass(), RuntimeClassDefault)
+	is.Equal(got.Sessions.Profiles["podman"].Runtime, RuntimeOpenShell)
+	is.Equal(got.Sessions.Runtime, RuntimeOpenShell)
 	is.Equal(got.Sessions.Repos["infra/*"].Profile, "claude")
 }
 

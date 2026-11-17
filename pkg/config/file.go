@@ -195,7 +195,7 @@ openshell:
   # after the SSH client disconnects.
   command: {{ printf "%q" .OpenShell.Command }}
   # OpenShell providers Sundae creates on the gateway and keeps up to date,
-  # for profiles to attach (sessions.profiles.<name>.providers). Each
+  # for profiles to attach (sessions.profiles.<name>.openshell.providers). Each
   # provider's credentials are read from credentials_dir: one file per
   # credential, named for its key (an environment variable name such as
   # GITHUB_TOKEN), holding the value; e.g. a Kubernetes Secret mounted as a
@@ -301,10 +301,14 @@ openshell:
   #    binaries: [/usr/local/bin/claude]
 {{- end }}
 
-# Sessions: what runs in the OpenShell sandboxes. Each user can have several
-# named sessions per repository (session start REPO --name NAME), one sandbox
+# Sessions: what runs in the sandboxes. Each user can have several named
+# sessions per repository (session start REPO --name NAME), one sandbox
 # each. Changes take effect on restart, and only for sandboxes created after.
 sessions:
+  # Where sessions run unless their profile says otherwise: "openshell"
+  # (the OpenShell gateway, see openshell:). An existing session keeps the
+  # runtime it was created in.
+  runtime: {{ printf "%q" .Sessions.Runtime }}
   osewa:
     # Pinned osewa Linux builds (osewa-linux-amd64.gz, osewa-linux-arm64.gz)
     # uploaded to sandboxes whose image lacks the pinned osewa.
@@ -336,28 +340,36 @@ sessions:
     # At most 100000.
     keep: {{ .Sessions.Signals.Keep }}
   # Named presets for "session start --profile NAME". Empty image and
-  # command fall back to openshell.image and openshell.command. providers
-  # names OpenShell providers (declared in openshell.providers, or created
-  # on the gateway with "openshell provider create") to attach to the
-  # sandboxes of this profile's sessions only; the session's program gets their credentials as placeholders that
-  # the gateway's proxy resolves. The sandbox network policy must allow the
-  # provider's endpoints. runtime_class is the Kubernetes RuntimeClass of
-  # the profile's new sandboxes; empty uses openshell.runtime_class, and
-  # "default" uses the default runtime even when openshell.runtime_class
-  # sets one.
+  # command fall back to openshell.image and openshell.command. runtime
+  # overrides sessions.runtime for the profile's sessions. openshell holds
+  # settings for profiles whose runtime is openshell: providers names
+  # OpenShell providers (declared in openshell.providers, or created on the
+  # gateway with "openshell provider create") to attach to the sandboxes of
+  # this profile's sessions only; the session's program gets their
+  # credentials as placeholders that the gateway's proxy resolves. The
+  # sandbox network policy must allow the provider's endpoints.
+  # runtime_class is the Kubernetes RuntimeClass of the profile's new
+  # sandboxes; empty uses openshell.runtime_class, and "default" uses the
+  # default runtime even when openshell.runtime_class sets one.
 {{- if .Sessions.Profiles }}
   profiles:
 {{- range $name, $p := .Sessions.Profiles }}
     {{ printf "%q" $name }}:
       image: {{ printf "%q" $p.Image }}
       command: {{ printf "%q" $p.Command }}
-{{- if $p.RuntimeClass }}
-      runtime_class: {{ printf "%q" $p.RuntimeClass }}
+{{- if $p.Runtime }}
+      runtime: {{ printf "%q" $p.Runtime }}
 {{- end }}
-{{- if $p.Providers }}
-      providers:
-{{- range $p.Providers }}
-        - {{ printf "%q" . }}
+{{- with $p.OpenShell }}
+      openshell:
+{{- if .RuntimeClass }}
+        runtime_class: {{ printf "%q" .RuntimeClass }}
+{{- end }}
+{{- if .Providers }}
+        providers:
+{{- range .Providers }}
+          - {{ printf "%q" . }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- end }}
@@ -366,10 +378,9 @@ sessions:
   #  claude:
   #    image: ghcr.io/me/agent-claude:latest
   #    command: claude
-  #    providers: [my-claude, my-github]
-  #  podman:
-  #    image: ghcr.io/me/agent-podman:latest
-  #    runtime_class: kata-containers
+  #    openshell:
+  #      providers: [my-claude, my-github]
+  #      runtime_class: kata-containers
 {{- end }}
   # Profiles for sessions started without --profile, by repository name
   # glob. "*" does not cross "/", "**" does; case-insensitive. The most

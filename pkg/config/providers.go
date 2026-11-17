@@ -57,7 +57,7 @@ const (
 // a ConfigMap or in git.
 type OpenShellProvider struct {
 	// Name is the provider's name on the gateway, which profiles list in
-	// sessions.profiles.<name>.providers.
+	// sessions.profiles.<name>.openshell.providers.
 	Name string `env:"NAME" yaml:"name"`
 
 	// Type is the provider type: the ID of a provider profile the gateway

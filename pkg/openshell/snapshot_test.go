@@ -764,7 +764,7 @@ func TestFallbackParkKeepsRuntimeClass(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newSnapHarness(t, func(c *config.Config) {
 				c.Sessions.Suspend.Fallback = config.SuspendFallbackSnapshot
-				c.Sessions.Profiles = map[string]config.SessionProfile{"podman": {RuntimeClass: config.RuntimeClassKata}}
+				c.Sessions.Profiles = map[string]config.SessionProfile{"podman": {OpenShell: &config.ProfileOpenShell{RuntimeClass: config.RuntimeClassKata}}}
 			}, false)
 			s, err := h.mgr.Start(ctx, StartOptions{User: alice, Repo: "r", Profile: tc.profile})
 			if err != nil {
@@ -780,14 +780,14 @@ func TestFallbackParkKeepsRuntimeClass(t *testing.T) {
 			}
 
 			// The runtime settings change while the session is parked.
-			h.mgr.sessions.Profiles["podman"] = config.SessionProfile{RuntimeClass: "kata-qemu"}
+			h.mgr.sessions.Profiles["podman"] = config.SessionProfile{OpenShell: &config.ProfileOpenShell{RuntimeClass: "kata-qemu"}}
 			h.mgr.runtimeClass = "gvisor"
 			freshVolume(h, s.Sandbox)
 			if _, err := h.mgr.Resume(ctx, StartOptions{User: alice, Repo: "r"}); err != nil {
 				t.Fatal(err)
 			}
 			sb, _ := h.fc.Sandboxes().Get(ctx, "default", s.Sandbox)
-			if got := SandboxRuntimeClass(sb); got != tc.want {
+			if got := SandboxRuntimeClass(fromSDK(sb)); got != tc.want {
 				t.Fatalf("runtime class = %q, want %q", got, tc.want)
 			}
 		})
@@ -870,7 +870,7 @@ func TestAutoParkFallback(t *testing.T) {
 	}
 	h.lifecycles()
 	sb, _ := h.fc.Sandboxes().Get(ctx, "default", s.Sandbox)
-	h.mon.reconcile([]*Sandbox{sb})
+	h.mon.reconcile([]*Sandbox{fromSDK(sb)})
 	h.mon.mu.Lock()
 	e := h.mon.entries[s.Sandbox]
 	e.known = true
@@ -963,7 +963,7 @@ func TestSnapshotExecsFitGatewayLimits(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := append([]string{"sh", "-c", snapshotUploadScript, snapshotUploadName, snapshotSpoolDir + "/snapshot.abc123", p.URL}, p.HeaderLines()...)
-	if err := gatewayLimits(args, ExecOptions{Env: osewaEnv()}); err != nil {
+	if err := gatewayLimits(args, toSDKExec(ExecOptions{Env: osewaEnv()})); err != nil {
 		t.Fatal(err)
 	}
 	if len(p.URL) > 8<<10 {

@@ -14,11 +14,11 @@ import (
 
 	"charm.land/log/v2"
 	"charm.land/ssh"
-	v1 "github.com/NVIDIA/OpenShell/sdk/go/openshell/v1"
 	"github.com/anmitsu/go-shlex"
 	"github.com/danielboothcloud/sundae/pkg/config"
 	"github.com/danielboothcloud/sundae/pkg/events"
 	"github.com/danielboothcloud/sundae/pkg/proto"
+	sbx "github.com/danielboothcloud/sundae/pkg/sandbox"
 )
 
 // SandboxRoot is the directory repositories are cloned into. It is also the
@@ -42,12 +42,15 @@ type TokenStore interface {
 // Manager drives the session lifecycle. It holds no session state; the
 // gateway and the sandboxes are the source of truth.
 type Manager struct {
-	client  Client
-	tokens  TokenStore
+	client Client
+	tokens TokenStore
+	// cfg is the configuration: the runtime of each profile, and each
+	// runtime's defaults.
+	cfg     *config.Config
 	image   string
 	command string
 	// runtimeClass is openshell.runtime_class: the RuntimeClass of new
-	// sandboxes whose profile sets none.
+	// OpenShell sandboxes whose profile sets none.
 	runtimeClass string
 	sessions     config.SessionsConfig
 	cloneURL     string
@@ -68,11 +71,6 @@ type Manager struct {
 	providerSync *ProviderReconciler
 	// snaps is the S3 snapshot store; nil when snapshots are off.
 	snaps *snapshotStore
-	// policy is the policy of the sandboxes the Manager creates; nil with
-	// openshell.sandbox_policy: image. policyErr is why it could not be
-	// built, returned when a sandbox is to be created.
-	policy    *SandboxPolicy
-	policyErr error
 	// logger reports what does not fail a command.
 	logger *log.Logger
 }
@@ -106,6 +104,7 @@ func NewManager(client Client, tokens TokenStore, cfg *config.Config, opts ...Ma
 	m := &Manager{
 		client:         client,
 		tokens:         tokens,
+		cfg:            cfg,
 		image:          cfg.OpenShell.Image,
 		runtimeClass:   cfg.OpenShell.RuntimeClass,
 		command:        cfg.OpenShell.Command,
@@ -119,7 +118,6 @@ func NewManager(client Client, tokens TokenStore, cfg *config.Config, opts ...Ma
 		snaps:          newSnapshotStore(cfg),
 		logger:         log.Default().WithPrefix("sessions"),
 	}
-	m.policy, m.policyErr = BuildSandboxPolicy(cfg)
 	if m.osewaBinaryDir == "" {
 		m.osewaBinaryDir = config.DefaultOsewaBinaryDir
 	}
@@ -216,6 +214,8 @@ type Session struct {
 	Sandbox string
 	// Profile is the profile the session was created from; empty for none.
 	Profile string
+	// Runtime is the runtime the session's sandbox runs in.
+	Runtime string
 	// Providers are the OpenShell providers the session has: those its
 	// profile lists, or, for a profile no longer configured, those
 	// attached to its sandbox. A program this call starts gets their
@@ -265,6 +265,8 @@ type Info struct {
 	Name string
 	// Profile is the profile the session was created from; empty for none.
 	Profile string
+	// Runtime is the runtime the session's sandbox runs in.
+	Runtime string
 	// Providers are the OpenShell providers attached to the sandbox, as
 	// the gateway lists them; nil for a session parked to its snapshot.
 	Providers []string
@@ -388,7 +390,7 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 	if existing != nil {
 		repos = mergeRepos(m.monitor.SessionRepos(existing), wanted, opts.RemoveRepos)
 	}
-	unparked := existing != nil && isParkedPhase(existing.Status.Phase)
+	unparked := existing != nil && isParkedPhase(existing.Phase)
 	var parked *ParkedSnapshot
 	if m.snaps != nil && IsNotFound(getErr) {
 		parked, err = m.snaps.readMarker(ctx, opts.User.ID(), sandbox)
@@ -423,7 +425,7 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 	// in openshell.providers whose last sync failed: its sandbox would get
 	// the provider's credentials as they were, or none. An attach only
 	// warns: the session keeps what the gateway has.
-	checkProfile, checkProviders := profile, p.Providers
+	checkProfile, checkProviders := profile, p.OpenShellProviders()
 	if existing != nil {
 		checkProfile = existing.Annotations[AnnotationProfile]
 		checkProviders, _ = m.profileProviders(checkProfile)
@@ -444,7 +446,7 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 		changes ProviderChanges
 		synced  bool
 	)
-	if existing != nil && owns(existing, ownerLabels(opts.User)) {
+	if existing != nil && owns(existing.Labels, ownerLabels(opts.User)) {
 		if _, ok := managedSandbox(existing); ok {
 			if changes, err = m.syncProviders(ctx, existing, name, progress); err != nil {
 				return nil, err
@@ -469,36 +471,44 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 			image = m.image
 		}
 		// The runtime follows the image: a session parked to its snapshot
-		// is created again with the runtime it had, else the profile's,
-		// else openshell.runtime_class.
-		var parkedRuntime string
+		// is created again in the runtime, and with the RuntimeClass, it
+		// had; else the profile's, else the defaults.
+		runtime := m.cfg.ProfileRuntime(profile)
+		var parkedRuntimeClass string
 		if parked != nil {
-			parkedRuntime = parked.RuntimeClass
+			runtime = parked.SessionRuntime()
+			parkedRuntimeClass = parked.RuntimeClass
 		}
-		runtimeClass := config.ResolveRuntimeClass(parkedRuntime, p.RuntimeClass, m.runtimeClass)
-		annotations := sessionAnnotations(opts.User.Username(), repos, name, profile, p.Providers)
+		var (
+			runtimeClass string
+			providers    []string
+		)
+		if runtime == config.RuntimeOpenShell {
+			runtimeClass = config.ResolveRuntimeClass(parkedRuntimeClass, p.OpenShellRuntimeClass(), m.runtimeClass)
+			providers = p.OpenShellProviders()
+		}
+		annotations := sessionAnnotations(opts.User.Username(), repos, name, profile, providers)
+		annotations[AnnotationRuntime] = runtime
 		if runtimeClass != "" {
 			annotations[AnnotationRuntimeClass] = runtimeClass
 		}
 
-		if m.policyErr != nil {
-			return nil, m.policyErr
-		}
 		fmt.Fprintf(progress, "Starting sandbox %s...\n", sandbox) //nolint:errcheck
 		sb, created, err = m.client.EnsureSandbox(ctx, sandbox, SandboxRequest{
+			Runtime:      runtime,
+			Profile:      profile,
 			Image:        image,
 			RuntimeClass: runtimeClass,
 			Labels:       ownerLabels(opts.User),
 			Annotations:  annotations,
-			Providers:    p.Providers,
-			Policy:       m.policy,
+			Providers:    providers,
 		})
 		var missing *MissingProviderError
 		if errors.As(err, &missing) {
 			return nil, m.missingProviderError(profile, missing)
 		}
 		if err != nil {
-			m.logger.Warn("cannot start sandbox", "sandbox", sandbox, "user", opts.User.Username(), "image", image, "runtime_class", runtimeClass, "err", err)
+			m.logger.Warn("cannot start sandbox", "sandbox", sandbox, "user", opts.User.Username(), "runtime", runtime, "image", image, "runtime_class", runtimeClass, "err", err)
 			return nil, err
 		}
 	} else {
@@ -546,6 +556,7 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 		Name:            name,
 		Sandbox:         sandbox,
 		Profile:         profile,
+		Runtime:         SandboxRuntime(sb),
 		Providers:       m.sessionProviders(profile, sb),
 		ProviderChanges: changes,
 		Created:         created,
@@ -731,7 +742,7 @@ func (m *Manager) profileProviders(profile string) ([]string, bool) {
 		return nil, true
 	}
 	p, ok := m.sessions.Profiles[profile]
-	return p.Providers, ok
+	return p.OpenShellProviders(), ok
 }
 
 // sessionProviders returns the providers of a session of profile in sb:
@@ -740,7 +751,7 @@ func (m *Manager) sessionProviders(profile string, sb *Sandbox) []string {
 	if want, ok := m.profileProviders(profile); ok {
 		return want
 	}
-	return sb.Spec.Providers
+	return sb.Providers
 }
 
 // syncProviders makes the OpenShell providers attached to an existing
@@ -910,18 +921,18 @@ func (m *Manager) ParkSession(ctx context.Context, user proto.User, name string)
 		return false, false, fmt.Errorf("%w: %q", ErrNoSession, name)
 	case err != nil:
 		return false, false, fmt.Errorf("openshell: get sandbox %q: %w", sandbox, err)
-	case !owns(sb, ownerLabels(user)):
+	case !owns(sb.Labels, ownerLabels(user)):
 		return false, false, ErrNotOwned
 	}
 	if _, ok := managedSandbox(sb); !ok {
 		return false, false, fmt.Errorf("openshell: sandbox %q was not created by Sundae; not parking it", sandbox)
 	}
-	switch sb.Status.Phase {
-	case v1.SandboxReady:
-	case v1.SandboxSuspended, v1.SandboxSuspending:
+	switch sb.Phase {
+	case sbx.Ready:
+	case sbx.Suspended, sbx.Suspending:
 		return false, false, nil
 	default:
-		return false, false, fmt.Errorf("session %s is %s; only a running session can be parked", name, sb.Status.Phase)
+		return false, false, fmt.Errorf("session %s is %s; only a running session can be parked", name, sb.Phase)
 	}
 
 	snapshot, err = m.monitor.ParkSession(ctx, m.client, sandbox)
@@ -1093,7 +1104,7 @@ func (m *Manager) EndSession(ctx context.Context, user proto.User, name string, 
 		existed = false
 	case err != nil:
 		return failed("end", fmt.Errorf("openshell: get sandbox %q: %w", sandbox, err))
-	case !owns(sb, ownerLabels(user)):
+	case !owns(sb.Labels, ownerLabels(user)):
 		return failed("end", ErrNotOwned)
 	default:
 		sess = events.NewSession(user.Username(), name, sandbox, m.monitor.SessionRepos(sb))
@@ -1167,15 +1178,15 @@ func (m *Manager) EndSession(ctx context.Context, user proto.User, name string, 
 // it first when it is parked or stopped: only a running sandbox can be
 // archived.
 func (m *Manager) snapshotForEnd(ctx context.Context, user proto.User, sess events.Session, sb *Sandbox, progress io.Writer) (*SnapshotInfo, error) {
-	switch sb.Status.Phase {
-	case v1.SandboxReady:
-	case v1.SandboxSuspended, v1.SandboxSuspending, v1.SandboxStopped, v1.SandboxProvisioning, v1.SandboxStarting:
+	switch sb.Phase {
+	case sbx.Ready:
+	case sbx.Suspended, sbx.Suspending, sbx.Stopped, sbx.Provisioning, sbx.Starting:
 		fmt.Fprintf(progress, "Resuming sandbox %s to snapshot it...\n", sess.Sandbox) //nolint:errcheck
 		if _, err := m.client.ResumeSandbox(ctx, sess.Sandbox, ownerLabels(user)); err != nil {
 			return nil, err
 		}
 	default:
-		return nil, fmt.Errorf("the sandbox is %s", sb.Status.Phase)
+		return nil, fmt.Errorf("the sandbox is %s", sb.Phase)
 	}
 	return m.snaps.take(ctx, m.client, user.ID(), sess, progress)
 }
@@ -1204,9 +1215,10 @@ func (m *Manager) List(ctx context.Context, user proto.User) ([]Info, error) {
 			Repos:     repos,
 			Name:      name,
 			Profile:   sb.Annotations[AnnotationProfile],
-			Providers: slices.Clone(sb.Spec.Providers),
+			Runtime:   SandboxRuntime(sb),
+			Providers: slices.Clone(sb.Providers),
 			Sandbox:   sb.Name,
-			Phase:     string(sb.Status.Phase),
+			Phase:     string(sb.Phase),
 		})
 	}
 	if m.snaps != nil {
@@ -1240,6 +1252,7 @@ func (m *Manager) withParkedSnapshots(ctx context.Context, user proto.User, sbs 
 			Repos:    p.AllRepos(),
 			Name:     p.Session,
 			Profile:  p.Profile,
+			Runtime:  p.SessionRuntime(),
 			Sandbox:  p.Sandbox,
 			Phase:    PhaseSnapshot,
 			Snapshot: &p,
@@ -1431,7 +1444,7 @@ func Bridge(ctx context.Context, term Terminal, is InteractiveSession) (int, err
 	go func() {
 		select {
 		case <-ctx.Done():
-			_ = v1.CancelInteractive(is)
+			_ = sbx.Cancel(is)
 		case <-done:
 		}
 	}()
@@ -1439,7 +1452,7 @@ func Bridge(ctx context.Context, term Terminal, is InteractiveSession) (int, err
 	go func() {
 		_, _ = io.Copy(is, term)
 		// The client closed its input; let the remote side see EOF.
-		_ = v1.CloseInteractiveInput(is)
+		_ = sbx.CloseInput(is)
 	}()
 
 	outDone := make(chan struct{})

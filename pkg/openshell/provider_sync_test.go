@@ -226,8 +226,8 @@ func newSyncHarness(t *testing.T, prune bool, declared ...config.OpenShellProvid
 	cfg.OpenShell.Providers = declared
 	cfg.OpenShell.PruneProviders = prune
 	cfg.Sessions.Profiles = map[string]config.SessionProfile{
-		"agent": {Providers: []string{"my-github", "manual"}},
-		"other": {Providers: []string{"my-github"}},
+		"agent": {OpenShell: &config.ProfileOpenShell{Providers: []string{"my-github", "manual"}}},
+		"other": {OpenShell: &config.ProfileOpenShell{Providers: []string{"my-github"}}},
 	}
 	store := newProviderStore(t)
 	bus := events.New()

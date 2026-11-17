@@ -48,6 +48,11 @@ const (
 // Profiles and repos are maps and can only be set in the config file; there
 // is no environment form for them.
 type SessionsConfig struct {
+	// Runtime is the runtime sessions run in (RuntimeOpenShell,
+	// RuntimePod or RuntimeDocker) unless their profile sets one. Empty
+	// means RuntimeOpenShell.
+	Runtime string `env:"RUNTIME" yaml:"runtime"`
+
 	// Osewa configures osewa, which keeps each session's program running
 	// after the SSH client disconnects.
 	Osewa OsewaConfig `envPrefix:"OSEWA_" yaml:"osewa"`
@@ -66,8 +71,8 @@ type SessionsConfig struct {
 	Signals SessionSignalsConfig `envPrefix:"SIGNALS_" yaml:"signals"`
 
 	// Profiles are named presets a session starts from (session start
-	// --profile NAME). A profile's empty fields fall back to openshell.image
-	// and openshell.command.
+	// --profile NAME). A profile's empty fields fall back to the runtime's
+	// defaults: openshell.image and openshell.command.
 	Profiles map[string]SessionProfile `yaml:"profiles"`
 
 	// Repos maps repository name globs to defaults for sessions started
@@ -156,6 +161,18 @@ type SessionProfile struct {
 	// Empty uses openshell.command.
 	Command string `yaml:"command"`
 
+	// Runtime is the runtime of this profile's sessions. Empty uses
+	// sessions.runtime. An existing session keeps the runtime it was
+	// created in.
+	Runtime string `yaml:"runtime"`
+
+	// OpenShell holds the profile's OpenShell settings; only a profile
+	// whose runtime is RuntimeOpenShell may set them.
+	OpenShell *ProfileOpenShell `yaml:"openshell"`
+}
+
+// ProfileOpenShell is a profile's OpenShell settings.
+type ProfileOpenShell struct {
 	// Providers names OpenShell providers to attach to the sandbox of
 	// every session of this profile. The providers are declared in
 	// openshell.providers, which Sundae creates on the gateway, or created
@@ -171,6 +188,22 @@ type SessionProfile struct {
 	// runtime even when openshell.runtime_class sets one. An existing
 	// sandbox keeps the runtime it was created with.
 	RuntimeClass string `yaml:"runtime_class"`
+}
+
+// OpenShellProviders returns the OpenShell providers the profile lists.
+func (p SessionProfile) OpenShellProviders() []string {
+	if p.OpenShell == nil {
+		return nil
+	}
+	return p.OpenShell.Providers
+}
+
+// OpenShellRuntimeClass returns the profile's openshell.runtime_class.
+func (p SessionProfile) OpenShellRuntimeClass() string {
+	if p.OpenShell == nil {
+		return ""
+	}
+	return p.OpenShell.RuntimeClass
 }
 
 // OpenShell's limits on provider names and attachments (openshell-server
@@ -318,6 +351,14 @@ func (c *Config) validateSessions() error {
 		fail("signals.keep %d must be between 1 and %d", sc.Signals.Keep, MaxSignalsKeep)
 	}
 
+	sc.Runtime = strings.ToLower(strings.TrimSpace(sc.Runtime))
+	if sc.Runtime == "" {
+		sc.Runtime = RuntimeOpenShell
+	}
+	if problem := runtimeProblem(sc.Runtime); problem != "" {
+		fail("runtime %q %s", sc.Runtime, problem)
+	}
+
 	for _, name := range sortedKeys(sc.Profiles) {
 		p := sc.Profiles[name]
 		key := fmt.Sprintf("profiles.%s", name)
@@ -326,29 +367,27 @@ func (c *Config) validateSessions() error {
 		}
 		p.Image = strings.TrimSpace(p.Image)
 		p.Command = strings.TrimSpace(p.Command)
-		p.RuntimeClass = strings.TrimSpace(p.RuntimeClass)
-		if !validRuntimeClass(p.RuntimeClass) {
-			fail("%s.runtime_class %q %s", key, p.RuntimeClass, runtimeClassProblem)
-		}
 		if p.Command != "" {
 			if args, err := shlex.Split(p.Command, true); err != nil || len(args) == 0 {
 				fail("%s.command %q is not a valid command line", key, p.Command)
 			}
 		}
-		var providers []string
-		for i, prov := range p.Providers {
-			prov = strings.TrimSpace(prov)
-			switch {
-			case !validProviderName(prov):
-				fail("%s.providers[%d] %q is not a valid OpenShell provider name: 1 to %d bytes without spaces, commas or control characters", key, i, prov, MaxProviderNameLen)
-			case !slices.Contains(providers, prov):
-				providers = append(providers, prov)
+		p.Runtime = strings.ToLower(strings.TrimSpace(p.Runtime))
+		if p.Runtime != "" {
+			if problem := runtimeProblem(p.Runtime); problem != "" {
+				fail("%s.runtime %q %s", key, p.Runtime, problem)
 			}
 		}
-		if len(providers) > MaxProviders {
-			fail("%s.providers lists %d providers; OpenShell attaches at most %d to a sandbox", key, len(providers), MaxProviders)
+		runtime := p.Runtime
+		if runtime == "" {
+			runtime = sc.Runtime
 		}
-		p.Providers = providers
+		if p.OpenShell != nil {
+			if runtime != RuntimeOpenShell {
+				fail("%s.openshell is set, but the profile's runtime is %s: OpenShell settings (providers, runtime_class) apply to %s profiles only; remove them, or set sessions.%s.runtime: %s", key, runtime, RuntimeOpenShell, key, RuntimeOpenShell)
+			}
+			p.OpenShell = validateProfileOpenShell(*p.OpenShell, key+".openshell", fail)
+		}
 		sc.Profiles[name] = p
 	}
 
@@ -373,6 +412,30 @@ func (c *Config) validateSessions() error {
 	return errors.Join(errs...)
 }
 
+// validateProfileOpenShell validates a profile's openshell settings,
+// reporting each problem with fail under key, and returns them cleaned up.
+func validateProfileOpenShell(o ProfileOpenShell, key string, fail func(string, ...any)) *ProfileOpenShell {
+	o.RuntimeClass = strings.TrimSpace(o.RuntimeClass)
+	if !validRuntimeClass(o.RuntimeClass) {
+		fail("%s.runtime_class %q %s", key, o.RuntimeClass, runtimeClassProblem)
+	}
+	var providers []string
+	for i, prov := range o.Providers {
+		prov = strings.TrimSpace(prov)
+		switch {
+		case !validProviderName(prov):
+			fail("%s.providers[%d] %q is not a valid OpenShell provider name: 1 to %d bytes without spaces, commas or control characters", key, i, prov, MaxProviderNameLen)
+		case !slices.Contains(providers, prov):
+			providers = append(providers, prov)
+		}
+	}
+	if len(providers) > MaxProviders {
+		fail("%s.providers lists %d providers; OpenShell attaches at most %d to a sandbox", key, len(providers), MaxProviders)
+	}
+	o.Providers = providers
+	return &o
+}
+
 // sortedKeys returns the keys of m in order, so problems are reported in a
 // stable order.
 func sortedKeys[V any](m map[string]V) []string {
@@ -389,6 +452,7 @@ func sortedKeys[V any](m map[string]V) []string {
 // environment form; hook subprocesses read them from the config file.
 func (c *Config) sessionsEnviron() []string {
 	return []string{
+		"SUNDAE_SESSIONS_RUNTIME=" + c.Sessions.Runtime,
 		"SUNDAE_SESSIONS_OSEWA_BINARY_DIR=" + c.Sessions.Osewa.BinaryDir,
 		fmt.Sprintf("SUNDAE_SESSIONS_OSEWA_PORT=%d", c.Sessions.Osewa.Port),
 		"SUNDAE_SESSIONS_STATUS_POLL_INTERVAL=" + c.Sessions.Status.PollInterval.String(),

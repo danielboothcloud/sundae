@@ -282,9 +282,9 @@ config:
     runtime_class: ""                 # all sessions; empty: the default runtime
   sessions:
     profiles:
-      podman:
-        image: <registry>/agent-podman:<tag>
-        runtime_class: kata-containers  # this profile only
+      isolated:
+        openshell:
+          runtime_class: kata-containers  # this profile only
 ```
 
 Sundae sends the name in the typed `runtime_class_name` field of the
@@ -292,6 +292,10 @@ sandbox template. The OpenShell gateway's `allow_driver_config` can stay
 `false`. This chart does not install a runtime: install Kata on the nodes
 and create the `RuntimeClass` yourself. An existing sandbox keeps its
 runtime. See the top-level README, "Sandbox runtimes".
+
+Kata does not let podman run in an OpenShell sandbox: OpenShell's in-sandbox
+seccomp filter blocks `mount`, `setns`, `clone3` and new user namespaces,
+and sets `no_new_privs`, under any runtime, with no setting to relax it.
 
 ### A gateway installed separately
 
@@ -571,8 +575,9 @@ Not checked, because it needs an image build or a live cluster:
   typed `runtime_class_name` as the sandbox pod's `runtimeClassName`; this
   was checked only against the SDK's fake gateway. Not known: whether the
   OpenShell sandbox passes its Landlock, seccomp and task-memory probes
-  under Kata, and whether Kata alone lets podman run in a sandbox (the
-  OpenShell sandbox drops all capabilities and sets `NoNewPrivs`).
+  under Kata. Kata alone does not let podman run in an OpenShell sandbox:
+  the OpenShell 0.1.8 seccomp filter blocks `mount`, `setns`, `clone3` and
+  new user namespaces, and sets `NoNewPrivs`, under any runtime.
 - The jj binary in the Sundae image (the Changes tab of jj repositories):
   the Containerfile's new jj stage has not been built. The tab was tested
   with jj 0.47.1 on macOS against local repositories. Its cache lives on

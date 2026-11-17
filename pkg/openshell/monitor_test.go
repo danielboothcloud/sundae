@@ -60,10 +60,10 @@ func newMonitorClient(t *testing.T) *monitorClient {
 }
 
 func (c *monitorClient) Run(ctx context.Context, sandbox string, command []string, opts ExecOptions) (*ExecResult, error) {
-	if err := gatewayLimits(command, opts); err != nil {
+	if err := gatewayLimits(command, toSDKExec(opts)); err != nil {
 		return nil, err
 	}
-	call := execCall{sandbox, command, opts}
+	call := execCall{sandbox, command, toSDKExec(opts)}
 	if call.script() != osewaStatusName || opts.Env["HOME"] != SandboxRoot || opts.Env["OSEWA_HOME"] != SandboxRoot {
 		return nil, fmt.Errorf("unexpected exec %q %v", command, opts.Env)
 	}

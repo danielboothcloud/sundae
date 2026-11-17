@@ -14,6 +14,7 @@ import (
 	"github.com/danielboothcloud/sundae/pkg/events"
 	"github.com/danielboothcloud/sundae/pkg/openshell"
 	"github.com/danielboothcloud/sundae/pkg/proto"
+	sbx "github.com/danielboothcloud/sundae/pkg/sandbox"
 	"github.com/danielboothcloud/sundae/pkg/sshutils"
 	"github.com/matryer/is"
 )
@@ -104,7 +105,7 @@ func TestSessionListStatus(t *testing.T) {
 	is.True(strings.Contains(rows[0], "…"))
 
 	// Listing never resumes.
-	is.Equal(fc.phase(sb("infra", "review")), types.SandboxSuspended)
+	is.Equal(fc.phase(sb("infra", "review")), sbx.Suspended)
 	is.Equal(fc.resumes, 0)
 
 	stdout, _, err = runSessionCmd(t, ctx, "ls", "--json")
@@ -159,7 +160,7 @@ func TestSessionParkAndResumeCommands(t *testing.T) {
 	_, stderr, err := runSessionCmd(t, ctx, "park", "two")
 	is.NoErr(err)
 	is.True(strings.Contains(stderr, "Session two parked"))
-	is.Equal(fc.phase(sandbox), types.SandboxSuspended)
+	is.Equal(fc.phase(sandbox), sbx.Suspended)
 	_, stderr, err = runSessionCmd(t, ctx, "park", "two")
 	is.NoErr(err)
 	is.True(strings.Contains(stderr, "Session two is already parked"))
@@ -168,7 +169,7 @@ func TestSessionParkAndResumeCommands(t *testing.T) {
 	is.NoErr(err)
 	is.True(strings.Contains(stderr, "Session two was parked; resuming it"))
 	is.True(strings.Contains(stderr, "Session two (r) is running in sandbox "+sandbox))
-	is.Equal(fc.phase(sandbox), types.SandboxReady)
+	is.Equal(fc.phase(sandbox), sbx.Ready)
 	is.Equal(fc.resumes, 1)
 	is.Equal(len(fc.interactive), 0) // resume never attaches
 
@@ -294,7 +295,7 @@ func TestSessionBridgeCounting(t *testing.T) {
 func TestSessionListProviders(t *testing.T) {
 	is := is.New(t)
 	ctx, be, user, _ := newSessionTestContext(t)
-	config.FromContext(ctx).Sessions.Profiles["claude"] = config.SessionProfile{Command: "claude", Providers: []string{"my-claude", "my-github"}}
+	config.FromContext(ctx).Sessions.Profiles["claude"] = config.SessionProfile{Command: "claude", OpenShell: &config.ProfileOpenShell{Providers: []string{"my-claude", "my-github"}}}
 	_, err := be.CreateRepository(ctx, "r", user, proto.RepositoryOptions{})
 	is.NoErr(err)
 	noPty := context.WithValue(ctx, sshutils.ContextKeySession, &fakeSSHSession{noPty: true})

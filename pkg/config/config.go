@@ -516,6 +516,9 @@ func describeKeyError(msg string) string {
 		// the boolean true.
 		return fmt.Sprintf("line %s: unknown key %s (an unquoted `on:` key was read as true by a YAML 1.1 tool; quote it: \"on\":)", m[1], key)
 	}
+	if to, ok := movedKeys[key]; ok {
+		return fmt.Sprintf("line %s: %s has moved to %s", m[1], key, to)
+	}
 	return fmt.Sprintf("line %s: unknown key %s", m[1], key)
 }
 

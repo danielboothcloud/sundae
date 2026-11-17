@@ -2,6 +2,7 @@ package openshell
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -209,20 +210,30 @@ func TestEnsureSandboxSendsPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	c.policy = policy
 	labels := map[string]string{LabelUserID: "1"}
 
-	sb, created, err := c.EnsureSandbox(ctx, "sd-a", SandboxRequest{Image: "img", Labels: labels, Policy: policy})
-	if err != nil || !created {
+	if _, created, err := c.EnsureSandbox(ctx, "sd-a", SandboxRequest{Image: "img", Labels: labels}); err != nil || !created {
 		t.Fatalf("created=%v err=%v", created, err)
 	}
-	if !reflect.DeepEqual(sb.Spec.Policy, policy) {
-		t.Fatalf("spec policy = %+v, want %+v", sb.Spec.Policy, policy)
+	sb, err := fc.Sandboxes().Get(ctx, "default", "sd-a")
+	if err != nil || !reflect.DeepEqual(sb.Spec.Policy, policy) {
+		t.Fatalf("spec policy = %+v, want %+v (err %v)", sb.Spec.Policy, policy, err)
 	}
 
 	// No policy: the spec has none, so the image's or OpenShell's applies.
-	sb, _, err = c.EnsureSandbox(ctx, "sd-b", SandboxRequest{Image: "img", Labels: labels})
-	if err != nil || sb.Spec.Policy != nil {
+	c.policy = nil
+	if _, _, err := c.EnsureSandbox(ctx, "sd-b", SandboxRequest{Image: "img", Labels: labels}); err != nil {
+		t.Fatal(err)
+	}
+	if sb, err = fc.Sandboxes().Get(ctx, "default", "sd-b"); err != nil || sb.Spec.Policy != nil {
 		t.Fatalf("no policy: spec policy = %+v, err = %v", sb.Spec.Policy, err)
+	}
+
+	// A policy that could not be built fails the start.
+	c.policyErr = errors.New("bad policy")
+	if _, _, err := c.EnsureSandbox(ctx, "sd-c", SandboxRequest{Image: "img", Labels: labels}); err == nil || err.Error() != "bad policy" {
+		t.Fatalf("policy error: err = %v", err)
 	}
 }
 

@@ -135,7 +135,7 @@ func NewServer(ctx context.Context) (*Server, error) {
 	var monitor *openshell.Monitor
 	if cfg.OpenShell.Enabled {
 		monitor = openshell.NewMonitor(func() (openshell.Client, error) {
-			return openshell.New(cfg.OpenShell)
+			return openshell.NewClient(cfg)
 		}, cfg, openshell.WithMonitorEvents(bus), openshell.WithMonitorLogger(log.FromContext(ctx)))
 		ctx = openshell.ContextWithMonitor(ctx, monitor)
 	}
