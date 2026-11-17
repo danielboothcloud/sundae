@@ -15,3 +15,9 @@ sundae_ed25519*
 # (Chart.lock pins them).
 /helm/sundae/charts/
 !todo.txt
+
+# BMad's scripts and config, which the .agents/skills need; the global
+# gitignore ignores _bmad. Per-user answers stay local, like
+# _bmad/custom/*.user.toml; _bmad/render/ has its own rule.
+!_bmad/
+/_bmad/config.user.toml
