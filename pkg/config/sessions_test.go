@@ -135,6 +135,35 @@ func TestValidateSessions(t *testing.T) {
 			},
 			"sessions.profiles.claude.providers lists 33 providers; OpenShell attaches at most 32 to a sandbox",
 		},
+		"profile runtime class": {
+			func(c *Config) { c.Sessions.Profiles["claude"] = SessionProfile{RuntimeClass: " kata-qemu.v2 "} }, "",
+		},
+		"profile runtime class default": {
+			func(c *Config) { c.Sessions.Profiles["claude"] = SessionProfile{RuntimeClass: RuntimeClassDefault} }, "",
+		},
+		"profile runtime class upper case": {
+			func(c *Config) { c.Sessions.Profiles["claude"] = SessionProfile{RuntimeClass: "Kata"} },
+			`sessions.profiles.claude.runtime_class "Kata" is not a Kubernetes RuntimeClass name`,
+		},
+		"profile runtime class underscore": {
+			func(c *Config) { c.Sessions.Profiles["claude"] = SessionProfile{RuntimeClass: "kata_qemu"} },
+			`sessions.profiles.claude.runtime_class "kata_qemu"`,
+		},
+		"profile runtime class trailing hyphen": {
+			func(c *Config) { c.Sessions.Profiles["claude"] = SessionProfile{RuntimeClass: "kata-"} },
+			`sessions.profiles.claude.runtime_class "kata-"`,
+		},
+		"profile runtime class too long": {
+			func(c *Config) {
+				c.Sessions.Profiles["claude"] = SessionProfile{RuntimeClass: strings.Repeat("k", MaxRuntimeClassLen+1)}
+			},
+			"sessions.profiles.claude.runtime_class",
+		},
+		"profile runtime class longest": {
+			func(c *Config) {
+				c.Sessions.Profiles["claude"] = SessionProfile{RuntimeClass: strings.Repeat("k", MaxRuntimeClassLen)}
+			}, "",
+		},
 		"repo without profile": {
 			func(c *Config) { c.Sessions.Repos["x/*"] = SessionRepoDefaults{} },
 			`sessions.repos["x/*"].profile is required`,
@@ -220,6 +249,8 @@ func TestSessionsConfigFileRoundTrip(t *testing.T) {
 	cfg.Sessions.Profiles = map[string]SessionProfile{
 		"claude": {Image: "ghcr.io/me/agent-claude:latest", Command: `claude --model "opus"`, Providers: []string{"my-claude", "gh.work"}},
 		"shell":  {},
+		"podman": {RuntimeClass: RuntimeClassKata},
+		"runc":   {RuntimeClass: RuntimeClassDefault},
 	}
 	cfg.Sessions.Repos = map[string]SessionRepoDefaults{"infra/*": {Profile: "claude"}}
 	is.NoErr(cfg.WriteConfig())
@@ -233,6 +264,9 @@ func TestSessionsConfigFileRoundTrip(t *testing.T) {
 	is.Equal(got.Sessions.Signals.Keep, 250)
 	is.Equal(got.Sessions.Profiles["claude"], cfg.Sessions.Profiles["claude"])
 	is.Equal(got.Sessions.Profiles["shell"].Providers, nil)
+	is.Equal(got.Sessions.Profiles["shell"].RuntimeClass, "")
+	is.Equal(got.Sessions.Profiles["podman"].RuntimeClass, RuntimeClassKata)
+	is.Equal(got.Sessions.Profiles["runc"].RuntimeClass, RuntimeClassDefault)
 	is.Equal(got.Sessions.Repos["infra/*"].Profile, "claude")
 }
 

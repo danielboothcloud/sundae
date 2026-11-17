@@ -179,6 +179,14 @@ config:
     # enabled. Build one from deploy/sandbox/Containerfile, e.g.
     # <registry>/sundae-sandbox:<tag>.
     image: ""
+    # The Kubernetes RuntimeClass of new sandboxes when the session's profile
+    # sets none, e.g. kata-containers for Kata Containers. Empty sends none:
+    # the OpenShell driver's default_runtime_class_name applies, else the
+    # cluster's default runtime (runc). The RuntimeClass must exist in the
+    # cluster. OpenShell sets it on the sandbox pod only; it needs no
+    # allow_driver_config in the gateway. An existing sandbox keeps its
+    # runtime. See the top-level README, "Sandbox runtimes".
+    runtime_class: ""
     # Path to a file holding the gateway bearer token. Leave empty to have the
     # chart point it at the mounted openshell.gatewayToken secret, if any. Do
     # not set `token` here: the chart refuses it.
@@ -299,12 +307,17 @@ config:
     # proxy resolves. The provider profiles' binaries and endpoints, or
     # config.openshell.network_policies, must allow the requests. See the
     # top-level README,
-    # "Providers".
+    # "Providers". `runtime_class` is the Kubernetes RuntimeClass of this
+    # profile's new sandboxes; empty uses config.openshell.runtime_class,
+    # and "default" uses the default runtime.
     profiles: {}
     #  claude:
     #    image: ghcr.io/me/agent-claude:latest
     #    command: claude
     #    providers: [my-claude, my-github]
+    #  podman:
+    #    image: ghcr.io/me/agent-podman:latest
+    #    runtime_class: kata-containers
     # The profile for sessions started without --profile, by repository name
     # glob ("*" does not cross "/", "**" does; the most specific match wins).
     repos: {}

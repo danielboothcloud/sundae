@@ -262,6 +262,7 @@ func TestParseOpenShellEnv(t *testing.T) {
 		"SUNDAE_OPENSHELL_GATEWAY_ADDRESS": "https://openshell.example:8443",
 		"SUNDAE_OPENSHELL_WORKSPACE":       "agents",
 		"SUNDAE_OPENSHELL_IMAGE":           "ghcr.io/example/sandbox:1",
+		"SUNDAE_OPENSHELL_RUNTIME_CLASS":   "kata-containers",
 		"SUNDAE_OPENSHELL_TOKEN":           "gw-secret",
 		"SUNDAE_OPENSHELL_TLS_CA":          "/tls/ca.crt",
 		"SUNDAE_OPENSHELL_TLS_CERT":        "tls/tls.crt",
@@ -282,6 +283,8 @@ func TestParseOpenShellEnv(t *testing.T) {
 	is.Equal(oc.GatewayAddress, "https://openshell.example:8443")
 	is.Equal(oc.Workspace, "agents")
 	is.Equal(oc.Image, "ghcr.io/example/sandbox:1")
+	is.Equal(oc.RuntimeClass, "kata-containers")
+	is.True(slices.Contains(cfg.Environ(), "SUNDAE_OPENSHELL_RUNTIME_CLASS=kata-containers"))
 	is.Equal(oc.Token, "gw-secret")
 	is.Equal(oc.TLSCA, "/tls/ca.crt")
 	is.Equal(oc.TLSCert, filepath.Join(td, "tls/tls.crt"))
@@ -319,15 +322,21 @@ func TestValidateOpenShell(t *testing.T) {
 		mutate func(*Config)
 		err    string
 	}{
-		"valid":               {mutate: func(*Config) {}},
-		"missing address":     {mutate: func(c *Config) { c.OpenShell.GatewayAddress = "" }, err: "gateway_address"},
-		"missing image":       {mutate: func(c *Config) { c.OpenShell.Image = "" }, err: "image"},
-		"cert without key":    {mutate: func(c *Config) { c.OpenShell.TLSCert = "c.crt" }, err: "tls_cert and tls_key"},
-		"zero ttl":            {mutate: func(c *Config) { c.OpenShell.TokenTTL = 0 }, err: "token_ttl"},
-		"short ready timeout": {mutate: func(c *Config) { c.OpenShell.ReadyTimeout = time.Second }, err: "openshell: ready_timeout 1s is too short: use at least 30s"},
-		"unset ready timeout": {mutate: func(c *Config) { c.OpenShell.ReadyTimeout = 0 }},
-		"empty command":       {mutate: func(c *Config) { c.OpenShell.Command = " " }, err: "command"},
-		"blank workspace":     {mutate: func(c *Config) { c.OpenShell.Workspace = " " }, err: "workspace"},
+		"valid":                 {mutate: func(*Config) {}},
+		"missing address":       {mutate: func(c *Config) { c.OpenShell.GatewayAddress = "" }, err: "gateway_address"},
+		"missing image":         {mutate: func(c *Config) { c.OpenShell.Image = "" }, err: "image"},
+		"cert without key":      {mutate: func(c *Config) { c.OpenShell.TLSCert = "c.crt" }, err: "tls_cert and tls_key"},
+		"zero ttl":              {mutate: func(c *Config) { c.OpenShell.TokenTTL = 0 }, err: "token_ttl"},
+		"short ready timeout":   {mutate: func(c *Config) { c.OpenShell.ReadyTimeout = time.Second }, err: "openshell: ready_timeout 1s is too short: use at least 30s"},
+		"unset ready timeout":   {mutate: func(c *Config) { c.OpenShell.ReadyTimeout = 0 }},
+		"empty command":         {mutate: func(c *Config) { c.OpenShell.Command = " " }, err: "command"},
+		"blank workspace":       {mutate: func(c *Config) { c.OpenShell.Workspace = " " }, err: "workspace"},
+		"runtime class":         {mutate: func(c *Config) { c.OpenShell.RuntimeClass = " kata-containers " }},
+		"runtime class default": {mutate: func(c *Config) { c.OpenShell.RuntimeClass = RuntimeClassDefault }},
+		"bad runtime class": {
+			mutate: func(c *Config) { c.OpenShell.RuntimeClass = "Kata Containers" },
+			err:    `openshell: runtime_class "Kata Containers" is not a Kubernetes RuntimeClass name`,
+		},
 		"every problem reported": {mutate: func(c *Config) {
 			c.OpenShell.GatewayAddress = ""
 			c.OpenShell.Image = ""
@@ -468,6 +477,7 @@ func TestOpenShellConfigFileRoundTrip(t *testing.T) {
 	cfg.OpenShell.TokenTTL = 90 * time.Minute
 	cfg.OpenShell.ReadyTimeout = 25 * time.Minute
 	cfg.OpenShell.Command = `bash -lc "echo hi"`
+	cfg.OpenShell.RuntimeClass = RuntimeClassKata
 	is.NoErr(cfg.WriteConfig())
 
 	got := &Config{DataPath: cfg.DataPath}
@@ -479,6 +489,7 @@ func TestOpenShellConfigFileRoundTrip(t *testing.T) {
 	is.Equal(got.OpenShell.TokenTTL, 90*time.Minute)
 	is.Equal(got.OpenShell.ReadyTimeout, 25*time.Minute)
 	is.Equal(got.OpenShell.Command, `bash -lc "echo hi"`)
+	is.Equal(got.OpenShell.RuntimeClass, RuntimeClassKata)
 	is.Equal(got.OpenShell.TokenFile, filepath.Join(cfg.DataPath, "gw-token"))
 	is.Equal(got.OpenShell.Token, "")
 }

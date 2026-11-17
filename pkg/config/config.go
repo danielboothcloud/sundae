@@ -163,6 +163,14 @@ type OpenShellConfig struct {
 	// Image is the sandbox base image used when no profile sets one.
 	Image string `env:"IMAGE" yaml:"image"`
 
+	// RuntimeClass is the Kubernetes RuntimeClass of the sandboxes Sundae
+	// creates when the session's profile sets none, e.g. RuntimeClassKata
+	// for Kata Containers. Empty, or RuntimeClassDefault, sends none: the
+	// OpenShell driver's default_runtime_class_name applies, else the
+	// cluster's default runtime (runc). It applies when a sandbox is
+	// created; an existing sandbox keeps its runtime.
+	RuntimeClass string `env:"RUNTIME_CLASS" yaml:"runtime_class"`
+
 	// Token is an optional bearer token used to authenticate to the gateway.
 	// Mutually exclusive with TokenFile.
 	Token string `env:"TOKEN" yaml:"token"`
@@ -368,6 +376,7 @@ func (c *Config) Environ() []string {
 		fmt.Sprintf("SUNDAE_OPENSHELL_GATEWAY_ADDRESS=%s", c.OpenShell.GatewayAddress),
 		fmt.Sprintf("SUNDAE_OPENSHELL_WORKSPACE=%s", c.OpenShell.Workspace),
 		fmt.Sprintf("SUNDAE_OPENSHELL_IMAGE=%s", c.OpenShell.Image),
+		fmt.Sprintf("SUNDAE_OPENSHELL_RUNTIME_CLASS=%s", c.OpenShell.RuntimeClass),
 		fmt.Sprintf("SUNDAE_OPENSHELL_TOKEN_FILE=%s", c.OpenShell.TokenFile),
 		fmt.Sprintf("SUNDAE_OPENSHELL_TLS_CA=%s", c.OpenShell.TLSCA),
 		fmt.Sprintf("SUNDAE_OPENSHELL_TLS_CERT=%s", c.OpenShell.TLSCert),
@@ -820,6 +829,7 @@ func (c *Config) Validate() error {
 func (c *Config) validateOpenShell() error {
 	oc := &c.OpenShell
 	oc.CloneURL = strings.TrimSuffix(oc.CloneURL, "/")
+	oc.RuntimeClass = strings.TrimSpace(oc.RuntimeClass)
 	for _, p := range []*string{&oc.TLSCA, &oc.TLSCert, &oc.TLSKey, &oc.TokenFile} {
 		if *p != "" && !filepath.IsAbs(*p) {
 			*p = filepath.Join(c.DataPath, *p)
@@ -843,6 +853,9 @@ func (c *Config) validateOpenShell() error {
 	}
 	if oc.Image == "" {
 		errs = append(errs, errors.New("openshell: image is required when openshell is enabled"))
+	}
+	if !validRuntimeClass(oc.RuntimeClass) {
+		errs = append(errs, fmt.Errorf("openshell: runtime_class %q %s", oc.RuntimeClass, runtimeClassProblem))
 	}
 	if (oc.TLSCert == "") != (oc.TLSKey == "") {
 		errs = append(errs, errors.New("openshell: tls_cert and tls_key must be set together"))

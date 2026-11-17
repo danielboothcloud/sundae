@@ -1006,6 +1006,66 @@ func TestStartCustomImage(t *testing.T) {
 	}
 }
 
+func TestStartRuntimeClass(t *testing.T) {
+	ctx := context.Background()
+	configure := func(global string) *config.Config {
+		cfg := newHarnessConfig()
+		cfg.OpenShell.RuntimeClass = global
+		cfg.Sessions.Profiles = map[string]config.SessionProfile{
+			"podman": {RuntimeClass: config.RuntimeClassKata},
+			"runc":   {RuntimeClass: config.RuntimeClassDefault},
+			"shell":  {},
+		}
+		return cfg
+	}
+	cases := []struct {
+		name, global, profile, want string
+	}{
+		{"default runtime", "", "", ""},
+		{"profile runtime", "", "podman", config.RuntimeClassKata},
+		{"global runtime", "gvisor", "", "gvisor"},
+		{"global runtime for a profile without one", "gvisor", "shell", "gvisor"},
+		{"profile beats global", "gvisor", "podman", config.RuntimeClassKata},
+		{"profile opts out of global", "gvisor", "runc", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarnessWith(t, configure(tc.global))
+			s, err := h.mgr.Start(ctx, StartOptions{User: alice, Repo: "r", Profile: tc.profile})
+			if err != nil {
+				t.Fatal(err)
+			}
+			sb, _ := h.fc.Sandboxes().Get(ctx, "default", s.Sandbox)
+			if sb.Spec.Template == nil || sb.Spec.Template.RuntimeClassName != tc.want {
+				t.Fatalf("template = %+v", sb.Spec.Template)
+			}
+			if got, ok := sb.Annotations[AnnotationRuntimeClass]; got != tc.want || ok != (tc.want != "") {
+				t.Fatalf("annotations = %v", sb.Annotations)
+			}
+		})
+	}
+
+	t.Run("existing sandbox keeps its runtime", func(t *testing.T) {
+		cfg := configure("")
+		h := newHarnessWith(t, cfg)
+		s, err := h.mgr.Start(ctx, StartOptions{User: alice, Repo: "r", Profile: "podman"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The profile changes to another runtime; the session is
+		// resumed in the sandbox it has.
+		cfg.Sessions.Profiles["podman"] = config.SessionProfile{RuntimeClass: "gvisor"}
+		h.mgr = NewManager(h.mgr.client, h.tokens, cfg)
+		if _, err := h.mgr.Start(ctx, StartOptions{User: alice, Repo: "r"}); err != nil {
+			t.Fatal(err)
+		}
+		sb, _ := h.fc.Sandboxes().Get(ctx, "default", s.Sandbox)
+		if got := SandboxRuntimeClass(sb); got != config.RuntimeClassKata {
+			t.Fatalf("runtime class = %q", got)
+		}
+	})
+}
+
 func profileConfig() *config.Config {
 	cfg := newHarnessConfig()
 	cfg.Sessions.Profiles = map[string]config.SessionProfile{

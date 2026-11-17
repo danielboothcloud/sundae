@@ -61,6 +61,11 @@ const (
 	// sandbox's Spec.Providers is what is attached now: start and attach
 	// reconcile it with the profile's current list.
 	AnnotationProviders = "sundae.providers"
+	// AnnotationRuntimeClass holds the Kubernetes RuntimeClass the sandbox
+	// was created with (openshell.runtime_class or the profile's
+	// runtime_class); absent for the default runtime. The sandbox keeps
+	// that runtime for its lifetime.
+	AnnotationRuntimeClass = "sundae.runtime-class"
 
 	// DefaultSessionName is the session name used when none is given and
 	// none can be derived from a repository.
@@ -118,6 +123,12 @@ func IsSuspendUnsupported(err error) bool {
 type SandboxRequest struct {
 	// Image is the sandbox base image.
 	Image string
+	// RuntimeClass is the Kubernetes RuntimeClass the sandbox is created
+	// with, sent as the template's runtime_class_name; OpenShell's
+	// Kubernetes driver gives it precedence over its
+	// default_runtime_class_name. Empty sends none: the driver's or the
+	// cluster's default runtime. An existing sandbox keeps its runtime.
+	RuntimeClass string
 	// Labels are set on creation. The LabelUserID label is also used to verify
 	// ownership of an existing sandbox.
 	Labels map[string]string
@@ -350,8 +361,8 @@ func (c *sdkClient) existing(ctx context.Context, sb *Sandbox, req SandboxReques
 // create creates the sandbox and waits for it, deleting it on failure.
 func (c *sdkClient) create(ctx context.Context, name string, req SandboxRequest) (*Sandbox, bool, error) {
 	spec := &v1.SandboxSpec{Providers: slices.Clone(req.Providers), Policy: req.Policy}
-	if req.Image != "" {
-		spec.Template = &v1.SandboxTemplate{Image: req.Image}
+	if req.Image != "" || req.RuntimeClass != "" {
+		spec.Template = &v1.SandboxTemplate{Image: req.Image, RuntimeClassName: req.RuntimeClass}
 	}
 
 	if _, err := c.sandboxes.Create(ctx, c.workspace, name, spec,
@@ -566,6 +577,20 @@ func (c *sdkClient) Close() error {
 		return nil
 	}
 	return c.closer.Close() //nolint:wrapcheck
+}
+
+// SandboxRuntimeClass returns the Kubernetes RuntimeClass sb was created
+// with: its template's runtime_class_name, else its AnnotationRuntimeClass.
+// "" means the default runtime, or a sandbox created before Sundae
+// recorded runtimes.
+func SandboxRuntimeClass(sb *Sandbox) string {
+	if sb == nil {
+		return ""
+	}
+	if sb.Spec.Template != nil && sb.Spec.Template.RuntimeClassName != "" {
+		return sb.Spec.Template.RuntimeClassName
+	}
+	return sb.Annotations[AnnotationRuntimeClass]
 }
 
 // owns reports whether sb carries the ownership label from want.

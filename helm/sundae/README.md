@@ -270,6 +270,29 @@ network_policies:
 
 An exact host name may resolve to a cluster-private address.
 
+### Sandbox runtimes
+
+By default, sandbox pods run with the cluster's default runtime (runc). To
+run a profile's sandboxes with another runtime, for example Kata
+Containers, set the name of a Kubernetes `RuntimeClass`:
+
+```yaml
+config:
+  openshell:
+    runtime_class: ""                 # all sessions; empty: the default runtime
+  sessions:
+    profiles:
+      podman:
+        image: <registry>/agent-podman:<tag>
+        runtime_class: kata-containers  # this profile only
+```
+
+Sundae sends the name in the typed `runtime_class_name` field of the
+sandbox template. The OpenShell gateway's `allow_driver_config` can stay
+`false`. This chart does not install a runtime: install Kata on the nodes
+and create the `RuntimeClass` yourself. An existing sandbox keeps its
+runtime. See the top-level README, "Sandbox runtimes".
+
 ### A gateway installed separately
 
 ```sh
@@ -544,3 +567,9 @@ Not checked, because it needs an image build or a live cluster:
   `securityContext.readOnlyRootFilesystem: false`.
 - Client certificate rotation. Sundae is expected to need a restart to
   pick up a new certificate.
+- Sandbox runtimes (`runtime_class`). The OpenShell 0.1.8 source sets the
+  typed `runtime_class_name` as the sandbox pod's `runtimeClassName`; this
+  was checked only against the SDK's fake gateway. Not known: whether the
+  OpenShell sandbox passes its Landlock, seccomp and task-memory probes
+  under Kata, and whether Kata alone lets podman run in a sandbox (the
+  OpenShell sandbox drops all capabilities and sets `NoNewPrivs`).

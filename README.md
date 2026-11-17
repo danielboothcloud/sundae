@@ -255,6 +255,7 @@ jobs:
 #    claude:
 #      image: ghcr.io/example/agent-claude:latest
 #      command: claude
+#      runtime_class: kata-containers  # empty: openshell.runtime_class
 #  repos:
 #    "infra/*":
 #      profile: claude
@@ -443,6 +444,10 @@ openshell:
   # Sandbox image when no profile sets one. It must provide git and jj
   # (deploy/sandbox/Containerfile builds one, with osewa).
   image: "<registry>/sundae-sandbox:<tag>"
+  # Kubernetes RuntimeClass of new sandboxes when no profile sets one, e.g.
+  # kata-containers. Empty: the OpenShell driver's or the cluster's default
+  # runtime (runc). See "Sandbox runtimes" below.
+  runtime_class: ""
   # Optional bearer token for the gateway. Prefer token_file, which keeps the
   # token out of this file. Set at most one of the two.
   #token: ""
@@ -508,6 +513,10 @@ sessions:
       command: claude                             # empty: openshell.command
       # OpenShell providers attached to this profile's sandboxes only.
       providers: [my-claude, my-github]
+    podman:
+      # Kubernetes RuntimeClass of this profile's new sandboxes. Empty:
+      # openshell.runtime_class; "default": the default runtime.
+      runtime_class: kata-containers
   # The profile for sessions started without --profile, by repository glob.
   repos:
     "infra/*":
@@ -534,7 +543,9 @@ lines); `sessions.profiles` and
 between 1 and 100000 (default 1000). When OpenShell is
 enabled, `gateway_address` and `image` are required, and a `token_file`, if
 set, must be readable and not empty. Setting both `token` and `token_file` is
-an error. `sundae config check` reports every problem, naming the key.
+an error. `openshell.runtime_class` and `sessions.profiles.<name>.runtime_class`
+must be empty, `default` or a Kubernetes RuntimeClass name (a DNS-1123
+subdomain: lowercase letters, digits, `-` and `.`, at most 253 characters). `sundae config check` reports every problem, naming the key.
 
 **Profiles.** A new session is created from `--profile`, else from the
 repository's own profile (`repo profile`, see
@@ -597,6 +608,39 @@ profile; duplicates are dropped.
   too: the sandbox proxy terminates TLS for every sandbox, so programs such
   as npm must trust its CA.
 - `session ls --json` lists each session's attached `providers`.
+
+**Sandbox runtimes.** By default a sandbox pod runs with the cluster's
+default container runtime (runc). To run the sandboxes of a profile with
+another runtime, for example [Kata Containers](https://katacontainers.io/),
+set `sessions.profiles.<name>.runtime_class` to the name of a Kubernetes
+`RuntimeClass`, for example `kata-containers`. `openshell.runtime_class`
+sets the runtime for sessions whose profile sets none, and for sessions
+without a profile. The value `default` in a profile selects the default
+runtime, also when `openshell.runtime_class` is set.
+
+- Kata runs under OpenShell, not next to it. Sundae sends the name as the
+  sandbox template's `runtime_class_name`, and OpenShell's Kubernetes
+  driver sets it as `runtimeClassName` on the sandbox pod. This typed field
+  has precedence over the driver's `default_runtime_class_name`. It does
+  not need `allow_driver_config` in the gateway's `gateway.toml`.
+- Only the sandbox (workload) pod gets the runtime. The OpenShell supervisor
+  pod uses the driver's `supervisor_runtime_class_name`, which is gateway
+  configuration.
+- The cluster must provide the runtime: install it on the nodes (for Kata,
+  for example with kata-deploy) and create the `RuntimeClass`. Sundae does
+  not check that the `RuntimeClass` exists. If it does not exist,
+  Kubernetes does not create the sandbox pod, and `session start` fails
+  with an error or after `openshell.ready_timeout`.
+- The runtime must let the OpenShell sandbox apply Landlock and its nested
+  seccomp filter. OpenShell fails closed: when the runtime blocks these
+  operations, the sandbox does not start. Do not add capabilities or an
+  unconfined seccomp profile to make a runtime work.
+- A sandbox keeps the runtime it was created with, the same as its image.
+  A change to `runtime_class` applies to new sessions only. Sundae records
+  the runtime in the sandbox's `sundae.runtime-class` annotation. A session
+  parked to an S3 snapshot is created again with the runtime it had.
+- The TUI's new-session form shows each profile's runtime next to its
+  image and command.
 
 **Declared providers.** Each `openshell.providers` entry is a provider
 Sundae creates on the gateway and keeps up to date, so credentials come from

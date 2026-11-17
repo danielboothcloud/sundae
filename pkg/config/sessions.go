@@ -164,6 +164,13 @@ type SessionProfile struct {
 	// its proxy replaces with the real values on requests to the provider's
 	// endpoints. Sessions of other profiles get none of them.
 	Providers []string `yaml:"providers"`
+
+	// RuntimeClass is the Kubernetes RuntimeClass of this profile's new
+	// sandboxes, e.g. RuntimeClassKata for Kata Containers. Empty uses
+	// openshell.runtime_class; RuntimeClassDefault uses the default
+	// runtime even when openshell.runtime_class sets one. An existing
+	// sandbox keeps the runtime it was created with.
+	RuntimeClass string `yaml:"runtime_class"`
 }
 
 // OpenShell's limits on provider names and attachments (openshell-server
@@ -319,6 +326,10 @@ func (c *Config) validateSessions() error {
 		}
 		p.Image = strings.TrimSpace(p.Image)
 		p.Command = strings.TrimSpace(p.Command)
+		p.RuntimeClass = strings.TrimSpace(p.RuntimeClass)
+		if !validRuntimeClass(p.RuntimeClass) {
+			fail("%s.runtime_class %q %s", key, p.RuntimeClass, runtimeClassProblem)
+		}
 		if p.Command != "" {
 			if args, err := shlex.Split(p.Command, true); err != nil || len(args) == 0 {
 				fail("%s.command %q is not a valid command line", key, p.Command)

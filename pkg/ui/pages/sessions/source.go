@@ -110,6 +110,10 @@ type Profile struct {
 	Name    string
 	Image   string
 	Command string
+	// RuntimeClass is the Kubernetes RuntimeClass of the profile's new
+	// sandboxes, openshell.runtime_class included; "" for the default
+	// runtime.
+	RuntimeClass string
 }
 
 // NewClient creates the OpenShell client of an operation. Tests may
@@ -216,7 +220,7 @@ func (s *source) Profiles() []Profile {
 	var out []Profile
 	for _, name := range slices.Sorted(maps.Keys(s.cfg.Sessions.Profiles)) {
 		p := s.cfg.Sessions.Profiles[name]
-		out = append(out, Profile{Name: name, Image: p.Image, Command: p.Command})
+		out = append(out, Profile{Name: name, Image: p.Image, Command: p.Command, RuntimeClass: s.cfg.ProfileRuntimeClass(name)})
 	}
 	return out
 }

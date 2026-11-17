@@ -861,6 +861,12 @@ func (m *Monitor) parkToSnapshot(ctx context.Context, client Client, sandbox, op
 	if sb.Spec.Template != nil {
 		marker.Image = sb.Spec.Template.Image
 	}
+	// Record the default runtime too, so a later openshell.runtime_class
+	// or profile change does not move the session to another runtime.
+	marker.RuntimeClass = SandboxRuntimeClass(sb)
+	if marker.RuntimeClass == "" {
+		marker.RuntimeClass = config.RuntimeClassDefault
+	}
 	if err := m.snaps.writeMarker(ctx, marker); err != nil {
 		return fmt.Errorf("openshell: record the session as parked: %w", err)
 	}

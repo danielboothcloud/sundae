@@ -285,6 +285,11 @@ type ParkedSnapshot struct {
 	// Image is the image the sandbox was created from, so it is created
 	// from it again.
 	Image string `json:"image,omitempty"`
+	// RuntimeClass is the Kubernetes RuntimeClass the sandbox was created
+	// with, or config.RuntimeClassDefault for the default runtime, so it
+	// is created with it again. Empty in a marker written before Sundae
+	// recorded runtimes: the session's profile then decides.
+	RuntimeClass string `json:"runtime_class,omitempty"`
 	// Parked is when the session was parked.
 	Parked time.Time `json:"parked"`
 	// Op is who parked it: ParkAuto or ParkManual.

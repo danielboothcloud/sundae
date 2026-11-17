@@ -11,6 +11,7 @@
           "anthropic/claude-opus-5-5",
           "anthropic/claude-fable-5-2"
       ],
+      "advisor": "anthropic/claude-fable-5-2",
       "mcpServers": {},
       "extensions": [
         "npm:@upstash/context7-pi",

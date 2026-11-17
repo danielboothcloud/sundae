@@ -157,6 +157,14 @@ openshell:
   workspace: "{{ .OpenShell.Workspace }}"
   # The default sandbox base image. It must provide git and jj.
   image: "{{ .OpenShell.Image }}"
+  # The Kubernetes RuntimeClass of new sandboxes when the session's profile
+  # sets none, e.g. "kata-containers" for Kata Containers. Empty (or
+  # "default") sends none: the OpenShell driver's default_runtime_class_name
+  # applies, else the cluster's default runtime (runc). The RuntimeClass
+  # must exist in the cluster, and the runtime must let OpenShell's
+  # supervisor apply Landlock and seccomp. An existing sandbox keeps the
+  # runtime it was created with.
+  runtime_class: "{{ .OpenShell.RuntimeClass }}"
   # Optional bearer token used to authenticate to the gateway. Prefer
   # token_file, which keeps the token out of this file. Set at most one.
   #token: ""
@@ -333,13 +341,19 @@ sessions:
   # on the gateway with "openshell provider create") to attach to the
   # sandboxes of this profile's sessions only; the session's program gets their credentials as placeholders that
   # the gateway's proxy resolves. The sandbox network policy must allow the
-  # provider's endpoints.
+  # provider's endpoints. runtime_class is the Kubernetes RuntimeClass of
+  # the profile's new sandboxes; empty uses openshell.runtime_class, and
+  # "default" uses the default runtime even when openshell.runtime_class
+  # sets one.
 {{- if .Sessions.Profiles }}
   profiles:
 {{- range $name, $p := .Sessions.Profiles }}
     {{ printf "%q" $name }}:
       image: {{ printf "%q" $p.Image }}
       command: {{ printf "%q" $p.Command }}
+{{- if $p.RuntimeClass }}
+      runtime_class: {{ printf "%q" $p.RuntimeClass }}
+{{- end }}
 {{- if $p.Providers }}
       providers:
 {{- range $p.Providers }}
@@ -353,6 +367,9 @@ sessions:
   #    image: ghcr.io/me/agent-claude:latest
   #    command: claude
   #    providers: [my-claude, my-github]
+  #  podman:
+  #    image: ghcr.io/me/agent-podman:latest
+  #    runtime_class: kata-containers
 {{- end }}
   # Profiles for sessions started without --profile, by repository name
   # glob. "*" does not cross "/", "**" does; case-insensitive. The most

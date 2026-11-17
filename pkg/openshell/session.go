@@ -42,14 +42,17 @@ type TokenStore interface {
 // Manager drives the session lifecycle. It holds no session state; the
 // gateway and the sandboxes are the source of truth.
 type Manager struct {
-	client   Client
-	tokens   TokenStore
-	image    string
-	command  string
-	sessions config.SessionsConfig
-	cloneURL string
-	tokenTTL time.Duration
-	now      func() time.Time
+	client  Client
+	tokens  TokenStore
+	image   string
+	command string
+	// runtimeClass is openshell.runtime_class: the RuntimeClass of new
+	// sandboxes whose profile sets none.
+	runtimeClass string
+	sessions     config.SessionsConfig
+	cloneURL     string
+	tokenTTL     time.Duration
+	now          func() time.Time
 	// osewaBinaryDir holds the osewa release builds to upload.
 	osewaBinaryDir string
 	// osewaPort is the loopback port of the sandbox's osewa server.
@@ -104,6 +107,7 @@ func NewManager(client Client, tokens TokenStore, cfg *config.Config, opts ...Ma
 		client:         client,
 		tokens:         tokens,
 		image:          cfg.OpenShell.Image,
+		runtimeClass:   cfg.OpenShell.RuntimeClass,
 		command:        cfg.OpenShell.Command,
 		sessions:       cfg.Sessions,
 		cloneURL:       cfg.OpenShellCloneURL(),
@@ -464,24 +468,37 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 		if image == "" {
 			image = m.image
 		}
+		// The runtime follows the image: a session parked to its snapshot
+		// is created again with the runtime it had, else the profile's,
+		// else openshell.runtime_class.
+		var parkedRuntime string
+		if parked != nil {
+			parkedRuntime = parked.RuntimeClass
+		}
+		runtimeClass := config.ResolveRuntimeClass(parkedRuntime, p.RuntimeClass, m.runtimeClass)
+		annotations := sessionAnnotations(opts.User.Username(), repos, name, profile, p.Providers)
+		if runtimeClass != "" {
+			annotations[AnnotationRuntimeClass] = runtimeClass
+		}
 
 		if m.policyErr != nil {
 			return nil, m.policyErr
 		}
 		fmt.Fprintf(progress, "Starting sandbox %s...\n", sandbox) //nolint:errcheck
 		sb, created, err = m.client.EnsureSandbox(ctx, sandbox, SandboxRequest{
-			Image:       image,
-			Labels:      ownerLabels(opts.User),
-			Annotations: sessionAnnotations(opts.User.Username(), repos, name, profile, p.Providers),
-			Providers:   p.Providers,
-			Policy:      m.policy,
+			Image:        image,
+			RuntimeClass: runtimeClass,
+			Labels:       ownerLabels(opts.User),
+			Annotations:  annotations,
+			Providers:    p.Providers,
+			Policy:       m.policy,
 		})
 		var missing *MissingProviderError
 		if errors.As(err, &missing) {
 			return nil, m.missingProviderError(profile, missing)
 		}
 		if err != nil {
-			m.logger.Warn("cannot start sandbox", "sandbox", sandbox, "user", opts.User.Username(), "image", image, "err", err)
+			m.logger.Warn("cannot start sandbox", "sandbox", sandbox, "user", opts.User.Username(), "image", image, "runtime_class", runtimeClass, "err", err)
 			return nil, err
 		}
 	} else {

@@ -750,6 +750,50 @@ func TestFallbackParkAndResume(t *testing.T) {
 	}
 }
 
+// A session parked to its snapshot is created again with the runtime it
+// had, whatever its profile or openshell.runtime_class say by then.
+func TestFallbackParkKeepsRuntimeClass(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name, profile, marker, want string
+	}{
+		{"profile runtime", "podman", config.RuntimeClassKata, config.RuntimeClassKata},
+		{"default runtime", "", config.RuntimeClassDefault, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newSnapHarness(t, func(c *config.Config) {
+				c.Sessions.Suspend.Fallback = config.SuspendFallbackSnapshot
+				c.Sessions.Profiles = map[string]config.SessionProfile{"podman": {RuntimeClass: config.RuntimeClassKata}}
+			}, false)
+			s, err := h.mgr.Start(ctx, StartOptions{User: alice, Repo: "r", Profile: tc.profile})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, snapshot, err := h.mgr.ParkSession(ctx, alice, ""); err != nil || !snapshot {
+				t.Fatalf("park = %v %v", snapshot, err)
+			}
+			var marker ParkedSnapshot
+			o, ok := h.s3.Object("sundae/sessions/1/" + s.Sandbox + ".parked.json")
+			if !ok || json.Unmarshal(o.Body, &marker) != nil || marker.RuntimeClass != tc.marker {
+				t.Fatalf("marker = %v %s", ok, o.Body)
+			}
+
+			// The runtime settings change while the session is parked.
+			h.mgr.sessions.Profiles["podman"] = config.SessionProfile{RuntimeClass: "kata-qemu"}
+			h.mgr.runtimeClass = "gvisor"
+			freshVolume(h, s.Sandbox)
+			if _, err := h.mgr.Resume(ctx, StartOptions{User: alice, Repo: "r"}); err != nil {
+				t.Fatal(err)
+			}
+			sb, _ := h.fc.Sandboxes().Get(ctx, "default", s.Sandbox)
+			if got := SandboxRuntimeClass(sb); got != tc.want {
+				t.Fatalf("runtime class = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestEndParkedSnapshotSession(t *testing.T) {
 	ctx := context.Background()
 	h := newSnapHarness(t, func(c *config.Config) { c.Sessions.Suspend.Fallback = config.SuspendFallbackSnapshot }, false)

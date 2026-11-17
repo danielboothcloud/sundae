@@ -3,6 +3,7 @@ package openshell
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -183,6 +184,81 @@ func TestEnsureSandboxDeletesHalfMadeSandbox(t *testing.T) {
 	}
 	if _, err := fc.Sandboxes().Get(ctx, "default", "sundae-a-r"); !IsNotFound(err) {
 		t.Fatalf("half-made sandbox not deleted: err=%v", err)
+	}
+}
+
+func TestEnsureSandboxRuntimeClass(t *testing.T) {
+	ctx := context.Background()
+	fc := fake.NewClient()
+	c := newSDKClient("default", fc.Sandboxes(), nil, nil, nil)
+	labels := map[string]string{LabelUserID: "1"}
+
+	cases := []struct {
+		name     string
+		req      SandboxRequest
+		wantTmpl bool
+	}{
+		{"image and runtime", SandboxRequest{Image: "img", RuntimeClass: config.RuntimeClassKata, Labels: labels}, true},
+		{"runtime without image", SandboxRequest{RuntimeClass: "kata-qemu", Labels: labels}, true},
+		{"default runtime", SandboxRequest{Image: "img", Labels: labels}, true},
+		{"neither", SandboxRequest{Labels: labels}, false},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			name := fmt.Sprintf("sundae-a-r%d", i)
+			if _, created, err := c.EnsureSandbox(ctx, name, tc.req); err != nil || !created {
+				t.Fatalf("created=%v err=%v", created, err)
+			}
+			// What the gateway was sent, not what EnsureSandbox returned.
+			sb, err := fc.Sandboxes().Get(ctx, "default", name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (sb.Spec.Template != nil) != tc.wantTmpl {
+				t.Fatalf("template = %+v", sb.Spec.Template)
+			}
+			if got := SandboxRuntimeClass(sb); got != tc.req.RuntimeClass {
+				t.Fatalf("runtime class = %q, want %q", got, tc.req.RuntimeClass)
+			}
+			if tc.wantTmpl && (sb.Spec.Template.RuntimeClassName != tc.req.RuntimeClass || sb.Spec.Template.Image != tc.req.Image) {
+				t.Fatalf("template = %+v", sb.Spec.Template)
+			}
+
+			// An existing sandbox is resumed as it is: a request for
+			// another runtime does not change it.
+			other := tc.req
+			other.RuntimeClass = "gvisor"
+			if _, created, err := c.EnsureSandbox(ctx, name, other); err != nil || created {
+				t.Fatalf("again: created=%v err=%v", created, err)
+			}
+			sb, _ = fc.Sandboxes().Get(ctx, "default", name)
+			if got := SandboxRuntimeClass(sb); got != tc.req.RuntimeClass {
+				t.Fatalf("runtime class changed to %q", got)
+			}
+		})
+	}
+}
+
+func TestSandboxRuntimeClass(t *testing.T) {
+	cases := map[string]struct {
+		sb   *Sandbox
+		want string
+	}{
+		"nil":         {nil, ""},
+		"no template": {&Sandbox{}, ""},
+		"template":    {&Sandbox{Spec: types.SandboxSpec{Template: &types.SandboxTemplate{RuntimeClassName: "kata"}}}, "kata"},
+		"annotation":  {&Sandbox{Annotations: map[string]string{AnnotationRuntimeClass: "kata"}}, "kata"},
+		"template wins": {&Sandbox{
+			Annotations: map[string]string{AnnotationRuntimeClass: "other"},
+			Spec:        types.SandboxSpec{Template: &types.SandboxTemplate{RuntimeClassName: "kata"}},
+		}, "kata"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := SandboxRuntimeClass(tc.sb); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
