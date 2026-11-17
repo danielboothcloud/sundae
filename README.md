@@ -1966,8 +1966,8 @@ header counts the ones blocked, errored, done and working. In it:
 <kbd>enter</kbd> attaches (detach with <kbd>~.</kbd> to come back to the same
 row), <kbd>n</kbd> starts a session (pick any number of repositories with
 <kbd>space</kbd>, a name and a profile), <kbd>A</kbd> and <kbd>R</kbd> add
-repositories to the highlighted session or remove some, <kbd>d</kbd> ends it
-after a confirm,
+repositories to the highlighted session or remove some, <kbd>u</kbd> syncs it
+with its forges (see below), <kbd>d</kbd> ends it after a confirm,
 <kbd>z</kbd> parks or resumes it, <kbd>c</kbd> copies its `session attach`
 command, and <kbd>/</kbd> filters. Below the list, **Signals · *session***
 shows the highlighted session's latest signals, newest first, and follows the
@@ -1978,6 +1978,16 @@ you, <kbd>g</kbd> goes back to the top and follows new signals);
 <kbd>esc</kbd> goes back.
 When the OpenShell gateway is unreachable the tab says so and <kbd>r</kbd>
 retries; the other tabs keep working.
+
+<kbd>u</kbd> (**Sync with forge**, also in the action menu) brings a
+session's checkouts up to date without attaching. For a server admin, it
+first syncs each repository imported from a forge, as `forge sync` does.
+Then it resumes the session if it is parked, renews the sandbox's git
+credentials, and runs `jj git fetch` or `git fetch` in each checkout. A jj
+checkout whose working-copy change is empty and has no description moves to
+a new change on `trunk()`; a git checkout fast-forwards to its upstream.
+Local work is never moved or lost: a checkout with work, a diverged branch
+or no upstream is only fetched, and the notice says so.
 
 On **Repositories**, each title line carries badges: your sessions of the
 repository (the most urgent state and how many), and, when forges are

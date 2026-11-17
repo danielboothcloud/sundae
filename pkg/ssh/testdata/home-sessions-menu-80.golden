@@ -11,10 +11,10 @@
     ✓ sundae / forge-syn│ > enter  Attach              │             done   5m
       Implemented GitHub│   z      Park                │
                         │   A      Add repos           │
-    ● gateway / main    │   c      Copy attach command │          working   5m
-      bash              │   d      End                 │
-                        ╰──────────────────────────────╯
-    ● sundae / tui                                                working   5m
+    ● gateway / main    │   u      Sync with forge     │          working   5m
+      bash              │   c      Copy attach command │
+                        │   d      End                 │
+    ● sundae / tui      ╰──────────────────────────────╯          working   5m
       Running go test ./pkg/ui/...
 
    Signals · infra / claude-1

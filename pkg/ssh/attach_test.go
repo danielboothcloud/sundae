@@ -146,6 +146,9 @@ func (f *fakeSource) AttachCommand(name string) string {
 func (f *fakeSource) End(context.Context, string, bool) (bool, error) { return true, nil }
 func (f *fakeSource) SnapshotsOnEnd() bool                            { return false }
 func (f *fakeSource) Park(context.Context, string) (bool, error)      { return true, nil }
+func (f *fakeSource) SyncRepos(context.Context, string, []string) ([]sessions.RepoSync, error) {
+	return nil, nil
+}
 func (f *fakeSource) Prepare(_ context.Context, req sessionctl.Request) (sessions.Attacher, error) {
 	if req.Name != "main" || req.Create {
 		return nil, fmt.Errorf("unexpected request %+v", req)

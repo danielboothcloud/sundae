@@ -49,6 +49,11 @@ type fakeSource struct {
 	// endErr is returned by End without force.
 	endErr    error
 	snapshots bool
+	// synced are the sessions SyncRepos was called for; syncRes and
+	// syncErr are what it returns (by default every checkout updated).
+	synced  []string
+	syncRes []RepoSync
+	syncErr error
 	// gate, when set, holds Prepare after its progress lines.
 	gate chan struct{}
 }
@@ -137,6 +142,20 @@ func (f *fakeSource) Park(_ context.Context, name string) (bool, error) {
 
 func (f *fakeSource) AttachCommand(name string) string {
 	return sessionctl.AttachCommand("ssh://git.example.com", name)
+}
+
+func (f *fakeSource) SyncRepos(_ context.Context, name string, repos []string) ([]RepoSync, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.synced = append(f.synced, name)
+	if f.syncRes != nil {
+		return f.syncRes, f.syncErr
+	}
+	out := make([]RepoSync, 0, len(repos))
+	for _, r := range repos {
+		out = append(out, RepoSync{Repo: r, Checkout: openshell.CheckoutUpdate{Repo: r, State: openshell.CheckoutUpdated}})
+	}
+	return out, f.syncErr
 }
 
 type fakeAttacher struct {
@@ -1124,5 +1143,53 @@ func TestScopeKeys(t *testing.T) {
 	// The header summary still counts every session.
 	if got := ansi.Strip(m.Summary(true)); got != "▲1 ✓1 ●2" {
 		t.Fatalf("summary %q", got)
+	}
+}
+
+// TestSyncWithForge: u syncs the selected session's repositories without
+// attaching, says what happened to each, and is in the action menu.
+func TestSyncWithForge(t *testing.T) {
+	src := newFakeSource()
+	m := loaded(t, 120, 30, src)
+	r, _ := m.selected()
+	label := sessionLabel(r.Info.Name, rowRepos(r))
+	run(m, keys(m, "u"), 1)
+	if fmt.Sprint(src.synced) != "["+r.Info.Name+"]" {
+		t.Fatalf("synced %v", src.synced)
+	}
+	if !strings.Contains(view(m), "Synced "+label+":") || !strings.Contains(view(m), "updated") {
+		t.Fatalf("notice:\n%s", view(m))
+	}
+
+	found := false
+	for _, b := range m.Actions() {
+		if b.Help().Desc == "sync with forge" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the action menu has no sync with forge")
+	}
+}
+
+func TestSyncNotice(t *testing.T) {
+	n := syncNotice("homelab", []RepoSync{
+		{Repo: "github/me/GitOps", Forge: "github", Checkout: openshell.CheckoutUpdate{State: openshell.CheckoutUpdated}},
+		{Repo: "github/me/IaC", Forge: "github", Checkout: openshell.CheckoutUpdate{State: openshell.CheckoutCurrent}},
+		{Repo: "github/me/helm", Forge: "github", Checkout: openshell.CheckoutUpdate{State: openshell.CheckoutFetched, Detail: "the branch has no upstream"}},
+	})
+	want := "Synced homelab: GitOps updated, IaC up to date, helm fetched (the branch has no upstream)."
+	if n.err || n.text != want {
+		t.Fatalf("notice %+v, want %q", n, want)
+	}
+	n = syncNotice("homelab", []RepoSync{
+		{Repo: "github/me/IaC", Forge: "github", ForgeErr: "git fetch: HTTP 401", Checkout: openshell.CheckoutUpdate{State: openshell.CheckoutCurrent}},
+	})
+	if !n.err || !strings.Contains(n.text, "IaC up to date; github sync failed: git fetch: HTTP 401") {
+		t.Fatalf("forge failure: %+v", n)
+	}
+	n = syncNotice("homelab", []RepoSync{{Repo: "r", Checkout: openshell.CheckoutUpdate{State: openshell.CheckoutFailed, Detail: "Permission denied"}}})
+	if !n.err || !strings.Contains(n.text, "r fetch failed: Permission denied") {
+		t.Fatalf("fetch failure: %+v", n)
 	}
 }

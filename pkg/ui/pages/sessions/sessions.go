@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"image/color"
+	"path"
 	"slices"
 	"strings"
 	"time"
@@ -52,6 +53,7 @@ type KeyMap struct {
 	New       key.Binding
 	AddRepo   key.Binding
 	DropRepo  key.Binding
+	Sync      key.Binding
 	End       key.Binding
 	Park      key.Binding
 	Copy      key.Binding
@@ -75,6 +77,7 @@ func DefaultKeyMap() KeyMap {
 		New:       key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new")),
 		AddRepo:   key.NewBinding(key.WithKeys("A"), key.WithHelp("A", "add repos")),
 		DropRepo:  key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "remove repos")),
+		Sync:      key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "sync with forge")),
 		End:       key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "end")),
 		Park:      key.NewBinding(key.WithKeys("z"), key.WithHelp("z", "park/resume")),
 		Copy:      key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "copy attach command")),
@@ -125,6 +128,8 @@ type (
 		row sessionctl.Row
 		// changed are the repositories added or removed.
 		changed []string
+		// synced is what a sync did to each repository.
+		synced []RepoSync
 	}
 )
 
@@ -777,7 +782,8 @@ func (m *Sessions) onKey(msg tea.KeyPressMsg) tea.Cmd {
 	case key.Matches(msg, km.Down):
 		m.move(1)
 		return nil
-	case key.Matches(msg, km.PrevPage):
+	case key.Matches(msg, km.PrevPage) && (m.pane == signalsPane || !key.Matches(msg, m.keys.Sync)):
+		// u syncs a session here, so it does not page (pgup and b do).
 		m.move(-m.perPage())
 		return nil
 	case key.Matches(msg, km.NextPage) && !key.Matches(msg, m.keys.End):
@@ -878,6 +884,11 @@ func (m *Sessions) onSessionsKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		m.form = m.editReposForm(nil, prefill{edit: "remove", target: r})
 		return nil
+	case key.Matches(msg, m.keys.Sync):
+		if m.busy[r.Info.Sandbox] != "" {
+			return nil
+		}
+		return m.syncCmd(r)
 	case key.Matches(msg, m.keys.End):
 		m.target = r
 		question := "End " + label + "?  The sandbox and any unpushed work are deleted."
@@ -1128,6 +1139,54 @@ func (m *Sessions) resumeCmd(r sessionctl.Row, restore openshell.RestoreMode) te
 	}
 }
 
+// syncCmd brings the session's checkouts up to date with their forges
+// (Source.SyncRepos), resuming it if parked, without attaching.
+func (m *Sessions) syncCmd(r sessionctl.Row) tea.Cmd {
+	m.busy[r.Info.Sandbox] = "syncing"
+	ctx, src := m.ctx, m.src
+	return func() tea.Msg {
+		res, err := src.SyncRepos(ctx, r.Info.Name, rowRepos(r))
+		return actionMsg{key: r.Info.Sandbox, verb: "sync", repos: rowRepos(r), name: r.Info.Name, done: err == nil, err: err, row: r, synced: res}
+	}
+}
+
+// syncNotice sums up a sync: what happened to each repository, and an
+// error mark when any forge sync or checkout update failed.
+func syncNotice(label string, res []RepoSync) notice {
+	parts := make([]string, 0, len(res))
+	failed := false
+	for _, rs := range res {
+		name := path.Base(rs.Repo)
+		var part string
+		switch rs.Checkout.State {
+		case openshell.CheckoutUpdated:
+			part = name + " updated"
+		case openshell.CheckoutCurrent:
+			part = name + " up to date"
+		case openshell.CheckoutFetched:
+			part = name + " fetched (" + rs.Checkout.Detail + ")"
+		case openshell.CheckoutMissing:
+			part = name + " has no checkout"
+		default:
+			failed = true
+			part = name + " fetch failed: " + rs.Checkout.Detail
+		}
+		if rs.ForgeErr != "" {
+			failed = true
+			part += "; " + rs.Forge + " sync failed: " + rs.ForgeErr
+		}
+		parts = append(parts, part)
+	}
+	text := "Synced " + label + ": " + strings.Join(parts, ", ") + "."
+	if len(parts) == 0 {
+		text = "Synced " + label + ": no repositories."
+	}
+	if failed {
+		text = "✗ " + text
+	}
+	return notice{text: text, err: failed}
+}
+
 // editReposCmd adds repositories to the session (verb "add") or removes
 // them ("remove"), resuming it if parked, without attaching.
 func (m *Sessions) editReposCmd(r sessionctl.Row, verb string, repos []string) tea.Cmd {
@@ -1182,6 +1241,8 @@ func (m *Sessions) onAction(msg actionMsg) tea.Cmd {
 		m.notice = notice{text: "Resumed " + label + "."}
 	case msg.verb == "add":
 		m.notice = notice{text: "Added " + strings.Join(msg.changed, ", ") + " to " + label + "."}
+	case msg.verb == "sync":
+		m.notice = syncNotice(label, msg.synced)
 	case msg.verb == "remove":
 		m.notice = notice{text: "Removed " + strings.Join(msg.changed, ", ") + " from " + label + "; their checkouts stay in /sandbox."}
 	}

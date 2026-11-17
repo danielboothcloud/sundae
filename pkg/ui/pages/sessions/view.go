@@ -574,7 +574,7 @@ func (m *Sessions) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		nav,
 		{m.keys.Attach, m.keys.New, m.keys.End, m.keys.Park},
-		{m.keys.AddRepo, m.keys.DropRepo},
+		{m.keys.AddRepo, m.keys.DropRepo, m.keys.Sync},
 		{m.keys.Copy, m.keys.Filter, m.keys.Clear, pane, m.keys.Retry},
 	}
 }
@@ -612,6 +612,7 @@ func (m *Sessions) Actions() []key.Binding {
 		if len(rowRepos(r)) >= 2 {
 			as = append(as, m.keys.DropRepo)
 		}
+		as = append(as, m.keys.Sync)
 	}
 	return append(as, m.keys.Copy, m.keys.End)
 }

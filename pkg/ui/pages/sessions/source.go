@@ -10,10 +10,12 @@ import (
 	"github.com/danielboothcloud/sundae/pkg/access"
 	"github.com/danielboothcloud/sundae/pkg/backend"
 	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/forge"
 	"github.com/danielboothcloud/sundae/pkg/openshell"
 	"github.com/danielboothcloud/sundae/pkg/proto"
 	"github.com/danielboothcloud/sundae/pkg/sessionctl"
 	"github.com/danielboothcloud/sundae/pkg/signals"
+	"github.com/danielboothcloud/sundae/pkg/ui/pages/forges"
 )
 
 // listTimeout bounds one listing of the user's sessions, so an unreachable
@@ -64,6 +66,23 @@ type Source interface {
 	// AttachCommand is the command that attaches to the session from a
 	// terminal.
 	AttachCommand(name string) string
+	// SyncRepos brings the session's checkouts up to date: it first syncs
+	// each repository imported from a forge from that forge (server
+	// admins only, like the Forges tab), then resumes the session if it
+	// is parked and updates its checkouts (openshell.UpdateCheckouts).
+	SyncRepos(ctx context.Context, name string, repos []string) ([]RepoSync, error)
+}
+
+// RepoSync is what SyncRepos did to one repository of a session.
+type RepoSync struct {
+	Repo string
+	// Forge is the forge the repository was synced from first; "" for a
+	// local repository, or when the user may not sync forges.
+	Forge string
+	// ForgeErr is why the forge sync failed; "" when it did not.
+	ForgeErr string
+	// Checkout is what happened to the checkout in the sandbox.
+	Checkout openshell.CheckoutUpdate
 }
 
 // Feed delivers signals as they are recorded; *signals.Feed satisfies it.
@@ -251,6 +270,52 @@ func (s *source) Park(ctx context.Context, name string) (parked bool, err error)
 
 func (s *source) AttachCommand(name string) string {
 	return sessionctl.AttachCommand(s.cfg.SSH.PublicURL, name)
+}
+
+func (s *source) SyncRepos(ctx context.Context, name string, repos []string) ([]RepoSync, error) {
+	forgeOf := map[string]RepoSync{}
+	if svc := forge.FromContext(s.ctx); svc != nil && forges.IsServerAdmin(s.ctx) {
+		for _, r := range repos {
+			o, ok, err := svc.Origin(ctx, r)
+			if err != nil || !ok {
+				continue
+			}
+			rs := RepoSync{Repo: r, Forge: o.Forge}
+			res, err := svc.SyncRepo(ctx, o.Forge, r)
+			switch {
+			case err != nil:
+				rs.ForgeErr = err.Error()
+			case res.Error != "":
+				rs.ForgeErr = res.Error
+			}
+			forgeOf[r] = rs
+		}
+	}
+
+	// Prepare resumes a parked session and renews the sandbox's git
+	// credentials, which the fetch uses.
+	client, err := NewClient(s.cfg)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Close() //nolint:errcheck
+	mgr := sessionctl.NewManager(s.ctx, client)
+	p, err := sessionctl.Prepare(ctx, mgr, sessionctl.Request{Name: name})
+	if err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+	defer p.Close()
+	ups, err := mgr.UpdateCheckouts(ctx, p.Session.Sandbox, p.Session.Repos)
+	if err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+	out := make([]RepoSync, 0, len(ups))
+	for _, u := range ups {
+		rs := forgeOf[u.Repo]
+		rs.Repo, rs.Checkout = u.Repo, u
+		out = append(out, rs)
+	}
+	return out, nil
 }
 
 // attacher is a sessionctl.Prepared with the client it was prepared with.
