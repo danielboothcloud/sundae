@@ -145,6 +145,22 @@ func (f *fakeSource) AttachCommand(name string) string {
 }
 func (f *fakeSource) End(context.Context, string, bool) (bool, error) { return true, nil }
 func (f *fakeSource) SnapshotsOnEnd() bool                            { return false }
+func (f *fakeSource) SnapshotsEnabled() bool                          { return false }
+func (f *fakeSource) EndDeletingSnapshot(context.Context, string) (bool, error) {
+	return false, openshell.ErrSnapshotsOff
+}
+
+func (f *fakeSource) Snapshots(context.Context) ([]openshell.StoredSnapshot, error) {
+	return nil, openshell.ErrSnapshotsOff
+}
+
+func (f *fakeSource) DeleteSnapshot(context.Context, string) (openshell.StoredSnapshot, error) {
+	return openshell.StoredSnapshot{}, openshell.ErrSnapshotsOff
+}
+
+func (f *fakeSource) PruneSnapshots(context.Context, time.Duration) ([]openshell.StoredSnapshot, error) {
+	return nil, openshell.ErrSnapshotsOff
+}
 func (f *fakeSource) Park(context.Context, string) (bool, error)      { return true, nil }
 func (f *fakeSource) SyncRepos(context.Context, string, []string) ([]sessions.RepoSync, error) {
 	return nil, nil

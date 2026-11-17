@@ -55,6 +55,8 @@ type KeyMap struct {
 	DropRepo  key.Binding
 	Sync      key.Binding
 	End       key.Binding
+	EndDelete key.Binding
+	Snapshots key.Binding
 	Park      key.Binding
 	Copy      key.Binding
 	Filter    key.Binding
@@ -81,6 +83,8 @@ func DefaultKeyMap() KeyMap {
 		DropRepo:  key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "remove repos")),
 		Sync:      key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "sync with forge")),
 		End:       key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "end")),
+		EndDelete: key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "end & delete snapshot")),
+		Snapshots: key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "snapshots")),
 		Park:      key.NewBinding(key.WithKeys("z"), key.WithHelp("z", "park/resume")),
 		Copy:      key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "copy attach command")),
 		Filter:    key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
@@ -142,7 +146,7 @@ type (
 // even while another page is shown, so its live updates do not stop.
 func IsMsg(msg tea.Msg) bool {
 	switch msg.(type) {
-	case listMsg, followMsg, signalsMsg, feedEndMsg, tickMsg, reposMsg, actionMsg, opMsg, attachDoneMsg:
+	case listMsg, followMsg, signalsMsg, feedEndMsg, tickMsg, reposMsg, actionMsg, opMsg, attachDoneMsg, snapListMsg, snapDoneMsg:
 		return true
 	}
 	return false
@@ -166,6 +170,9 @@ type Sessions struct {
 	handoff Handoff
 	keys    KeyMap
 	now     func() time.Time
+	// snaps is the open Snapshots view (S); nil when closed.
+	snaps    *snapList
+	snapKeys snapKeys
 
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -247,6 +254,7 @@ func New(c common.Common, src Source) *Sessions {
 		common:   c,
 		src:      src,
 		keys:     DefaultKeyMap(),
+		snapKeys: defaultSnapKeys(),
 		now:      time.Now,
 		ctx:      ctx,
 		cancel:   cancel,
@@ -276,9 +284,10 @@ func (m *Sessions) Close() {
 }
 
 // Capturing reports whether the tab takes every key: a form, a confirm or
-// a filter is open. The frame then leaves q, tab and the digits to it.
+// a filter or the Snapshots view is open. The frame then leaves q, tab
+// and the digits to it.
 func (m *Sessions) Capturing() bool {
-	return m.form != nil || m.confirm != nil || m.typing
+	return m.form != nil || m.confirm != nil || m.typing || m.snaps != nil
 }
 
 // SetSize implements common.Component.
@@ -463,6 +472,11 @@ func (m *Sessions) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 		return m, m.onAttachDone(msg)
 	case actionMsg:
 		return m, m.onAction(msg)
+	case snapListMsg:
+		m.onSnapList(msg)
+		return m, nil
+	case snapDoneMsg:
+		return m, m.onSnapDone(msg)
 	case tea.KeyPressMsg:
 		return m, m.onKey(msg)
 	}
@@ -751,6 +765,8 @@ func (m *Sessions) onKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case m.typing:
 		return m.onFilterKey(msg)
+	case m.snaps != nil:
+		return m.onSnapKey(msg)
 	}
 	m.notice = notice{}
 	if m.src == nil {
@@ -782,6 +798,8 @@ func (m *Sessions) onKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case key.Matches(msg, m.keys.Retry):
 		return m.listCmd()
+	case key.Matches(msg, m.keys.Snapshots) && m.src.SnapshotsEnabled():
+		return m.openSnapshots()
 	case key.Matches(msg, m.keys.New):
 		if m.scope != "" {
 			return m.reposCmd(prefill{repos: []string{m.scope}})
@@ -910,6 +928,11 @@ func (m *Sessions) onSessionsKey(msg tea.KeyPressMsg) tea.Cmd {
 			question = "End " + label + "?  /sandbox is saved to S3, then the sandbox is deleted."
 		}
 		m.ask(question, func() tea.Cmd { return m.endCmd(r, false) })
+		return nil
+	case key.Matches(msg, m.keys.EndDelete) && m.src.SnapshotsEnabled():
+		m.target = r
+		m.ask("End "+label+" and delete its S3 snapshot?  The sandbox, the snapshot and any unpushed work are gone for good.",
+			func() tea.Cmd { return m.endDeleteCmd(r) })
 		return nil
 	case key.Matches(msg, m.keys.Park):
 		if m.busy[r.Info.Sandbox] != "" {
@@ -1129,6 +1152,16 @@ func (m *Sessions) endCmd(r sessionctl.Row, force bool) tea.Cmd {
 	}
 }
 
+// endDeleteCmd ends the session and deletes its S3 snapshot, taking none.
+func (m *Sessions) endDeleteCmd(r sessionctl.Row) tea.Cmd {
+	m.busy[r.Info.Sandbox] = "ending"
+	ctx, src := m.ctx, m.src
+	return func() tea.Msg {
+		existed, err := src.EndDeletingSnapshot(ctx, r.Info.Name)
+		return actionMsg{key: r.Info.Sandbox, verb: "end-delete", repos: rowRepos(r), name: r.Info.Name, done: existed, err: err, row: r}
+	}
+}
+
 func (m *Sessions) parkCmd(r sessionctl.Row) tea.Cmd {
 	m.busy[r.Info.Sandbox] = "parking"
 	ctx, src := m.ctx, m.src
@@ -1240,6 +1273,8 @@ func (m *Sessions) onAction(msg actionMsg) tea.Cmd {
 		return m.listCmd()
 	case msg.err != nil:
 		m.notice = notice{text: "✗ " + label + ": " + msg.err.Error(), err: true}
+	case msg.verb == "end-delete":
+		m.notice = notice{text: "Ended " + label + " and deleted its snapshot."}
 	case msg.verb == "end" && msg.done:
 		m.notice = notice{text: "Ended " + label + "."}
 	case msg.verb == "end":

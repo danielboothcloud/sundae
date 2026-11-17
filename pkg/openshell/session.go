@@ -1009,6 +1009,11 @@ func (m *Manager) Attach(ctx context.Context, s *Session, cols, rows uint32) (In
 type EndOptions struct {
 	// Force ends the session even when its snapshot fails.
 	Force bool
+	// DeleteSnapshot deletes the session's stored snapshot too, and takes
+	// no snapshot on end. A session parked to its snapshot loses it; one
+	// that has already ended has its snapshot deleted. It needs S3
+	// snapshots (ErrSnapshotsOff).
+	DeleteSnapshot bool
 	// Progress receives human-readable progress messages. May be nil.
 	Progress io.Writer
 }
@@ -1025,8 +1030,11 @@ type EndResult struct {
 	// anyway.
 	SnapshotErr error
 	// Parked reports that the session was parked to its snapshot, which is
-	// kept.
+	// kept unless DeleteSnapshot.
 	Parked bool
+	// SnapshotDeleted is the stored snapshot DeleteSnapshot deleted; nil
+	// when there was none.
+	SnapshotDeleted *SnapshotInfo
 }
 
 // End is EndSession without options: a failed snapshot stops it.
@@ -1060,6 +1068,9 @@ func (m *Manager) EndSession(ctx context.Context, user proto.User, name string, 
 		progress = io.Discard
 	}
 
+	if o.DeleteSnapshot && m.snaps == nil {
+		return res, ErrSnapshotsOff
+	}
 	sandbox := SessionSandboxName(user.Username(), name)
 	sess := events.NewSession(user.Username(), name, sandbox, nil)
 	failed := func(op string, err error) (EndResult, error) {
@@ -1104,7 +1115,7 @@ func (m *Manager) EndSession(ctx context.Context, user proto.User, name string, 
 	}
 
 	if existed {
-		if m.snaps.onEnd() {
+		if m.snaps.onEnd() && !o.DeleteSnapshot {
 			info, serr := m.snapshotForEnd(ctx, user, sess, sb, progress)
 			switch {
 			case serr == nil:
@@ -1132,6 +1143,17 @@ func (m *Manager) EndSession(ctx context.Context, user proto.User, name string, 
 		m.monitor.forgetRepos(sandbox)
 		// The session is gone even if revoking its tokens below fails.
 		m.publish(user, events.SessionLifecycle{Session: sess, Step: events.LifecycleEnded}, nil)
+	}
+
+	if o.DeleteSnapshot {
+		info, err := m.snaps.stat(ctx, user.ID(), sandbox)
+		if err == nil && info != nil {
+			err = m.snaps.store.Delete(ctx, m.snaps.key(user.ID(), sandbox))
+		}
+		if err != nil {
+			return res, fmt.Errorf("openshell: delete the snapshot of session %s: %w", name, err)
+		}
+		res.SnapshotDeleted = info
 	}
 
 	if err := m.revokeTokens(ctx, user, TokenName(sandbox), true); err != nil {

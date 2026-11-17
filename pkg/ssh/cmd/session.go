@@ -47,6 +47,7 @@ func SessionCommand() *cobra.Command {
 		sessionParkCommand(),
 		sessionResumeCommand(),
 		sessionEndCommand(),
+		sessionSnapshotCommand(),
 	)
 
 	return cmd
@@ -700,7 +701,7 @@ its program again if it is not running. It never creates a session.
 
 func sessionEndCommand() *cobra.Command {
 	var name string
-	var force bool
+	var force, deleteSnapshot bool
 	cmd := &cobra.Command{
 		Use:     "end SESSION",
 		Aliases: []string{"stop", "rm"},
@@ -713,6 +714,10 @@ replacing the session's previous snapshot, and starting the session again
 restores it. When the snapshot fails the session is not ended; --force ends
 it anyway, without a snapshot. A session parked to its snapshot is ended by
 forgetting that it is parked; its snapshot is kept.
+
+--delete-snapshot deletes the session's S3 snapshot too and takes none on
+end, so the session's work is gone for good. It also deletes the snapshot
+of a session that has already ended.
 
 ` + sessionArgHelp,
 		Args: cobra.ExactArgs(1),
@@ -733,14 +738,19 @@ forgetting that it is parked; its snapshot is kept.
 			defer client.Close() //nolint:errcheck
 
 			res, err := newManager(ctx, client).EndSession(ctx, proto.UserFromContext(ctx), n, openshell.EndOptions{
-				Force:    force,
-				Progress: cmd.ErrOrStderr(),
+				Force:          force,
+				DeleteSnapshot: deleteSnapshot,
+				Progress:       cmd.ErrOrStderr(),
 			})
 			if err != nil {
 				return err
 			}
 
 			switch {
+			case deleteSnapshot && res.SnapshotDeleted != nil && res.Existed:
+				cmd.PrintErrf("Session ended; its S3 snapshot (%s) is deleted\n", res.SnapshotDeleted.Describe())
+			case deleteSnapshot && res.SnapshotDeleted != nil:
+				cmd.PrintErrf("No session to end; its S3 snapshot (%s) is deleted\n", res.SnapshotDeleted.Describe())
 			case res.Parked:
 				cmd.PrintErrln("Session ended; its S3 snapshot is kept")
 			case res.Existed && res.Snapshot != nil:
@@ -756,6 +766,7 @@ forgetting that it is parked; its snapshot is kept.
 
 	addLegacyNameFlag(cmd, &name)
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "End the session even when its snapshot fails")
+	cmd.Flags().BoolVar(&deleteSnapshot, "delete-snapshot", false, "Delete the session's S3 snapshot too, taking none on end")
 
 	return cmd
 }

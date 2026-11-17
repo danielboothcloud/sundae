@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -56,6 +57,57 @@ type fakeSource struct {
 	syncErr error
 	// gate, when set, holds Prepare after its progress lines.
 	gate chan struct{}
+	// stored are the snapshots Snapshots lists; deletedSnaps and pruned
+	// record DeleteSnapshot and PruneSnapshots; endDeleted the sessions
+	// EndDeletingSnapshot ended.
+	stored       []openshell.StoredSnapshot
+	deletedSnaps []string
+	pruned       int
+	endDeleted   []string
+}
+
+func (f *fakeSource) SnapshotsEnabled() bool { return f.snapshots }
+
+func (f *fakeSource) EndDeletingSnapshot(_ context.Context, name string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.endDeleted = append(f.endDeleted, name)
+	return true, nil
+}
+
+func (f *fakeSource) Snapshots(context.Context) ([]openshell.StoredSnapshot, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.stored), nil
+}
+
+func (f *fakeSource) DeleteSnapshot(_ context.Context, name string) (openshell.StoredSnapshot, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, s := range f.stored {
+		if s.Session == name {
+			f.stored = slices.Delete(f.stored, i, i+1)
+			f.deletedSnaps = append(f.deletedSnaps, name)
+			return s, nil
+		}
+	}
+	return openshell.StoredSnapshot{}, openshell.ErrNoSnapshot
+}
+
+func (f *fakeSource) PruneSnapshots(context.Context, time.Duration) ([]openshell.StoredSnapshot, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out, keep []openshell.StoredSnapshot
+	for _, s := range f.stored {
+		if s.State == openshell.SnapshotEnded {
+			out = append(out, s)
+		} else {
+			keep = append(keep, s)
+		}
+	}
+	f.stored = keep
+	f.pruned += len(out)
+	return out, nil
 }
 
 func (f *fakeSource) List(context.Context) ([]sessionctl.Row, error) {

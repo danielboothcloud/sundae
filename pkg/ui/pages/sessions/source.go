@@ -61,6 +61,20 @@ type Source interface {
 	// SnapshotsOnEnd reports whether ending a session saves /sandbox to
 	// S3 first.
 	SnapshotsOnEnd() bool
+	// SnapshotsEnabled reports whether S3 snapshots are configured, so the
+	// Snapshots view and end-and-delete are offered.
+	SnapshotsEnabled() bool
+	// EndDeletingSnapshot ends a session and deletes its S3 snapshot,
+	// taking none (session end --delete-snapshot). It reports whether
+	// there was a session.
+	EndDeletingSnapshot(ctx context.Context, name string) (bool, error)
+	// Snapshots lists the user's stored snapshots, newest first.
+	Snapshots(ctx context.Context) ([]openshell.StoredSnapshot, error)
+	// DeleteSnapshot deletes the snapshot of the session name.
+	DeleteSnapshot(ctx context.Context, name string) (openshell.StoredSnapshot, error)
+	// PruneSnapshots deletes the snapshots of ended sessions older than
+	// olderThan (0: any age) and returns them.
+	PruneSnapshots(ctx context.Context, olderThan time.Duration) ([]openshell.StoredSnapshot, error)
 	// Park parks a running session. It reports whether it parked it.
 	Park(ctx context.Context, name string) (bool, error)
 	// AttachCommand is the command that attaches to the session from a
@@ -263,6 +277,41 @@ func (s *source) End(ctx context.Context, name string, force bool) (existed bool
 }
 
 func (s *source) SnapshotsOnEnd() bool { return s.cfg.Snapshots.S3.Snapshots(config.SnapshotOnEnd) }
+
+func (s *source) SnapshotsEnabled() bool { return s.cfg.Snapshots.S3.Enabled }
+
+func (s *source) EndDeletingSnapshot(ctx context.Context, name string) (existed bool, err error) {
+	err = s.withClient(func(mgr *openshell.Manager) error {
+		res, err := mgr.EndSession(ctx, s.user, name, openshell.EndOptions{DeleteSnapshot: true})
+		existed = res.Existed
+		return err //nolint:wrapcheck
+	})
+	return existed, err
+}
+
+func (s *source) Snapshots(ctx context.Context) (out []openshell.StoredSnapshot, err error) {
+	err = s.withClient(func(mgr *openshell.Manager) error {
+		out, err = mgr.Snapshots(ctx, s.user)
+		return err //nolint:wrapcheck
+	})
+	return out, err
+}
+
+func (s *source) DeleteSnapshot(ctx context.Context, name string) (out openshell.StoredSnapshot, err error) {
+	err = s.withClient(func(mgr *openshell.Manager) error {
+		out, err = mgr.DeleteSnapshot(ctx, s.user, name)
+		return err //nolint:wrapcheck
+	})
+	return out, err
+}
+
+func (s *source) PruneSnapshots(ctx context.Context, olderThan time.Duration) (out []openshell.StoredSnapshot, err error) {
+	err = s.withClient(func(mgr *openshell.Manager) error {
+		out, err = mgr.PruneSnapshots(ctx, s.user, openshell.PruneOptions{OlderThan: olderThan})
+		return err //nolint:wrapcheck
+	})
+	return out, err
+}
 
 func (s *source) Park(ctx context.Context, name string) (parked bool, err error) {
 	err = s.withClient(func(mgr *openshell.Manager) error {
