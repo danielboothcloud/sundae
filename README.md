@@ -620,28 +620,10 @@ terminal and every command run through `pods/exec`.
   default, while `node_selector`, `annotations` and `labels` are merged. A
   profile sets `image` or `pod.image`, not both.
 
-Nested containers (podman) need the pod runtime and relaxed settings, for
-example:
-
-```yaml
-sessions:
-  profiles:
-    podman:
-      runtime: pod
-      image: ghcr.io/example/agent-podman:latest
-      pod:
-        runtime_class: kata
-        security_context:
-          allowPrivilegeEscalation: true   # newuidmap/newgidmap are setuid
-          seccompProfile: {type: Unconfined}
-          appArmorProfile: {type: Unconfined}
-          capabilities: {add: [SETUID, SETGID]}
-        volumes: [{name: fuse, hostPath: {path: /dev/fuse, type: CharDevice}}]
-        volume_mounts: [{name: fuse, mountPath: /dev/fuse}]
-```
-
-This is untested on a cluster: podman inside a Kata pod depends on
-`/dev/fuse`, user namespaces and seccomp inside the Kata guest.
+Sundae sets no workload-specific settings: what a workload needs (another
+RuntimeClass, a relaxed seccomp profile, capabilities, a device volume) goes
+into `pod:` or a profile's `pod:`, and what it needs in the image goes into
+the image.
 
 A profile's runtime-specific settings sit under the runtime's name:
 `sessions.profiles.<name>.openshell` holds `providers` and `runtime_class`,

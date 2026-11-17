@@ -318,7 +318,7 @@ config:
       fsGroup: 10001
       fsGroupChangePolicy: OnRootMismatch
     # The sandbox container's resources (requests, limits). A device-plugin
-    # resource such as a FUSE device goes under limits.
+    # resource goes under limits.
     resources: {}
     # The PVC mounted at /sandbox. Empty storage_class: the cluster's
     # default StorageClass. Use block storage (ReadWriteOnce).
@@ -333,11 +333,7 @@ config:
     # Extra volumes of the sandbox Pod and their mounts in the sandbox
     # container (Kubernetes Volume and VolumeMount objects).
     volumes: []
-    #  - name: fuse
-    #    hostPath: {path: /dev/fuse, type: CharDevice}
     volume_mounts: []
-    #  - name: fuse
-    #    mountPath: /dev/fuse
 
   # What runs in the sandboxes: several named sessions per repository
   # (session start <repo> --name <name>), each from a profile.
@@ -397,18 +393,12 @@ config:
     #    openshell:
     #      providers: [my-claude, my-github]
     #      runtime_class: kata-containers
-    #  # Nested containers in a Kata pod (untested; see the chart README,
-    #  # "Pod runtime").
-    #  podman:
+    #  isolated:
     #    runtime: pod
-    #    image: ghcr.io/me/agent-podman:latest
+    #    image: ghcr.io/me/agent:latest
     #    pod:
     #      runtime_class: kata
-    #      security_context:
-    #        seccompProfile: {type: Unconfined}
-    #        capabilities: {add: [SETUID, SETGID]}
-    #      volumes: [{name: fuse, hostPath: {path: /dev/fuse, type: CharDevice}}]
-    #      volume_mounts: [{name: fuse, mountPath: /dev/fuse}]
+    #      resources: {limits: {memory: 8Gi}}
     # The profile for sessions started without --profile, by repository name
     # glob ("*" does not cross "/", "**" does; the most specific match wins).
     repos: {}

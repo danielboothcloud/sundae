@@ -332,7 +332,7 @@ pod:
   # Kubernetes RuntimeClass, e.g. kata. Empty: the cluster's default.
   runtime_class: {{ printf "%q" .Pod.RuntimeClass }}
   # Default: no privilege escalation, no capabilities, RuntimeDefault
-  # seccomp. Nested containers (podman) need more: see the README.
+  # seccomp. Relax them here or in a profile as a workload needs.
   security_context: {{ json .Pod.SecurityContext }}
   # Default: the sandbox image's user 10001, which owns /sandbox (fsGroup).
   pod_security_context: {{ json .Pod.PodSecurityContext }}
@@ -344,7 +344,7 @@ pod:
   tolerations: {{ json .Pod.Tolerations }}
   annotations: {{ json .Pod.Annotations }}
   labels: {{ json .Pod.Labels }}
-  # Extra volumes and their mounts in the sandbox container, e.g. /dev/fuse.
+  # Extra volumes and their mounts in the sandbox container.
   volumes: {{ json .Pod.Volumes }}
   volume_mounts: {{ json .Pod.VolumeMounts }}
 

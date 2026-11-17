@@ -87,7 +87,7 @@ type PodSettings struct {
 	Annotations  map[string]string `yaml:"annotations"`
 	Labels       map[string]string `yaml:"labels"`
 	// Volumes are extra pod volumes, and VolumeMounts their mounts in the
-	// sandbox container: e.g. /dev/fuse as a hostPath CharDevice.
+	// sandbox container.
 	Volumes      []map[string]any `yaml:"volumes"`
 	VolumeMounts []map[string]any `yaml:"volume_mounts"`
 }

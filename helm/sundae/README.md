@@ -463,7 +463,7 @@ sandbox image, user `sandbox` 10001:10001 with `HOME=/sandbox`:
 | `pod.security_context` | `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`, `seccompProfile: RuntimeDefault` | The sandbox container's `securityContext`. |
 | `pod.runtime_class` | empty: the cluster default | `runtimeClassName`, e.g. `kata`. In a profile, `default` forces the cluster default. |
 | `pod.resources` | none | Requests and limits; also device-plugin resources. |
-| `pod.volumes`, `pod.volume_mounts` | none | Extra volumes, e.g. `/dev/fuse`. |
+| `pod.volumes`, `pod.volume_mounts` | none | Extra volumes and their mounts in the sandbox container. |
 | `pod.node_selector`, `pod.tolerations`, `pod.annotations`, `pod.labels` | none | Placement and metadata of the sandbox Pod. |
 | `pod.storage_class`, `pod.storage_size` | cluster default, `10Gi` | The `/sandbox` PVC. |
 
@@ -473,47 +473,12 @@ map renders as `{}`, which Sundae reads as "none"); set the whole map to
 `null` to get Sundae's built-in default. Profiles have no chart defaults, so
 a profile's `pod` maps are passed as written.
 
-Nested containers (podman in the sandbox) need these relaxed, ideally only
-in a profile and under a VM runtime:
-
-```yaml
-config:
-  sessions:
-    profiles:
-      podman:
-        runtime: pod
-        image: <registry>/agent-podman:<tag>
-        pod:
-          runtime_class: kata               # a VM per Pod; must exist in the cluster
-          security_context:
-            allowPrivilegeEscalation: true                       # setuid newuidmap/newgidmap
-            capabilities: {drop: [ALL], add: [SETUID, SETGID]}
-            seccompProfile: {type: Unconfined}                   # mount, unshare, clone3, setns
-            appArmorProfile: {type: Unconfined}                  # on AppArmor nodes
-          volumes: [{name: fuse, hostPath: {path: /dev/fuse, type: CharDevice}}]
-          volume_mounts: [{name: fuse, mountPath: /dev/fuse}]
-          # Or, with a FUSE device plugin instead of the hostPath volume:
-          # resources: {limits: {<device-plugin-domain>/fuse: 1}}
-```
-
-- `runtime_class`: a VM runtime such as Kata keeps the relaxed settings
-  inside a guest kernel. This chart installs no runtime.
-- `seccompProfile: Unconfined`: the default profile blocks the mount and
-  namespace syscalls rootless podman needs.
-- `capabilities.add` and `allowPrivilegeEscalation`: `newuidmap` and
-  `newgidmap` need `SETUID` and `SETGID` for the user-namespace ID mapping.
-  The sandbox user is not root, so they get them only from setuid bits or
-  file capabilities, which `allowPrivilegeEscalation: false`
-  (`no_new_privs`) blocks.
-- `/dev/fuse`: for fuse-overlayfs, from a `hostPath` `CharDevice` volume (the
-  nodes, or with Kata the guest, must have it) or a device-plugin resource
-  in `resources.limits`.
-- `appArmorProfile: Unconfined`: the default AppArmor profile denies
-  mounts.
-
-**Open risk:** podman inside a Kata pod is untested. It depends on
-`/dev/fuse`, user namespaces and seccomp all being available inside the
-Kata guest, which this chart cannot check.
+The chart sets no workload-specific settings: whatever a workload needs
+(another RuntimeClass, a relaxed seccomp or AppArmor profile, added
+capabilities, a device volume) goes into these values, ideally in a profile
+(`config.sessions.profiles.<name>.pod`), and anything the workload needs in
+the image (users, ID ranges, tools) goes into the sandbox image. Every value
+is passed to the Pod as written.
 
 ## Check the config before deploying
 
@@ -706,7 +671,7 @@ Not checked, because it needs an image build or a live cluster:
   new user namespaces, and sets `NoNewPrivs`, under any runtime.
 - The pod runtime on a cluster: the RBAC is the set listed in "Pod
   runtime", checked only with `helm template`; the NetworkPolicy was not
-  run against a CNI. Podman in a Kata pod (see there) is untested.
+  run against a CNI.
 - The jj binary in the Sundae image (the Changes tab of jj repositories):
   the Containerfile's new jj stage has not been built. The tab was tested
   with jj 0.47.1 on macOS against local repositories. Its cache lives on
