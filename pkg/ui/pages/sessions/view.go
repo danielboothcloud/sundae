@@ -534,17 +534,19 @@ func (m *Sessions) ShortHelp() []key.Binding {
 	case m.typing:
 		return []key.Binding{m.keys.Apply, m.keys.Cancel}
 	}
-	pane := m.keys.Pane
-	pane.SetHelp("e", "history")
 	if m.pane == signalsPane {
-		return []key.Binding{m.keys.Attach, m.keys.Filter, m.keys.Attention, m.backKey()}
+		back := m.keys.Left
+		if m.sigQuery != "" {
+			back = m.keys.Clear
+		}
+		return []key.Binding{m.keys.Attach, m.keys.Attention, m.keys.Filter, back}
 	}
 	if m.listErr != nil {
 		retry := m.keys.Retry
 		retry.SetHelp("r", "retry")
-		return []key.Binding{retry, pane}
+		return []key.Binding{retry, m.keys.Right}
 	}
-	return []key.Binding{m.keys.Attach, m.keys.New, m.keys.Filter, m.keys.End, pane}
+	return []key.Binding{m.keys.Attach, m.keys.New, m.keys.Filter, m.keys.Right}
 }
 
 // backKey is esc in the signal history: it clears the filter first.

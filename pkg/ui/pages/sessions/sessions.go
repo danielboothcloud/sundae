@@ -60,6 +60,8 @@ type KeyMap struct {
 	Filter    key.Binding
 	Clear     key.Binding
 	Pane      key.Binding
+	Right     key.Binding
+	Left      key.Binding
 	Back      key.Binding
 	Retry     key.Binding
 	Attention key.Binding
@@ -84,6 +86,8 @@ func DefaultKeyMap() KeyMap {
 		Filter:    key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
 		Clear:     key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear filter")),
 		Pane:      key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "signal history")),
+		Right:     key.NewBinding(key.WithKeys("l", "right"), key.WithHelp("l", "history")),
+		Left:      key.NewBinding(key.WithKeys("h", "left"), key.WithHelp("h", "sessions")),
 		Back:      key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 		Retry:     key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 		Attention: key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "attention only")),
@@ -756,6 +760,13 @@ func (m *Sessions) onKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch {
 	case key.Matches(msg, m.keys.Pane):
 		m.pane = 1 - m.pane
+		return nil
+	case m.pane == sessionsPane && key.Matches(msg, m.keys.Right):
+		// l moves right, to the signal history; h back to the sessions.
+		m.pane = signalsPane
+		return nil
+	case m.pane == signalsPane && key.Matches(msg, m.keys.Left):
+		m.pane = sessionsPane
 		return nil
 	case m.pane == signalsPane && m.sigQuery == "" && key.Matches(msg, m.keys.Back):
 		// esc leaves the signal history for the sessions.

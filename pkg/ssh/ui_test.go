@@ -247,6 +247,23 @@ func TestHomeWithoutSessions(t *testing.T) {
 	}
 }
 
+// TestHomeTabsHL checks L and H move to the next and previous tab, as tab
+// and shift+tab do, wrapping at the ends.
+func TestHomeTabsHL(t *testing.T) {
+	ui := newTestUI(t, 80, 24, &fakeSource{rows: frameRows()})
+	if s := screenText(ui); !strings.Contains(s, "• Repositories") || !strings.Contains(s, "H/L tabs") {
+		t.Fatalf("start:\n%s", s)
+	}
+	uiKey(ui, "L")
+	if s := screenText(ui); !strings.Contains(s, "• Sessions") {
+		t.Fatalf("L:\n%s", s)
+	}
+	uiKey(ui, "H", "H")
+	if s := screenText(ui); !strings.Contains(s, "• About") {
+		t.Fatalf("H wraps to the last tab:\n%s", s)
+	}
+}
+
 func TestHomeSessionsKeys(t *testing.T) {
 	ui := newTestUI(t, 80, 24, &fakeSource{rows: frameRows()})
 	uiKey(ui, "2")

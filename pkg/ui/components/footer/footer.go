@@ -1,6 +1,8 @@
 package footer
 
 import (
+	"strings"
+
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -27,7 +29,50 @@ func NewHelp(c common.Common) help.Model {
 	h.Styles.ShortDesc = c.Styles.HelpValue
 	h.Styles.FullKey = c.Styles.HelpKey
 	h.Styles.FullDesc = c.Styles.HelpValue
+	h.Styles.ShortSeparator = separatorStyle(c)
+	h.Styles.FullSeparator = separatorStyle(c)
+	h.Styles.Ellipsis = separatorStyle(c)
 	return h
+}
+
+// separatorStyle is the style of the " • " between help items.
+func separatorStyle(c common.Common) lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(c.Styles.HelpDivider.GetForeground())
+}
+
+// ShortView renders bindings as a short help line: "key desc" items
+// separated by " • ", each key (and the words of one that deletes or ends
+// something) coloured by its action kind (common.KindOf). Disabled
+// bindings are left out. With width > 0 the line ends with "…" where the
+// next item does not fit.
+func ShortView(c common.Common, kb []key.Binding, width int) string {
+	sep := separatorStyle(c).Render(" • ")
+	sepW := lipgloss.Width(sep)
+	ellipsis := separatorStyle(c).Render(" …")
+	var b strings.Builder
+	total := 0
+	for _, k := range kb {
+		if !k.Enabled() || (k.Help().Key == "" && k.Help().Desc == "") {
+			continue
+		}
+		item := c.KeyStyle(k).Render(k.Help().Key) + " " + c.DescStyle(k).Render(k.Help().Desc)
+		w := lipgloss.Width(item)
+		if total > 0 {
+			w += sepW
+		}
+		if width > 0 && total+w > width {
+			if total+lipgloss.Width(ellipsis) <= width {
+				b.WriteString(ellipsis)
+			}
+			break
+		}
+		if total > 0 {
+			b.WriteString(sep)
+		}
+		b.WriteString(item)
+		total += w
+	}
+	return b.String()
 }
 
 // New creates a new Footer.
@@ -85,17 +130,15 @@ func (f *Footer) View() string {
 func (f *Footer) shortView() string {
 	kb := f.keymap.ShortHelp()
 	n := len(kb)
+	width := f.help.Width()
 	if n < 2 || kb[n-1].Help().Key != "?" {
-		return f.help.ShortHelpView(kb)
+		return ShortView(f.common, kb, width)
 	}
-	h := f.help
-	last := h.ShortHelpView(kb[n-1:])
-	sep := h.Styles.ShortSeparator.Render(h.ShortSeparator)
-	rest := h.ShortHelpView(kb[:n-1])
-	room := h.Width() - lipgloss.Width(sep) - lipgloss.Width(last)
-	if lipgloss.Width(rest) > room {
-		h.SetWidth(max(room, 1))
-		rest = h.ShortHelpView(kb[:n-1])
+	last := ShortView(f.common, kb[n-1:], 0)
+	sep := separatorStyle(f.common).Render(" • ")
+	rest := ShortView(f.common, kb[:n-1], 0)
+	if room := width - lipgloss.Width(sep) - lipgloss.Width(last); lipgloss.Width(rest) > room {
+		rest = ShortView(f.common, kb[:n-1], max(room, 1))
 	}
 	if rest == "" {
 		return last

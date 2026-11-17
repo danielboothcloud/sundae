@@ -748,12 +748,25 @@ func TestPaneSwitch(t *testing.T) {
 	if m.pane != signalsPane || !strings.Contains(view(m), "‹ Signal history ›") {
 		t.Fatal("e did not open the signal history")
 	}
-	if h := m.ShortHelp(); h[3].Help().Key != "esc" || h[3].Help().Desc != "back" {
+	if h := m.ShortHelp(); h[3].Help().Key != "h" || h[3].Help().Desc != "sessions" {
 		t.Fatalf("help %v", h[3].Help())
 	}
 	keys(m, "esc")
 	if m.pane != sessionsPane {
 		t.Fatal("esc did not go back")
+	}
+	// l moves right to the history, h back left.
+	keys(m, "l")
+	if m.pane != signalsPane {
+		t.Fatal("l did not open the signal history")
+	}
+	keys(m, "l")
+	if m.pane != signalsPane {
+		t.Fatal("l in the history left it")
+	}
+	keys(m, "h")
+	if m.pane != sessionsPane {
+		t.Fatal("h did not go back")
 	}
 	keys(m, "e", "e")
 	if m.pane != sessionsPane {

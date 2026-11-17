@@ -950,7 +950,7 @@ func (c *Confirm) Update(msg tea.Msg) Result {
 // answers at the right end of width columns as the help footer renders
 // keys ("y yes • N no"), cutting the question to fit.
 func (c *Confirm) View(width int) string {
-	answer := footer.NewHelp(c.common).ShortHelpView([]key.Binding{c.Yes, c.No})
+	answer := footer.ShortView(c.common, []key.Binding{c.Yes, c.No}, 0)
 	aw := lipgloss.Width(answer)
 	q := common.TruncateString(c.Question, max(width-aw-2, 1))
 	gap := max(width-lipgloss.Width(q)-aw, 2)

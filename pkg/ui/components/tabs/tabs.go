@@ -79,11 +79,12 @@ func (t *Tabs) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 	cmds := make([]tea.Cmd, 0)
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
+		// tab and L go to the next tab, shift+tab and H to the previous.
 		switch msg.String() {
-		case "tab":
+		case "tab", "L":
 			t.activeTab = (t.activeTab + 1) % len(t.tabs)
 			cmds = append(cmds, t.activeTabCmd)
-		case "shift+tab":
+		case "shift+tab", "H":
 			t.activeTab = (t.activeTab - 1 + len(t.tabs)) % len(t.tabs)
 			cmds = append(cmds, t.activeTabCmd)
 		}

@@ -130,7 +130,7 @@ func (r *Repo) commonHelp() []key.Binding {
 	back := r.common.KeyMap.Back
 	back.SetHelp("esc", "back to menu")
 	tab := r.common.KeyMap.Section
-	tab.SetHelp("tab", "switch tab")
+	tab.SetHelp("H/L", "tabs")
 	b = append(b, back)
 	b = append(b, tab)
 	return b

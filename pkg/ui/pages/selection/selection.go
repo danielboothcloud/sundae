@@ -143,12 +143,12 @@ func New(c common.Common) *Selection {
 	t.CollapseBelow = sessions.NarrowWidth
 	sel.tabs = t
 
-	keys := []string{"tab", "shift+tab"}
+	keys := []string{"tab", "shift+tab", "H", "L"}
 	for i := range sel.panes {
 		keys = append(keys, strconv.Itoa(i+1))
 	}
 	sel.tabKeys = key.NewBinding(key.WithKeys(keys...),
-		key.WithHelp(fmt.Sprintf("tab/1-%d", len(sel.panes)), "tab"))
+		key.WithHelp(fmt.Sprintf("H/L/1-%d", len(sel.panes)), "tabs"))
 
 	readme := code.New(c, "", "")
 	readme.UseGlamour = true
@@ -348,11 +348,15 @@ func (s *Selection) ShortHelp() []key.Binding {
 	if s.Capturing() {
 		return s.capturingHelp()
 	}
+	// Every tab's help reads the same way: move, the main action, the
+	// tab's own keys, filter, then switching tabs. The selected row's
+	// other actions are in its action bar and menu.
+	var kb []key.Binding
 	switch s.activePane {
 	case selectorPane:
 		open := s.common.KeyMap.Select
 		open.SetHelp("enter", "open")
-		kb := []key.Binding{open, s.selector.KeyMap.Filter}
+		kb = []key.Binding{open}
 		if s.canCreate() {
 			n := s.newRepo
 			n.SetHelp("n", "new")
@@ -363,19 +367,23 @@ func (s *Selection) ShortHelp() []key.Binding {
 			ns.SetHelp("s", "session")
 			kb = append(kb, ns)
 		}
-		if len(kb) < 4 {
-			copyKey := s.common.KeyMap.Copy
-			copyKey.SetHelp("c", "copy")
-			kb = append(kb, copyKey)
-		}
-		return kb
+		kb = append(kb, s.selector.KeyMap.Filter)
 	case forgesPane:
-		return s.forges.ShortHelp()
+		kb = s.forges.ShortHelp()
 	case sessionsPane:
 		s.bindSessions()
-		return s.sessions.ShortHelp()
+		kb = s.sessions.ShortHelp()
+	default:
+		return []key.Binding{s.tabsHelp()}
 	}
-	return nil
+	return append(append([]key.Binding{s.common.KeyMap.UpDown}, kb...), s.tabsHelp())
+}
+
+// tabsHelp is the help entry for switching tabs.
+func (s *Selection) tabsHelp() key.Binding {
+	t := s.tabKeys
+	t.SetHelp("H/L", "tabs")
+	return t
 }
 
 // FullHelp implements help.KeyMap.

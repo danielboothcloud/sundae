@@ -32,8 +32,8 @@ func DefaultKeyMap() KeyMap {
 	return KeyMap{
 		Up:    key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
 		Down:  key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
-		Run:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "run")),
-		Close: key.NewBinding(key.WithKeys("esc", "space", "."), key.WithHelp("esc", "close")),
+		Run:   key.NewBinding(key.WithKeys("enter", "l"), key.WithHelp("enter", "run")),
+		Close: key.NewBinding(key.WithKeys("esc", "space", ".", "h"), key.WithHelp("esc", "close")),
 	}
 }
 
@@ -102,7 +102,7 @@ func (m *Menu) Update(msg tea.KeyPressMsg) (Result, key.Binding) {
 
 // ShortHelp is the menu's footer help.
 func (m *Menu) ShortHelp() []key.Binding {
-	move := key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑↓", "move"))
+	move := key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("j/k", "move"))
 	return []key.Binding{move, m.Keys.Run, m.Keys.Close}
 }
 
@@ -125,7 +125,8 @@ func KeyLabel(b key.Binding) string {
 }
 
 // ListView renders actions as rows of key and label, the cursor's
-// highlighted, at most width cells wide. The command palette reuses it.
+// highlighted, at most width cells wide. Keys are coloured by their
+// action kind, as the footer colours them. The command palette reuses it.
 func ListView(c common.Common, actions []key.Binding, cursor, width int) string {
 	st := c.Styles.ActionMenu
 	kw := 0
@@ -134,7 +135,7 @@ func ListView(c common.Common, actions []key.Binding, cursor, width int) string 
 	}
 	rows := make([]string, len(actions))
 	for i, a := range actions {
-		ks, as, cur := st.Key, st.Action, "  "
+		ks, as, cur := c.KeyStyle(a), c.DescStyle(a), "  "
 		if i == cursor {
 			ks, as, cur = st.ActiveKey, st.ActiveAction, st.Cursor.Render("> ")
 		}

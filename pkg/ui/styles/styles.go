@@ -55,6 +55,15 @@ type Styles struct {
 	HelpKey     lipgloss.Style
 	HelpValue   lipgloss.Style
 	HelpDivider lipgloss.Style
+
+	// Action colours keys by what they do (common.KindOf): the main
+	// action's key in the selection pink, keys that delete or end
+	// something, and their words, in red. Other keys use HelpKey.
+	Action struct {
+		PrimaryKey lipgloss.Style
+		DangerKey  lipgloss.Style
+		DangerDesc lipgloss.Style
+	}
 	URLStyle    lipgloss.Style
 
 	Error      lipgloss.Style
@@ -322,15 +331,26 @@ func DefaultStyles() *Styles {
 		Background(lipgloss.Color("236")).
 		Padding(0, 1)
 
+	// Keys stand apart from their words: a light blue key, a light grey
+	// word, a dim divider.
 	s.HelpKey = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241"))
+		Foreground(lipgloss.Color("111"))
 
 	s.HelpValue = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("239"))
+		Foreground(lipgloss.Color("248"))
 
 	s.HelpDivider = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("237")).
+		Foreground(lipgloss.Color("240")).
 		SetString(" • ")
+
+	s.Action.PrimaryKey = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("212")).
+		Bold(true)
+	s.Action.DangerKey = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("167")).
+		Bold(true)
+	s.Action.DangerDesc = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("174"))
 
 	s.URLStyle = lipgloss.NewStyle().
 		MarginLeft(1).

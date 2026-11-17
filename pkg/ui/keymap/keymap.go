@@ -70,8 +70,8 @@ func DefaultKeyMap() *KeyMap {
 			"j",
 		),
 		key.WithHelp(
-			"↑↓",
-			"navigate",
+			"j/k",
+			"move",
 		),
 	)
 
@@ -141,10 +141,12 @@ func DefaultKeyMap() *KeyMap {
 		key.WithKeys(
 			"tab",
 			"shift+tab",
+			"H",
+			"L",
 		),
 		key.WithHelp(
-			"tab",
-			"section",
+			"H/L",
+			"tabs",
 		),
 	)
 
