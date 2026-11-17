@@ -49,9 +49,9 @@ type (
 
 const (
 	// LabelUserID is the sandbox label holding the owning Sundae user ID.
-	LabelUserID = "sundae.user-id"
+	LabelUserID = sbx.LabelUserID
 	// LabelManaged marks sandboxes created by Sundae.
-	LabelManaged = "sundae.managed"
+	LabelManaged = sbx.LabelManaged
 	// AnnotationUser holds the owning Sundae username.
 	AnnotationUser = "sundae.user"
 	// AnnotationRepo holds the first repository the session was created
@@ -71,10 +71,10 @@ const (
 	// was created with (the runtime's runtime_class or the profile's);
 	// absent for the default runtime. The sandbox keeps that runtime for
 	// its lifetime.
-	AnnotationRuntimeClass = "sundae.runtime-class"
+	AnnotationRuntimeClass = sbx.AnnotationRuntimeClass
 	// AnnotationRuntime holds the session runtime the sandbox was created
 	// in (config.Runtime*); absent means config.RuntimeOpenShell.
-	AnnotationRuntime = "sundae.runtime"
+	AnnotationRuntime = sbx.AnnotationRuntime
 
 	// DefaultSessionName is the session name used when none is given and
 	// none can be derived from a repository.
@@ -606,13 +606,7 @@ func SandboxRuntime(sb *Sandbox) string {
 
 // owns reports whether a sandbox's labels carry the ownership label from
 // want.
-func owns(labels, want map[string]string) bool {
-	id, ok := want[LabelUserID]
-	if !ok {
-		return true
-	}
-	return labels[LabelUserID] == id
-}
+func owns(labels, want map[string]string) bool { return sbx.Owns(labels, want) }
 
 func hasLabels(have, labels map[string]string) bool {
 	for k, v := range labels {

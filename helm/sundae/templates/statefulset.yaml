@@ -39,7 +39,9 @@ spec:
         {{- end }}
     spec:
       serviceAccountName: {{ include "sundae.serviceAccountName" . }}
-      automountServiceAccountToken: false
+      # The token is only needed by the pod session runtime, which creates
+      # sandbox Pods and PVCs through the Kubernetes API.
+      automountServiceAccountToken: {{ include "sundae.podRuntime" . | eq "true" }}
       # Service links would inject SUNDAE_SSH_PORT, SUNDAE_HTTP_PORT, ...
       # for this chart's own Services. Sundae reads SUNDAE_* variables
       # as configuration, so keep them out.

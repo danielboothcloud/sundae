@@ -169,6 +169,10 @@ type SessionProfile struct {
 	// OpenShell holds the profile's OpenShell settings; only a profile
 	// whose runtime is RuntimeOpenShell may set them.
 	OpenShell *ProfileOpenShell `yaml:"openshell"`
+
+	// Pod overrides pod: for this profile; only a profile whose runtime
+	// is RuntimePod may set it.
+	Pod *PodSettings `yaml:"pod"`
 }
 
 // ProfileOpenShell is a profile's OpenShell settings.
@@ -387,6 +391,12 @@ func (c *Config) validateSessions() error {
 				fail("%s.openshell is set, but the profile's runtime is %s: OpenShell settings (providers, runtime_class) apply to %s profiles only; remove them, or set sessions.%s.runtime: %s", key, runtime, RuntimeOpenShell, key, RuntimeOpenShell)
 			}
 			p.OpenShell = validateProfileOpenShell(*p.OpenShell, key+".openshell", fail)
+		}
+		if p.Pod != nil && runtime != RuntimePod {
+			fail("%s.pod is set, but the profile's runtime is %s: pod settings apply to %s profiles only; remove them, or set sessions.%s.runtime: %s", key, runtime, RuntimePod, key, RuntimePod)
+		}
+		if runtime == RuntimeOpenShell && sc.Runtime != RuntimeOpenShell && !c.OpenShell.Enabled {
+			fail("%s.runtime is %s, but openshell.enabled is false", key, RuntimeOpenShell)
 		}
 		sc.Profiles[name] = p
 	}

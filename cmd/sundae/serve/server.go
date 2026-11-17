@@ -133,7 +133,7 @@ func NewServer(ctx context.Context) (*Server, error) {
 	// The session monitor, like the bus, reaches the SSH server through
 	// the context. It runs from Start until Shutdown.
 	var monitor *openshell.Monitor
-	if cfg.OpenShell.Enabled {
+	if cfg.SessionsEnabled() {
 		monitor = openshell.NewMonitor(func() (openshell.Client, error) {
 			return openshell.NewClient(cfg)
 		}, cfg, openshell.WithMonitorEvents(bus), openshell.WithMonitorLogger(log.FromContext(ctx)))
@@ -156,7 +156,7 @@ func NewServer(ctx context.Context) (*Server, error) {
 	// what is published while the server starts. It reaches the SSH
 	// server through the context.
 	var sigs *signals.History
-	if cfg.OpenShell.Enabled {
+	if cfg.SessionsEnabled() {
 		sigs = signals.New(cfg.Sessions.Signals.Keep,
 			signals.WithLogger(log.FromContext(ctx)),
 			signals.WithStateLookup(func(sandbox string) (events.State, bool) {

@@ -94,6 +94,38 @@ true
 {{- end }}
 
 {{/*
+Whether any sessions use the pod runtime: config.sessions.runtime is "pod",
+or any config.sessions.profiles.<name>.runtime is.
+*/}}
+{{- define "sundae.podRuntime" -}}
+{{- $s := .Values.config.sessions | default dict -}}
+{{- $on := eq (toString (get $s "runtime")) "pod" -}}
+{{- range $name, $p := (get $s "profiles" | default dict) -}}
+{{- if eq (toString (get ($p | default dict) "runtime")) "pod" -}}
+{{- $on = true -}}
+{{- end -}}
+{{- end -}}
+{{- if $on -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
+The namespace of the pod runtime's sandbox Pods and PVCs: config.pod.namespace,
+or the release namespace.
+*/}}
+{{- define "sundae.podNamespace" -}}
+{{- (.Values.config.pod | default dict).namespace | default .Release.Namespace -}}
+{{- end }}
+
+{{/*
+The default clone URL: this release's in-cluster HTTP Service.
+*/}}
+{{- define "sundae.defaultCloneURL" -}}
+{{- printf "http://%s-http.%s.svc.cluster.local:%v" (include "sundae.fullname" .) .Release.Namespace .Values.service.http.port -}}
+{{- end }}
+
+{{/*
 The embedded gateway's full name, computed as the OpenShell chart does
 (openshell.fullname), with the chart aliased "openshell" and its default
 nameOverride "openshell". Its Service has this name.
@@ -226,7 +258,11 @@ The Sundae config file: .Values.config, plus
   - when ntfy notifications are enabled and the ntfy token secret is mounted,
     an empty notifications.ntfy.token_file pointed at the mounted key;
   - when S3 snapshots are enabled and their credentials secret is mounted,
-    an empty snapshots.s3.credentials_file pointed at it.
+    an empty snapshots.s3.credentials_file pointed at it;
+  - when any sessions use the pod runtime, an empty pod.namespace set to the
+    release namespace and an empty openshell.clone_url (which pod sandboxes
+    clone over too) set to this release's HTTP Service, with or without
+    OpenShell.
 Refuses to render secret material or an OpenShell section Sundae itself
 would reject at startup.
 */}}
@@ -270,13 +306,25 @@ would reject at startup.
 {{- end -}}
 {{- end -}}
 {{- if not (get $os "clone_url") -}}
-{{- $_ := set $os "clone_url" (printf "http://%s-http.%s.svc.cluster.local:%v" (include "sundae.fullname" .) .Release.Namespace .Values.service.http.port) -}}
+{{- $_ := set $os "clone_url" (include "sundae.defaultCloneURL" .) -}}
 {{- end -}}
 {{- if and (include "sundae.openshellTokenMounted" .) (not (get $os "token_file")) -}}
 {{- $_ := set $os "token_file" (include "sundae.openshellTokenPath" .) -}}
 {{- end -}}
 {{- if ne (empty (get $os "tls_cert")) (empty (get $os "tls_key")) -}}
 {{- fail "config.openshell.tls_cert and config.openshell.tls_key must be set together" -}}
+{{- end -}}
+{{- $_ := set $cfg "openshell" $os -}}
+{{- end -}}
+
+{{- if include "sundae.podRuntime" . -}}
+{{- $pod := get $cfg "pod" | default dict -}}
+{{- if not (get $pod "namespace") -}}
+{{- $_ := set $pod "namespace" .Release.Namespace -}}
+{{- end -}}
+{{- $_ := set $cfg "pod" $pod -}}
+{{- if not (get $os "clone_url") -}}
+{{- $_ := set $os "clone_url" (include "sundae.defaultCloneURL" .) -}}
 {{- end -}}
 {{- $_ := set $cfg "openshell" $os -}}
 {{- end -}}

@@ -279,6 +279,10 @@ type Config struct {
 	// profiles and per-repository defaults.
 	Sessions SessionsConfig `envPrefix:"SESSIONS_" yaml:"sessions"`
 
+	// Pod configures the pod session runtime: sessions as Kubernetes
+	// pods (sessions.runtime: pod).
+	Pod PodConfig `envPrefix:"POD_" yaml:"pod"`
+
 	// Projects configures how new repositories are initialised: the
 	// templates `repo create --template` and the TUI offer.
 	Projects ProjectsConfig `envPrefix:"PROJECTS_" yaml:"projects"`
@@ -397,6 +401,8 @@ func (c *Config) Environ() []string {
 	envs = append(envs, c.sandboxPolicyEnviron()...)
 
 	envs = append(envs, c.sessionsEnviron()...)
+
+	envs = append(envs, c.podEnviron()...)
 
 	// projects.templates is a map and has no environment form; hook
 	// subprocesses read it from the config file.
@@ -537,6 +543,9 @@ var configSections = func() map[string]string {
 				continue
 			}
 			ft := f.Type
+			if ft.Kind() == reflect.Pointer {
+				ft = ft.Elem()
+			}
 			switch {
 			case ft.Kind() == reflect.Slice && ft.Elem().Kind() == reflect.Struct:
 				// A list of sections, such as forges: its entries are
@@ -748,6 +757,10 @@ func DefaultConfig() *Config {
 			ProvidersSync: DefaultProvidersSync,
 			SandboxPolicy: SandboxPolicySundae,
 		},
+		Pod: PodConfig{
+			ReadyTimeout: DefaultReadyTimeout,
+			PodSettings:  PodSettings{StorageSize: DefaultPodStorageSize},
+		},
 		Sessions: SessionsConfig{
 			Osewa: OsewaConfig{
 				BinaryDir: DefaultOsewaBinaryDir,
@@ -824,7 +837,7 @@ func (c *Config) Validate() error {
 
 	c.HTTP.CORS.AllowedOrigins = append([]string{c.HTTP.PublicURL}, c.HTTP.CORS.AllowedOrigins...)
 
-	return errors.Join(c.validateOpenShell(), c.validateProviders(), c.validateSandboxPolicy(), c.validateSessions(), c.validateProjects(), c.validateForges(), c.validateGitIdentities(), c.validateNotifications(), c.validateSnapshots())
+	return errors.Join(c.validateOpenShell(), c.validateProviders(), c.validateSandboxPolicy(), c.validateSessions(), c.validatePod(), c.validateProjects(), c.validateForges(), c.validateGitIdentities(), c.validateNotifications(), c.validateSnapshots())
 }
 
 // validateOpenShell validates the OpenShell configuration and resolves its

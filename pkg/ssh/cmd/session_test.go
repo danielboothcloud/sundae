@@ -486,7 +486,7 @@ func TestSessionListAndEnd(t *testing.T) {
 
 	stdout, _, err = runSessionCmd(t, ctx, "ls")
 	is.NoErr(err)
-	for _, want := range []string{"Name", "Repositories", "Profile", "Sandbox", "Phase", "gone", name, "Ready", openshell.SessionSandboxName("alice", "r"), "review", "claude"} {
+	for _, want := range []string{"Name", "Repositories", "Profile", "Runtime", "Sandbox", "Phase", "gone", name, "Ready", openshell.SessionSandboxName("alice", "r"), "review", "claude"} {
 		is.True(strings.Contains(stdout, want)) // missing: want
 	}
 	lines := strings.Split(stdout, "\n")
@@ -497,9 +497,9 @@ func TestSessionListAndEnd(t *testing.T) {
 		}
 	}
 	is.Equal(len(rows), 3)
-	is.True(strings.HasPrefix(rows[0], "gone gone - "+name))
-	is.True(strings.HasPrefix(rows[1], "r r - "+openshell.SessionSandboxName("alice", "r")+" Ready"))
-	is.True(strings.HasPrefix(rows[2], "review r claude "+openshell.SessionSandboxName("alice", "review")))
+	is.True(strings.HasPrefix(rows[0], "gone gone - openshell "+name))
+	is.True(strings.HasPrefix(rows[1], "r r - openshell "+openshell.SessionSandboxName("alice", "r")+" Ready"))
+	is.True(strings.HasPrefix(rows[2], "review r claude openshell "+openshell.SessionSandboxName("alice", "review")))
 
 	// r is held by two sessions now: naming it is ambiguous.
 	_, _, err = runSessionCmd(t, ctx, "end", "r", "-n", "")

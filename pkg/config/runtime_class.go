@@ -65,6 +65,8 @@ func (c *Config) ProfileRuntimeClass(profile string) string {
 	switch c.ProfileRuntime(profile) {
 	case RuntimeOpenShell:
 		return ResolveRuntimeClass(c.Sessions.Profiles[profile].OpenShellRuntimeClass(), c.OpenShell.RuntimeClass)
+	case RuntimePod:
+		return ResolveRuntimeClass(c.PodSettingsFor(profile).RuntimeClass)
 	default:
 		return ""
 	}

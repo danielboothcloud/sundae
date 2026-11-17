@@ -52,7 +52,7 @@ repository start from (see "repo profile"); a template may set one too.
 			}
 			if start {
 				// Checked before anything is created.
-				if !cfg.OpenShell.Enabled {
+				if !cfg.SessionsEnabled() {
 					return errStartNeedsSessions
 				}
 				if user == nil {

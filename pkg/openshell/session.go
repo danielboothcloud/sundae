@@ -460,32 +460,36 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 		created bool
 	)
 	if create {
-		image := opts.Image
-		if parked != nil {
-			image = parked.Image
-		}
-		if image == "" {
-			image = p.Image
-		}
-		if image == "" {
-			image = m.image
-		}
 		// The runtime follows the image: a session parked to its snapshot
-		// is created again in the runtime, and with the RuntimeClass, it
-		// had; else the profile's, else the defaults.
+		// is created again in the runtime, from the image and with the
+		// RuntimeClass it had; else the profile's, else the defaults.
 		runtime := m.cfg.ProfileRuntime(profile)
+		image := opts.Image
 		var parkedRuntimeClass string
 		if parked != nil {
 			runtime = parked.SessionRuntime()
+			image = parked.Image
 			parkedRuntimeClass = parked.RuntimeClass
 		}
 		var (
 			runtimeClass string
 			providers    []string
 		)
-		if runtime == config.RuntimeOpenShell {
+		switch runtime {
+		case config.RuntimeOpenShell:
+			if image == "" {
+				image = p.Image
+			}
+			if image == "" {
+				image = m.image
+			}
 			runtimeClass = config.ResolveRuntimeClass(parkedRuntimeClass, p.OpenShellRuntimeClass(), m.runtimeClass)
 			providers = p.OpenShellProviders()
+		default:
+			if image == "" {
+				image = m.cfg.ProfileImage(profile)
+			}
+			runtimeClass = config.ResolveRuntimeClass(parkedRuntimeClass, m.cfg.ProfileRuntimeClass(profile))
 		}
 		annotations := sessionAnnotations(opts.User.Username(), repos, name, profile, providers)
 		annotations[AnnotationRuntime] = runtime
@@ -700,6 +704,9 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 	case s.Started && s.Unparked && parked != nil:
 		// A snapshot keeps /sandbox, not running programs.
 		fmt.Fprintf(progress, "Started %s again: it was not running when the session resumed (the session was parked to a snapshot of /sandbox, which keeps files but not running programs)\n", strings.Join(command, " ")) //nolint:errcheck
+	case s.Started && s.Unparked && s.Runtime == config.RuntimePod:
+		// Parking a pod session deletes its pod.
+		fmt.Fprintf(progress, "Started %s again: parking stopped it (a parked pod session keeps /sandbox, not running programs)\n", strings.Join(command, " ")) //nolint:errcheck
 	case s.Started && s.Unparked:
 		// The sandbox's memory was not restored (it restarted cleanly,
 		// see resumeRestartIfRestoreFails), or the program had exited

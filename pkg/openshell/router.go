@@ -9,6 +9,7 @@ import (
 
 	"github.com/danielboothcloud/sundae/pkg/config"
 	sbx "github.com/danielboothcloud/sundae/pkg/sandbox"
+	"github.com/danielboothcloud/sundae/pkg/sandbox/pod"
 )
 
 // NewClient returns the Client for the session runtimes cfg uses
@@ -33,6 +34,13 @@ func NewClient(cfg *config.Config) (Client, error) {
 			}
 			c.policy, c.policyErr = BuildSandboxPolicy(cfg)
 			backends[r] = c
+		case config.RuntimePod:
+			p, err := pod.New(cfg)
+			if err != nil {
+				closeAll()
+				return nil, err
+			}
+			backends[r] = p
 		default:
 			closeAll()
 			return nil, fmt.Errorf("session runtime %q is not implemented", r)

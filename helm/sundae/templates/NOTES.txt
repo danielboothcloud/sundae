@@ -26,6 +26,32 @@ Sundae gives each sandbox it creates a policy allowing that{{ if (($cfg.snapshot
 Other egress is denied unless an attached provider allows it; see the chart README, "Sandbox egress".
 {{- end }}
 {{- end }}
+{{- if include "sundae.podRuntime" . }}
+{{- $cfg := include "sundae.config" . | fromYaml }}
+{{- $s := $cfg.sessions | default dict }}
+{{- $profiles := list }}
+{{- range $name, $p := ($s.profiles | default dict) }}
+{{- if eq (toString ($p | default dict).runtime) "pod" }}
+{{- $profiles = append $profiles $name }}
+{{- end }}
+{{- end }}
+
+Pod sessions are enabled ({{ if eq (toString $s.runtime) "pod" }}the default runtime{{ if $profiles }}, and the profile(s) {{ join ", " $profiles }}{{ end }}{{ else }}profile(s) {{ join ", " $profiles }}{{ end }}):
+each session is a Pod and a PVC in namespace {{ $cfg.pod.namespace }}, created with
+ServiceAccount {{ include "sundae.serviceAccountName" . }}.
+{{- if not .Values.podRuntime.rbac.create }}
+podRuntime.rbac.create is off: that ServiceAccount needs a Role there (see the chart README, "Pod runtime").
+{{- end }}
+{{- if not (include "sundae.openshellEnabled" .) }}
+Sandboxes clone and push over {{ $cfg.openshell.clone_url }}.
+{{- end }}
+{{- if .Values.podRuntime.networkPolicy.enabled }}
+NetworkPolicy {{ include "sundae.fullname" . }}-pod-sandboxes denies pod sandboxes all ingress and allows egress only to
+Sundae's HTTP port{{ with .Values.podRuntime.networkPolicy.extraEgress }}, DNS and {{ len . }} rule(s) from podRuntime.networkPolicy.extraEgress{{ else }} and DNS{{ end }}.
+{{- else }}
+Pod sandboxes have the cluster's default network access (podRuntime.networkPolicy.enabled is off).
+{{- end }}
+{{- end }}
 {{- if not (or .Values.initialAdminKeys .Values.config.initial_admin_keys .Values.initialAdminKeysSecret.name) }}
 
 WARNING: no initialAdminKeys are set, so nobody can administer this server over SSH.

@@ -88,11 +88,11 @@ func TestSessionListStatus(t *testing.T) {
 	rows := tableRows(stdout)
 	is.Equal(len(rows), 5)
 	want := []string{
-		"review | infra | - | " + sb("infra", "review") + " | Suspended | ▲ blocked · permission · parked | Apply [31m3 to add, 1 to change? x",
-		"web | web | - | " + sb("web", "web") + " | Ready | ✗ error | build failed | 0 | now",
-		"docs | docs | - | " + sb("docs", "docs") + " | Ready | ✓ done | Implemented GitHub discovery | 0 | now",
-		"infra | infra | - | " + sb("infra", "infra") + " | Ready | ● working 40% | Running go test ./pkg/ui/... | 1 | now",
-		"quiet | web | - | " + sb("web", "quiet") + " | Ready | · none | - | 0 | now",
+		"review | infra | - | openshell | " + sb("infra", "review") + " | Suspended | ▲ blocked · permission · parked | Apply [31m3 to add, 1 to change? x",
+		"web | web | - | openshell | " + sb("web", "web") + " | Ready | ✗ error | build failed | 0 | now",
+		"docs | docs | - | openshell | " + sb("docs", "docs") + " | Ready | ✓ done | Implemented GitHub discovery | 0 | now",
+		"infra | infra | - | openshell | " + sb("infra", "infra") + " | Ready | ● working 40% | Running go test ./pkg/ui/... | 1 | now",
+		"quiet | web | - | openshell | " + sb("web", "quiet") + " | Ready | · none | - | 0 | now",
 	}
 	for i, w := range want {
 		if !strings.HasPrefix(rows[i], w) {
@@ -137,7 +137,7 @@ func TestSessionListStatus(t *testing.T) {
 	stdout, _, err = runSessionCmd(t, plain, "ls")
 	is.NoErr(err)
 	rows = tableRows(stdout)
-	is.True(strings.HasPrefix(rows[0], "docs | docs | - | "+sb("docs", "docs")+" | Ready | · none | - | - | -"))
+	is.True(strings.HasPrefix(rows[0], "docs | docs | - | openshell | "+sb("docs", "docs")+" | Ready | · none | - | - | -"))
 	is.True(strings.Contains(stdout, "· none · parked"))
 }
 

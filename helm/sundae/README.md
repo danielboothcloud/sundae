@@ -11,7 +11,8 @@ Agent sessions are optional (`config.openshell.enabled`) and need an
 [Agent Sandbox](https://github.com/kubernetes-sigs/agent-sandbox). The chart
 can install both with the release (`openshell.install`,
 `agentSandbox.install`; both off by default), or use a gateway installed
-separately.
+separately. Sessions can instead run as plain Kubernetes Pods, with no
+gateway (`config.sessions.runtime: pod`; see "Pod runtime").
 
 ## 1. Build and push the images
 
@@ -296,6 +297,7 @@ runtime. See the top-level README, "Sandbox runtimes".
 Kata does not let podman run in an OpenShell sandbox: OpenShell's in-sandbox
 seccomp filter blocks `mount`, `setns`, `clone3` and new user namespaces,
 and sets `no_new_privs`, under any runtime, with no setting to relax it.
+The pod runtime has no such filter ("Pod runtime").
 
 ### A gateway installed separately
 
@@ -356,6 +358,7 @@ config:
 | `config.openshell.gateway_address`, `config.openshell.image` | with sessions | The gateway and the sandbox image from steps 1 and 2. With `openshell.install`, only the image. |
 | `openshell.server.workspaceStorageClass`, `.workspaceDefaultStorageSize` | with `openshell.install` | Each sandbox's `/sandbox` volume; empty uses the cluster default class and 2Gi. |
 | `openshell.credentialKey.generate`, `openshell.server.credentialStorage.existingSecret` | no | The gateway's credential encryption key, generated once in the cluster as `openshell-credential-key` (step 2). |
+| `config.sessions.runtime`, `config.pod.*`, `podRuntime.*` | no | The pod session runtime ("Pod runtime"). |
 | `config.openshell.clone_url` | no | Defaults to this release's HTTP Service, `http://<fullname>-http.<namespace>.svc.cluster.local:23232`. |
 | `openshell.clientTLS.secretName` | no | Defaults to `openshell-client-tls`; the TLS paths in `config.openshell` point at it. Ignored with `openshell.install`. |
 | `persistence.size`, `persistence.storageClass` | no | Data volume; empty StorageClass uses the cluster default. |
@@ -388,6 +391,129 @@ helm upgrade --install sundae helm/sundae -n <namespace> --create-namespace \
 
 Afterwards SSH is the Service `<fullname>-ssh`, port 23231. Config changes
 roll the pod.
+
+## Pod runtime
+
+With `config.sessions.runtime: pod`, or `runtime: pod` in a profile, a
+session runs in a plain Kubernetes Pod instead of an OpenShell sandbox: no
+gateway, no Agent Sandbox. Sundae creates one Pod and one PVC (mounted at
+`/sandbox`) per session in `config.pod.namespace` (default: the release
+namespace; it must exist), through the Kubernetes API with its own
+ServiceAccount, and runs the terminal through `pods/exec`. The Pods carry
+the labels `sundae.managed: "true"`, `sundae.runtime: pod` and
+`sundae.user-id`. A session keeps the runtime it was created in. Parking
+deletes the Pod, which stops the session's program, and keeps the PVC with
+`/sandbox`; the next start or attach creates a new Pod on it. Ending a
+session deletes the Pod and the PVC.
+
+```yaml
+config:
+  sessions:
+    runtime: pod                  # or `runtime: pod` in one profile
+  pod:
+    image: <registry>/sundae-sandbox:<tag>   # empty: config.openshell.image
+podRuntime:
+  networkPolicy:
+    enabled: true
+    extraEgress:
+      - to: [{ipBlock: {cidr: 0.0.0.0/0, except: [10.0.0.0/8]}}]
+        ports: [{port: 443, protocol: TCP}]
+```
+
+Sandboxes clone and push over `config.openshell.clone_url`; the chart sets
+it to this release's HTTP Service whenever a session uses the pod runtime,
+with or without OpenShell. Every `config.pod` key is documented in
+`values.yaml`; a profile overrides any of them under
+`sessions.profiles.<name>.pod`, except `namespace`, `kubeconfig` and
+`ready_timeout`.
+
+What the chart adds when any session uses the pod runtime (nothing of this
+renders by default):
+
+- **The ServiceAccount token.** `automountServiceAccountToken` becomes
+  `true` on the ServiceAccount and Sundae's pod; otherwise it stays `false`.
+- **RBAC** (`podRuntime.rbac.create`, default `true`). A Role and
+  RoleBinding `<fullname>-pod-runtime` in the pod namespace for Sundae's
+  ServiceAccount (`serviceAccount.name` when `serviceAccount.create` is
+  false): `pods` get, list, watch, create, delete; `pods/exec` and
+  `pods/attach` create, get; `pods/log` get; `persistentvolumeclaims` get,
+  list, watch, create, delete; `events` get, list, watch (scheduling
+  diagnostics). With `config.pod.kubeconfig` (another cluster) the RBAC
+  belongs in that cluster; set `rbac.create: false`.
+- **NetworkPolicy** (`podRuntime.networkPolicy.enabled`, default `false`;
+  the CNI must enforce it). `<fullname>-pod-sandboxes` in the pod namespace
+  selects the sandbox Pods and denies all ingress (exec goes through the
+  kubelet, not the Pod network). Egress is allowed to Sundae's pods on the
+  HTTP port (`config.http.listen_addr`), to DNS (`networkPolicy.dns`,
+  default kube-dns in kube-system, ports 53 UDP and TCP), and to the rules
+  in `networkPolicy.extraEgress`, appended as they are. Everything else
+  must go there: the S3 snapshot endpoint, package registries, model APIs,
+  forges, and a `clone_url` that is not this release's Service. Without
+  the policy, sandbox Pods have the cluster's default network access.
+  Unlike OpenShell there is no per-program or L7 filtering.
+
+### Security settings
+
+The defaults (`values.yaml`, the same as Sundae's built-in ones) match the
+sandbox image, user `sandbox` 10001:10001 with `HOME=/sandbox`:
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `pod.pod_security_context` | `runAsUser`/`runAsGroup`/`fsGroup` 10001, `runAsNonRoot: true`, `fsGroupChangePolicy: OnRootMismatch` | The Pod's `securityContext`. `fsGroup` makes the PVC writable. |
+| `pod.security_context` | `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`, `seccompProfile: RuntimeDefault` | The sandbox container's `securityContext`. |
+| `pod.runtime_class` | empty: the cluster default | `runtimeClassName`, e.g. `kata`. In a profile, `default` forces the cluster default. |
+| `pod.resources` | none | Requests and limits; also device-plugin resources. |
+| `pod.volumes`, `pod.volume_mounts` | none | Extra volumes, e.g. `/dev/fuse`. |
+| `pod.node_selector`, `pod.tolerations`, `pod.annotations`, `pod.labels` | none | Placement and metadata of the sandbox Pod. |
+| `pod.storage_class`, `pod.storage_size` | cluster default, `10Gi` | The `/sandbox` PVC. |
+
+Helm merges your values into these maps key by key: `{}` in your values
+changes nothing. Set a field to `null` to drop it (with every field null the
+map renders as `{}`, which Sundae reads as "none"); set the whole map to
+`null` to get Sundae's built-in default. Profiles have no chart defaults, so
+a profile's `pod` maps are passed as written.
+
+Nested containers (podman in the sandbox) need these relaxed, ideally only
+in a profile and under a VM runtime:
+
+```yaml
+config:
+  sessions:
+    profiles:
+      podman:
+        runtime: pod
+        image: <registry>/agent-podman:<tag>
+        pod:
+          runtime_class: kata               # a VM per Pod; must exist in the cluster
+          security_context:
+            allowPrivilegeEscalation: true                       # setuid newuidmap/newgidmap
+            capabilities: {drop: [ALL], add: [SETUID, SETGID]}
+            seccompProfile: {type: Unconfined}                   # mount, unshare, clone3, setns
+            appArmorProfile: {type: Unconfined}                  # on AppArmor nodes
+          volumes: [{name: fuse, hostPath: {path: /dev/fuse, type: CharDevice}}]
+          volume_mounts: [{name: fuse, mountPath: /dev/fuse}]
+          # Or, with a FUSE device plugin instead of the hostPath volume:
+          # resources: {limits: {<device-plugin-domain>/fuse: 1}}
+```
+
+- `runtime_class`: a VM runtime such as Kata keeps the relaxed settings
+  inside a guest kernel. This chart installs no runtime.
+- `seccompProfile: Unconfined`: the default profile blocks the mount and
+  namespace syscalls rootless podman needs.
+- `capabilities.add` and `allowPrivilegeEscalation`: `newuidmap` and
+  `newgidmap` need `SETUID` and `SETGID` for the user-namespace ID mapping.
+  The sandbox user is not root, so they get them only from setuid bits or
+  file capabilities, which `allowPrivilegeEscalation: false`
+  (`no_new_privs`) blocks.
+- `/dev/fuse`: for fuse-overlayfs, from a `hostPath` `CharDevice` volume (the
+  nodes, or with Kata the guest, must have it) or a device-plugin resource
+  in `resources.limits`.
+- `appArmorProfile: Unconfined`: the default AppArmor profile denies
+  mounts.
+
+**Open risk:** podman inside a Kata pod is untested. It depends on
+`/dev/fuse`, user namespaces and seccomp all being available inside the
+Kata guest, which this chart cannot check.
 
 ## Check the config before deploying
 
@@ -578,6 +704,9 @@ Not checked, because it needs an image build or a live cluster:
   under Kata. Kata alone does not let podman run in an OpenShell sandbox:
   the OpenShell 0.1.8 seccomp filter blocks `mount`, `setns`, `clone3` and
   new user namespaces, and sets `NoNewPrivs`, under any runtime.
+- The pod runtime on a cluster: the RBAC is the set listed in "Pod
+  runtime", checked only with `helm template`; the NetworkPolicy was not
+  run against a CNI. Podman in a Kata pod (see there) is untested.
 - The jj binary in the Sundae image (the Changes tab of jj repositories):
   the Containerfile's new jj stage has not been built. The tab was tested
   with jj 0.47.1 on macOS against local repositories. Its cache lives on

@@ -2,10 +2,23 @@ package config
 
 import (
 	"bytes"
+	"encoding/json"
 	"text/template"
 )
 
-var configFileTmpl = template.Must(template.New("config").Parse(`# Sundae Server configurations
+// configFileFuncs are the config file template's functions. json writes a
+// value as JSON, which is YAML too: the pod settings' Kubernetes objects.
+var configFileFuncs = template.FuncMap{
+	"json": func(v any) string {
+		b, err := json.Marshal(v)
+		if err != nil {
+			return "null"
+		}
+		return string(b)
+	},
+}
+
+var configFileTmpl = template.Must(template.New("config").Funcs(configFileFuncs).Parse(`# Sundae Server configurations
 
 # The name of the server.
 # This is the name that will be displayed in the UI.
@@ -301,13 +314,48 @@ openshell:
   #    binaries: [/usr/local/bin/claude]
 {{- end }}
 
+# The pod session runtime (sessions.runtime: pod): each session is a
+# Kubernetes Pod with a PersistentVolumeClaim at /sandbox, created with
+# Sundae's own Kubernetes credentials. Parking deletes the pod (its program
+# stops) and keeps the volume; ending deletes both. Profiles override these
+# settings in sessions.profiles.<name>.pod. The Kubernetes objects use
+# Kubernetes field names (seccompProfile, runAsUser, ...); null uses
+# Sundae's defaults, {} sets none.
+pod:
+  # Empty: Sundae's own namespace.
+  namespace: {{ printf "%q" .Pod.Namespace }}
+  # Empty: in-cluster credentials, else $KUBECONFIG or ~/.kube/config.
+  kubeconfig: {{ printf "%q" .Pod.Kubeconfig }}
+  ready_timeout: "{{ .Pod.ReadyTimeout }}"
+  # Empty: openshell.image. A profile's image wins.
+  image: {{ printf "%q" .Pod.Image }}
+  # Kubernetes RuntimeClass, e.g. kata. Empty: the cluster's default.
+  runtime_class: {{ printf "%q" .Pod.RuntimeClass }}
+  # Default: no privilege escalation, no capabilities, RuntimeDefault
+  # seccomp. Nested containers (podman) need more: see the README.
+  security_context: {{ json .Pod.SecurityContext }}
+  # Default: the sandbox image's user 10001, which owns /sandbox (fsGroup).
+  pod_security_context: {{ json .Pod.PodSecurityContext }}
+  resources: {{ json .Pod.Resources }}
+  # /sandbox's volume. Empty storage_class: the cluster's default.
+  storage_class: {{ printf "%q" .Pod.StorageClass }}
+  storage_size: {{ printf "%q" .Pod.StorageSize }}
+  node_selector: {{ json .Pod.NodeSelector }}
+  tolerations: {{ json .Pod.Tolerations }}
+  annotations: {{ json .Pod.Annotations }}
+  labels: {{ json .Pod.Labels }}
+  # Extra volumes and their mounts in the sandbox container, e.g. /dev/fuse.
+  volumes: {{ json .Pod.Volumes }}
+  volume_mounts: {{ json .Pod.VolumeMounts }}
+
 # Sessions: what runs in the sandboxes. Each user can have several named
 # sessions per repository (session start REPO --name NAME), one sandbox
 # each. Changes take effect on restart, and only for sandboxes created after.
 sessions:
   # Where sessions run unless their profile says otherwise: "openshell"
-  # (the OpenShell gateway, see openshell:). An existing session keeps the
-  # runtime it was created in.
+  # (the OpenShell gateway, see openshell:) or "pod" (a Kubernetes pod per
+  # session, see pod:). An existing session keeps the runtime it was
+  # created in.
   runtime: {{ printf "%q" .Sessions.Runtime }}
   osewa:
     # Pinned osewa Linux builds (osewa-linux-amd64.gz, osewa-linux-arm64.gz)
@@ -322,8 +370,10 @@ sessions:
     poll_interval: "{{ .Sessions.Status.PollInterval }}"
   suspend:
     # Park (suspend) a session's sandbox once nobody has been attached to it
-    # and it has not reported "working" for "after". Needs an OpenShell
-    # compute driver that supports suspend; otherwise sandboxes keep running.
+    # and it has not reported "working" for "after". OpenShell needs a
+    # compute driver that supports suspend (else see fallback); the pod
+    # runtime parks by deleting the pod, which stops the program and keeps
+    # /sandbox.
     # "session start" and "session attach" resume a parked session.
     enabled: {{ .Sessions.Suspend.Enabled }}
     after: "{{ .Sessions.Suspend.After }}"
@@ -357,6 +407,22 @@ sessions:
     {{ printf "%q" $name }}:
       image: {{ printf "%q" $p.Image }}
       command: {{ printf "%q" $p.Command }}
+{{- with $p.Pod }}
+      pod:
+        image: {{ printf "%q" .Image }}
+        runtime_class: {{ printf "%q" .RuntimeClass }}
+        storage_class: {{ printf "%q" .StorageClass }}
+        storage_size: {{ printf "%q" .StorageSize }}
+        security_context: {{ json .SecurityContext }}
+        pod_security_context: {{ json .PodSecurityContext }}
+        resources: {{ json .Resources }}
+        node_selector: {{ json .NodeSelector }}
+        tolerations: {{ json .Tolerations }}
+        annotations: {{ json .Annotations }}
+        labels: {{ json .Labels }}
+        volumes: {{ json .Volumes }}
+        volume_mounts: {{ json .VolumeMounts }}
+{{- end }}
 {{- if $p.Runtime }}
       runtime: {{ printf "%q" $p.Runtime }}
 {{- end }}

@@ -1335,7 +1335,7 @@ func (m *Sessions) newSessionForm(repos []string, pre prefill) *prompt.Form {
 	}
 	var popts []prompt.Option
 	for _, p := range m.src.Profiles() {
-		popts = append(popts, prompt.Option{Value: p.Name, Detail: profileDetail(p.Image, p.Command, p.RuntimeClass)})
+		popts = append(popts, prompt.Option{Value: p.Name, Detail: profileDetail(p.Runtime, p.Image, p.Command, p.RuntimeClass)})
 	}
 	if len(popts) == 0 {
 		popts = []prompt.Option{{Value: "", Label: "default", Detail: m.src.Command("")}}
@@ -1413,12 +1413,12 @@ func (m *Sessions) editReposForm(repos []string, pre prefill) *prompt.Form {
 	return f
 }
 
-func profileDetail(image, command, runtimeClass string) string {
+func profileDetail(runtime, image, command, runtimeClass string) string {
 	var parts []string
 	if runtimeClass != "" {
-		runtimeClass = "runtime " + runtimeClass
+		runtimeClass = "runtime class " + runtimeClass
 	}
-	for _, s := range []string{image, command, runtimeClass} {
+	for _, s := range []string{runtime, image, command, runtimeClass} {
 		if s = signals.Sanitize(s, 40); s != "" {
 			parts = append(parts, s)
 		}

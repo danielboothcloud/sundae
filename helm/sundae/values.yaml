@@ -267,12 +267,85 @@ config:
     #        port: 443
     #    binaries: [/usr/local/bin/claude]
 
+  # The pod session runtime (sessions.runtime or a profile's runtime: pod):
+  # each session is one Kubernetes Pod plus one PVC mounted at /sandbox,
+  # which Sundae creates through the Kubernetes API with its own
+  # ServiceAccount (the chart then mounts its token and creates a Role, see
+  # podRuntime below); the terminal runs through pods/exec. Parking deletes
+  # the Pod and keeps the PVC; ending a session deletes both. Only read when
+  # a session uses the pod runtime. Semantics in the chart README, "Pod
+  # runtime". A profile can override every key except namespace, kubeconfig
+  # and ready_timeout (sessions.profiles.<name>.pod).
+  #
+  # Helm merges your values into the maps below key by key, so `{}` in your
+  # values changes nothing. To drop a default field, set it to null (e.g.
+  # seccompProfile: null); with every field null the map renders as {},
+  # which Sundae reads as "none". Setting a whole map to null removes the
+  # key, and Sundae uses its built-in default (the same values as below).
+  pod:
+    # Where the sandbox Pods and PVCs are created. Empty: the release
+    # namespace (the chart sets it). The namespace must exist.
+    namespace: ""
+    # A kubeconfig file for another cluster. Empty: in-cluster, with the
+    # ServiceAccount token. The chart's Role, RoleBinding and NetworkPolicy
+    # are created in this cluster only.
+    kubeconfig: ""
+    # How long a session start waits for its Pod to become ready (image pull,
+    # scheduling, volume binding).
+    ready_timeout: "15m"
+    # The default sandbox image. Empty: config.openshell.image. It must
+    # provide git and jj, and run as the user below (deploy/sandbox is
+    # 10001:10001 with HOME /sandbox).
+    image: ""
+    # The Kubernetes RuntimeClass of the sandbox Pods, e.g. kata. Empty: the
+    # cluster's default runtime. In a profile, empty uses this value and
+    # "default" the cluster's default runtime. The RuntimeClass must exist.
+    runtime_class: ""
+    # The sandbox container's securityContext (Kubernetes field names).
+    security_context:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
+      seccompProfile:
+        type: RuntimeDefault
+    # The sandbox Pod's securityContext. fsGroup makes the PVC writable for
+    # the sandbox user.
+    pod_security_context:
+      runAsUser: 10001
+      runAsGroup: 10001
+      runAsNonRoot: true
+      fsGroup: 10001
+      fsGroupChangePolicy: OnRootMismatch
+    # The sandbox container's resources (requests, limits). A device-plugin
+    # resource such as a FUSE device goes under limits.
+    resources: {}
+    # The PVC mounted at /sandbox. Empty storage_class: the cluster's
+    # default StorageClass. Use block storage (ReadWriteOnce).
+    storage_class: ""
+    storage_size: "10Gi"
+    node_selector: {}
+    tolerations: []
+    # Added to every sandbox Pod, next to Sundae's own labels
+    # (sundae.managed, sundae.runtime, sundae.user-id).
+    annotations: {}
+    labels: {}
+    # Extra volumes of the sandbox Pod and their mounts in the sandbox
+    # container (Kubernetes Volume and VolumeMount objects).
+    volumes: []
+    #  - name: fuse
+    #    hostPath: {path: /dev/fuse, type: CharDevice}
+    volume_mounts: []
+    #  - name: fuse
+    #    mountPath: /dev/fuse
+
   # What runs in the sandboxes: several named sessions per repository
   # (session start <repo> --name <name>), each from a profile.
   sessions:
     # Where sessions run unless their profile sets `runtime`: "openshell"
-    # (the OpenShell gateway, config.openshell). An existing session keeps
-    # the runtime it was created in.
+    # (the OpenShell gateway, config.openshell) or "pod" (a plain Kubernetes
+    # Pod, config.pod; see podRuntime below). An existing session keeps the
+    # runtime it was created in.
     runtime: openshell
     osewa:
       # The pinned osewa builds this image carries, uploaded to sandboxes
@@ -314,7 +387,9 @@ config:
     # requests. See the top-level README, "Providers". `runtime_class` is
     # the Kubernetes RuntimeClass of this profile's new sandboxes; empty
     # uses config.openshell.runtime_class, and "default" uses the default
-    # runtime.
+    # runtime. `pod` holds settings for profiles whose runtime is pod: any
+    # config.pod key except namespace, kubeconfig and ready_timeout. Empty
+    # image falls back to config.pod.image, then openshell.image.
     profiles: {}
     #  claude:
     #    image: ghcr.io/me/agent-claude:latest
@@ -322,6 +397,18 @@ config:
     #    openshell:
     #      providers: [my-claude, my-github]
     #      runtime_class: kata-containers
+    #  # Nested containers in a Kata pod (untested; see the chart README,
+    #  # "Pod runtime").
+    #  podman:
+    #    runtime: pod
+    #    image: ghcr.io/me/agent-podman:latest
+    #    pod:
+    #      runtime_class: kata
+    #      security_context:
+    #        seccompProfile: {type: Unconfined}
+    #        capabilities: {add: [SETUID, SETGID]}
+    #      volumes: [{name: fuse, hostPath: {path: /dev/fuse, type: CharDevice}}]
+    #      volume_mounts: [{name: fuse, mountPath: /dev/fuse}]
     # The profile for sessions started without --profile, by repository name
     # glob ("*" does not cross "/", "**" does; the most specific match wins).
     repos: {}
@@ -561,6 +648,45 @@ agentSandbox:
     capabilities:
       drop:
         - ALL
+
+# Chart-side wiring for the pod session runtime (config.pod). Only used when
+# config.sessions.runtime or a profile's runtime is pod; then the chart also
+# mounts the ServiceAccount token into Sundae's pod (otherwise it does not).
+podRuntime:
+  rbac:
+    # A Role and RoleBinding in the pod namespace (config.pod.namespace, else
+    # the release namespace) for Sundae's ServiceAccount: pods (get, list,
+    # watch, create, delete), pods/exec and pods/attach (create, get),
+    # pods/log (get), persistentvolumeclaims (get, list, watch, create,
+    # delete) and events (get, list, watch). Set to false to manage the RBAC
+    # yourself.
+    create: true
+  # A NetworkPolicy for the sandbox Pods (labels sundae.managed: "true",
+  # sundae.runtime: pod) in the pod namespace: all ingress denied (the
+  # terminal runs through exec, via the kubelet), egress only to Sundae's
+  # HTTP port (clone and push), DNS and extraEgress. Needs a CNI that
+  # enforces NetworkPolicy. Off: sandbox Pods have the cluster's default
+  # network access.
+  networkPolicy:
+    enabled: false
+    # The DNS servers' peers (the rule's `to`); ports 53 UDP and TCP are
+    # added. Adjust for a cluster whose DNS pods are labelled differently.
+    dns:
+      to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+    # NetworkPolicyEgressRule objects appended as they are: everything else
+    # the sandboxes need, e.g. the S3 snapshot endpoint, package registries,
+    # model APIs, or a clone_url that is not this release's Service.
+    extraEgress: []
+    #  - to:
+    #      - ipBlock: {cidr: 0.0.0.0/0, except: [10.0.0.0/8]}
+    #    ports:
+    #      - {port: 443, protocol: TCP}
 
 # Chart-side wiring for config.notifications. Only used when
 # config.notifications.ntfy.enabled is true.

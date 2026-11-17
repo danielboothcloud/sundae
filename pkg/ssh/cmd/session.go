@@ -443,6 +443,7 @@ var sessionColumns = []struct {
 	{"Name", func(r sessionRow, _ time.Time) string { return r.Info.Name }},
 	{"Repositories", func(r sessionRow, _ time.Time) string { return strings.Join(r.Info.Repos, ", ") }},
 	{"Profile", func(r sessionRow, _ time.Time) string { return orDash(r.Info.Profile) }},
+	{"Runtime", func(r sessionRow, _ time.Time) string { return orDash(r.Info.Runtime) }},
 	{"Sandbox", func(r sessionRow, _ time.Time) string { return r.Info.Sandbox }},
 	{"Phase", func(r sessionRow, _ time.Time) string { return orDash(r.Info.Phase) }},
 	{"State", func(r sessionRow, _ time.Time) string { return r.Label() }},
@@ -477,6 +478,8 @@ type sessionJSON struct {
 	Repo    string   `json:"repo"`
 	Repos   []string `json:"repos"`
 	Profile string   `json:"profile,omitempty"`
+	// Runtime is the session runtime its sandbox runs in.
+	Runtime string `json:"runtime,omitempty"`
 	// Providers are the OpenShell providers attached to the session's
 	// sandbox.
 	Providers []string `json:"providers,omitempty"`
@@ -518,6 +521,7 @@ func sessionToJSON(r sessionRow) sessionJSON {
 		Repos:     r.Info.Repos,
 		Name:      r.Info.Name,
 		Profile:   r.Info.Profile,
+		Runtime:   r.Info.Runtime,
 		Providers: r.Info.Providers,
 		Sandbox:   r.Info.Sandbox,
 		Phase:     r.Info.Phase,

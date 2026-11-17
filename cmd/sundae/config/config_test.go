@@ -275,8 +275,58 @@ sessions:
 		err = check(p)
 		is.True(err != nil)
 		for _, want := range []string{
-			`sessions.runtime "pod" is not implemented yet`,
+			"pod.image (or openshell.image) is required: sessions.runtime is pod",
 			"sessions.profiles.claude.openshell is set, but the profile's runtime is pod",
+		} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%q missing from:\n%s", want, err)
+			}
+		}
+	})
+
+	t.Run("pod runtime", func(t *testing.T) {
+		is := is.New(t)
+		p := filepath.Join(td, "pod.yaml")
+		writeFile(t, p, `sessions:
+  runtime: pod
+  profiles:
+    podman:
+      image: agent-podman:1
+      pod:
+        runtime_class: kata
+        security_context:
+          seccompProfile: {type: Unconfined}
+          capabilities: {add: [SETUID, SETGID]}
+        volumes: [{name: fuse, hostPath: {path: /dev/fuse, type: CharDevice}}]
+        volume_mounts: [{name: fuse, mountPath: /dev/fuse}]
+pod:
+  image: sandbox:1
+  storage_size: 20Gi
+  resources: {limits: {memory: 4Gi}}
+`)
+		is.NoErr(check(p))
+
+		// Kubernetes objects are checked field by field.
+		writeFile(t, p, `sessions:
+  runtime: pod
+  profiles:
+    podman:
+      pod:
+        image: x
+        security_context: {seccompprofile: {type: Unconfined}}
+pod:
+  image: sandbox:1
+  storage_size: lots
+  labels: {"bad key!": x}
+  sneaky: true
+`)
+		err := check(p)
+		is.True(err != nil)
+		for _, want := range []string{
+			"unknown key pod.sneaky",
+			`pod.storage_size "lots" is not a positive Kubernetes quantity`,
+			`pod.labels: key "bad key!"`,
+			`sessions.profiles.podman.pod.security_context: unknown field "seccompprofile"`,
 		} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("%q missing from:\n%s", want, err)

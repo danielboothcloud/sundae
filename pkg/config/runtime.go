@@ -23,7 +23,17 @@ const (
 var Runtimes = []string{RuntimeOpenShell, RuntimePod, RuntimeDocker}
 
 // availableRuntimes are the runtimes this build implements.
-var availableRuntimes = []string{RuntimeOpenShell}
+var availableRuntimes = []string{RuntimeOpenShell, RuntimePod}
+
+// SessionsEnabled reports whether agent sessions are on: with
+// sessions.runtime openshell, when openshell.enabled is; with any other
+// runtime, always.
+func (c *Config) SessionsEnabled() bool {
+	if c.ProfileRuntime("") == RuntimeOpenShell {
+		return c.OpenShell.Enabled
+	}
+	return true
+}
 
 // ProfileRuntime returns the runtime of the named profile's sessions: the
 // profile's runtime, else sessions.runtime, else RuntimeOpenShell. An

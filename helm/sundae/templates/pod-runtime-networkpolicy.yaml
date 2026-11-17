@@ -1,0 +1,56 @@
+{{- /*
+Egress for the pod runtime's sandbox Pods (opt-in): no ingress at all (the
+terminal runs through exec, via the kubelet), egress only to Sundae's HTTP
+port (clone and push over config.openshell.clone_url), DNS, and
+podRuntime.networkPolicy.extraEgress.
+*/}}
+{{- $np := .Values.podRuntime.networkPolicy }}
+{{- if and (include "sundae.podRuntime" .) $np.enabled }}
+{{- $cfg := .Values.config }}
+{{- $ns := include "sundae.podNamespace" . }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "sundae.fullname" . }}-pod-sandboxes
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "sundae.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      sundae.managed: "true"
+      sundae.runtime: pod
+  policyTypes:
+    - Ingress
+    - Egress
+  # No ingress rules: all ingress is denied.
+  ingress: []
+  egress:
+    {{- if $cfg.http.enabled }}
+    # Sundae's HTTP server, for git and jj (config.openshell.clone_url).
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "sundae.selectorLabels" . | nindent 14 }}
+          {{- if ne $ns .Release.Namespace }}
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace | quote }}
+          {{- end }}
+      ports:
+        - port: {{ include "sundae.listenPort" (dict "name" "http" "addr" $cfg.http.listen_addr) }}
+          protocol: TCP
+    {{- end }}
+    {{- with $np.dns }}
+    # DNS.
+    - {{- toYaml . | nindent 6 }}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    {{- end }}
+    {{- with $np.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

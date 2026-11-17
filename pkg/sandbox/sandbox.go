@@ -42,6 +42,30 @@ const (
 	Suspended Phase = "Suspended"
 )
 
+// Labels and annotations Sundae sets on every sandbox, in every runtime.
+const (
+	// LabelUserID is the sandbox label holding the owning Sundae user ID.
+	LabelUserID = "sundae.user-id"
+	// LabelManaged marks sandboxes created by Sundae.
+	LabelManaged = "sundae.managed"
+	// AnnotationRuntime holds the session runtime the sandbox was created
+	// in; absent means OpenShell.
+	AnnotationRuntime = "sundae.runtime"
+	// AnnotationRuntimeClass holds the Kubernetes RuntimeClass the sandbox
+	// was created with; absent for the default runtime.
+	AnnotationRuntimeClass = "sundae.runtime-class"
+)
+
+// Owns reports whether a sandbox's labels carry the owner label of want;
+// true when want has none.
+func Owns(labels, want map[string]string) bool {
+	id, ok := want[LabelUserID]
+	if !ok {
+		return true
+	}
+	return labels[LabelUserID] == id
+}
+
 // Sandbox is a session's sandbox as a runtime reports it.
 type Sandbox struct {
 	// Name is the sandbox name, unique across runtimes.

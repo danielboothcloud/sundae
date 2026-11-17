@@ -207,11 +207,11 @@ func CommandMiddleware(sh ssh.Handler) ssh.Handler {
 			}
 		}
 
+		if cfg.SessionsEnabled() {
+			rootCmd.AddCommand(cmd.SessionCommand())
+		}
 		if cfg.OpenShell.Enabled {
-			rootCmd.AddCommand(
-				cmd.SessionCommand(),
-				cmd.OpenShellCommand(),
-			)
+			rootCmd.AddCommand(cmd.OpenShellCommand())
 		}
 
 		if len(cfg.Forges) > 0 {

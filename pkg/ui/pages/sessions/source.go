@@ -128,6 +128,8 @@ type Profile struct {
 	// sandboxes, openshell.runtime_class included; "" for the default
 	// runtime.
 	RuntimeClass string
+	// Runtime is the session runtime of the profile's sessions.
+	Runtime string
 }
 
 // NewClient creates the OpenShell client of an operation. Tests may
@@ -157,7 +159,7 @@ func SourceFor(ctx context.Context) Source {
 func NewSource(ctx context.Context) Source {
 	cfg := config.FromContext(ctx)
 	user := proto.UserFromContext(ctx)
-	if cfg == nil || !cfg.OpenShell.Enabled || user == nil {
+	if cfg == nil || !cfg.SessionsEnabled() || user == nil {
 		return nil
 	}
 	return &source{ctx: ctx, cfg: cfg, user: user}
@@ -234,7 +236,7 @@ func (s *source) Profiles() []Profile {
 	var out []Profile
 	for _, name := range slices.Sorted(maps.Keys(s.cfg.Sessions.Profiles)) {
 		p := s.cfg.Sessions.Profiles[name]
-		out = append(out, Profile{Name: name, Image: p.Image, Command: p.Command, RuntimeClass: s.cfg.ProfileRuntimeClass(name)})
+		out = append(out, Profile{Name: name, Image: p.Image, Command: p.Command, RuntimeClass: s.cfg.ProfileRuntimeClass(name), Runtime: s.cfg.ProfileRuntime(name)})
 	}
 	return out
 }

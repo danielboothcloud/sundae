@@ -390,6 +390,11 @@ func (m *Sessions) sessionRow(r sessionctl.Row, selected bool, w int) []string {
 	}
 	msg := m.message(r)
 	msgStyle := sel.Desc
+	// The runtime column: where the session's sandbox runs.
+	rt := ""
+	if r.Info.Runtime != "" {
+		rt = r.Info.Runtime + "  "
+	}
 	if m.copied == r.Info.Sandbox {
 		msg = "(copied to clipboard)"
 	}
@@ -398,20 +403,20 @@ func (m *Sessions) sessionRow(r sessionctl.Row, selected bool, w int) []string {
 	if m.narrow() {
 		lines = []string{
 			glyph + " " + sel.Title.Render(common.TruncateString(where, cw-2)),
-			"  " + ss.Render(common.TruncateString(words, cw-2-ageWidth)) + sel.Updated.Render(strings.TrimRight("  "+age, " ")),
+			"  " + sel.Desc.Render(rt) + ss.Render(common.TruncateString(words, cw-2-ageWidth-len(rt))) + sel.Updated.Render(strings.TrimRight("  "+age, " ")),
 			"  " + msgStyle.Render(common.TruncateString(msg, cw-2)),
 		}
 	} else {
-		right := words + "  " + fmt.Sprintf("%*s", ageWidth-2, age)
+		right := rt + words + "  " + fmt.Sprintf("%*s", ageWidth-2, age)
 		if lipgloss.Width(right) > cw/2 {
-			words = common.TruncateString(words, cw/2-ageWidth)
-			right = words + "  " + fmt.Sprintf("%*s", ageWidth-2, age)
+			words = common.TruncateString(words, max(cw/2-ageWidth-len(rt), 1))
+			right = rt + words + "  " + fmt.Sprintf("%*s", ageWidth-2, age)
 		}
 		where = common.TruncateString(where, cw-2-lipgloss.Width(right)-2)
 		gap := max(cw-2-lipgloss.Width(where)-lipgloss.Width(right), 2)
 		lines = []string{
 			glyph + " " + sel.Title.Render(where) + strings.Repeat(" ", gap) +
-				ss.Render(words) + sel.Updated.Render("  "+fmt.Sprintf("%*s", ageWidth-2, age)),
+				sel.Desc.Render(rt) + ss.Render(words) + sel.Updated.Render("  "+fmt.Sprintf("%*s", ageWidth-2, age)),
 			"  " + msgStyle.Render(common.TruncateString(msg, cw-2)),
 		}
 	}

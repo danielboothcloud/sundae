@@ -1,0 +1,50 @@
+{{- /*
+The pod session runtime: Sundae creates one Pod and one PVC per session in
+the pod namespace (config.pod.namespace, else the release namespace), with
+its own ServiceAccount, and runs the terminal through pods/exec.
+*/}}
+{{- if and (include "sundae.podRuntime" .) .Values.podRuntime.rbac.create }}
+{{- $ns := include "sundae.podNamespace" . }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "sundae.fullname" . }}-pod-runtime
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "sundae.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  # The session terminal and the status poll (osewa) run through exec.
+  - apiGroups: [""]
+    resources: ["pods/exec", "pods/attach"]
+    verbs: ["create", "get"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  # The sandbox's /sandbox volume, kept while a session is parked.
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  # Scheduling and image pull diagnostics while a sandbox starts.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "sundae.fullname" . }}-pod-runtime
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "sundae.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "sundae.fullname" . }}-pod-runtime
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "sundae.serviceAccountName" . | quote }}
+    namespace: {{ .Release.Namespace | quote }}
+{{- end }}

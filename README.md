@@ -497,8 +497,8 @@ openshell:
   network_policies: []
 
 sessions:
-  # Where sessions run unless their profile says otherwise (see "Session
-  # runtimes"). Only openshell is implemented so far.
+  # Where sessions run unless their profile says otherwise: openshell or
+  # pod (see "Session runtimes").
   runtime: openshell
   osewa:
     # Pinned osewa builds uploaded to sandboxes whose image lacks osewa.
@@ -580,9 +580,68 @@ keeps the runtime it was created in (recorded in its sandbox's
   by `openshell:`. Only this runtime has providers and credential
   injection, the L7 egress policy (`openshell.sandbox_policy`,
   `openshell.network_policies`) and suspend.
-- `pod` and `docker` are planned: a plain Kubernetes pod per session, and
-  a Docker container per session. `sundae config check` reports them as
-  not implemented yet.
+- `pod`: a plain Kubernetes Pod per session, with a PersistentVolumeClaim
+  mounted at `/sandbox`, configured by `pod:` (below).
+- `docker` is planned: a Docker container per session. `sundae config
+  check` reports it as not implemented yet.
+
+Sessions are on when `sessions.runtime` is `pod`, or when it is
+`openshell` and `openshell.enabled` is true. A profile whose runtime is
+`openshell` needs `openshell.enabled`. In every runtime, sessions clone over
+`openshell.clone_url` (else `http.public_url`), get git tokens valid for
+`openshell.token_ttl`, and run `openshell.command` unless the profile sets
+a command; S3 snapshots, osewa, signals and the TUI work the same.
+
+**Pod runtime.** Sundae creates the Pod and the claim itself, through the
+Kubernetes API (in-cluster credentials, or `pod.kubeconfig`), in
+`pod.namespace` (default: Sundae's own namespace). It needs RBAC for pods,
+pods/exec and persistentvolumeclaims there; the Helm chart creates it. The
+terminal and every command run through `pods/exec`.
+
+- Parking deletes the Pod and keeps the claim: the session's program stops,
+  `/sandbox` stays. Start and attach create the Pod again, from the template
+  the claim recorded, and start the program again. Ending deletes both.
+- A new claim is seeded from the image's `/sandbox` by an init container.
+- The Pod runs the image with `/bin/sh` as its main process, `HOME=/sandbox`,
+  no service account token and no service links.
+- Settings: `image` (empty: `openshell.image`), `runtime_class` (e.g.
+  `kata`), `security_context`, `pod_security_context`, `resources`,
+  `storage_class`, `storage_size` (default `10Gi`), `node_selector`,
+  `tolerations`, `annotations`, `labels`, `volumes`, `volume_mounts`,
+  `ready_timeout` (default `15m`). The Kubernetes objects use Kubernetes
+  field names (`seccompProfile`, `runAsUser`, ...) and are checked against
+  the API types.
+- Defaults: the container drops all capabilities, cannot escalate
+  privileges and uses the `RuntimeDefault` seccomp profile; the Pod runs as
+  10001:10001 (the sandbox image's user) with `fsGroup` 10001. Unset (null)
+  means these defaults; `{}` means none.
+- `sessions.profiles.<name>.pod` overrides any of them except `namespace`,
+  `kubeconfig` and `ready_timeout`: a string or object it sets replaces the
+  default, while `node_selector`, `annotations` and `labels` are merged. A
+  profile sets `image` or `pod.image`, not both.
+
+Nested containers (podman) need the pod runtime and relaxed settings, for
+example:
+
+```yaml
+sessions:
+  profiles:
+    podman:
+      runtime: pod
+      image: ghcr.io/example/agent-podman:latest
+      pod:
+        runtime_class: kata
+        security_context:
+          allowPrivilegeEscalation: true   # newuidmap/newgidmap are setuid
+          seccompProfile: {type: Unconfined}
+          appArmorProfile: {type: Unconfined}
+          capabilities: {add: [SETUID, SETGID]}
+        volumes: [{name: fuse, hostPath: {path: /dev/fuse, type: CharDevice}}]
+        volume_mounts: [{name: fuse, mountPath: /dev/fuse}]
+```
+
+This is untested on a cluster: podman inside a Kata pod depends on
+`/dev/fuse`, user namespaces and seccomp inside the Kata guest.
 
 A profile's runtime-specific settings sit under the runtime's name:
 `sessions.profiles.<name>.openshell` holds `providers` and `runtime_class`,
@@ -670,7 +729,7 @@ runtime, also when `openshell.runtime_class` is set.
   OpenShell sandbox. OpenShell's own seccomp filter, applied inside the
   sandbox whatever the runtime, blocks `mount`, `setns`, `clone3`, and
   `unshare`/`clone` with `CLONE_NEWUSER`, and sets `no_new_privs`; OpenShell
-  0.1.8 has no setting to relax it. Nested containers need the planned `pod`
+  0.1.8 has no setting to relax it. Nested containers need the `pod`
   runtime, where the pod's security settings are yours to choose.
 - A sandbox keeps the runtime it was created with, the same as its image.
   A change to `runtime_class` applies to new sessions only. Sundae records
