@@ -64,7 +64,7 @@ type Styles struct {
 		DangerKey  lipgloss.Style
 		DangerDesc lipgloss.Style
 	}
-	URLStyle    lipgloss.Style
+	URLStyle lipgloss.Style
 
 	Error      lipgloss.Style
 	ErrorTitle lipgloss.Style

@@ -161,7 +161,7 @@ func (f *fakeSource) DeleteSnapshot(context.Context, string) (openshell.StoredSn
 func (f *fakeSource) PruneSnapshots(context.Context, time.Duration) ([]openshell.StoredSnapshot, error) {
 	return nil, openshell.ErrSnapshotsOff
 }
-func (f *fakeSource) Park(context.Context, string) (bool, error)      { return true, nil }
+func (f *fakeSource) Park(context.Context, string) (bool, error) { return true, nil }
 func (f *fakeSource) SyncRepos(context.Context, string, []string) ([]sessions.RepoSync, error) {
 	return nil, nil
 }

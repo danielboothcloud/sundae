@@ -23,6 +23,15 @@ ARG OSEWA_VERSION=0.1.4
 ARG OSEWA_SHA256_AMD64=160667bfd60e999b4059b30dfad74fd38c8ab0da413668ec176678a4a0d4bb58
 ARG OSEWA_SHA256_ARM64=5a08537f6ebd2b2b6870a54c2c6a78cb26a16d1426e261ab5b8b896d24967325
 
+# Jujutsu release and the SHA-256 of its static musl tarball per architecture,
+# from https://github.com/jj-vcs/jj/releases/tag/v0.47.1. The repository
+# page's Changes tab runs it on a cache copy of a jj repository's refs
+# (pkg/jjview). Must match the JJ_* arguments of deploy/sandbox/Containerfile
+# (TestJJPinMatchesContainerfiles checks).
+ARG JJ_VERSION=0.47.1
+ARG JJ_SHA256_AMD64=d4b657f622ee50929c8916466dfa3d6a6c17a0a32b50e7b2c793707ec9ebcad7
+ARG JJ_SHA256_ARM64=0f300e1576de8dabe0a9dedf0b87ae44f8accea5cf54d9a342a51061c1fb1bcd
+
 # --- build -------------------------------------------------------------------
 # The build stage runs on the build host's architecture and cross-compiles.
 # That is possible because the binary is pure Go (SQLite is modernc.org/sqlite).
@@ -74,6 +83,31 @@ RUN set -eu; \
       echo "${sum}  /out/osewa/${gz}" | sha256sum -c -; \
     done
 
+# --- jj ----------------------------------------------------------------------
+# The jj binary for the target architecture, verified against its checksum.
+FROM --platform=$BUILDPLATFORM ${RUNTIME_IMAGE} AS jj
+
+ARG TARGETARCH
+ARG JJ_VERSION
+ARG JJ_SHA256_AMD64
+ARG JJ_SHA256_ARM64
+
+RUN apk add --no-cache curl tar
+
+RUN set -eu; \
+    case "${TARGETARCH}" in \
+      amd64) triple=x86_64-unknown-linux-musl;  sum="${JJ_SHA256_AMD64}" ;; \
+      arm64) triple=aarch64-unknown-linux-musl; sum="${JJ_SHA256_ARM64}" ;; \
+      *) echo "unsupported TARGETARCH '${TARGETARCH}' (want amd64 or arm64)" >&2; exit 1 ;; \
+    esac; \
+    tarball="jj-v${JJ_VERSION}-${triple}.tar.gz"; \
+    curl -fsSL --proto '=https' --tlsv1.2 -o "/tmp/${tarball}" \
+      "https://github.com/jj-vcs/jj/releases/download/v${JJ_VERSION}/${tarball}"; \
+    echo "${sum}  /tmp/${tarball}" | sha256sum -c -; \
+    mkdir /tmp/jj; \
+    tar -xzf "/tmp/${tarball}" -C /tmp/jj ./jj; \
+    install -m 0755 /tmp/jj/jj /out-jj
+
 # --- runtime -----------------------------------------------------------------
 FROM ${RUNTIME_IMAGE}
 
@@ -93,6 +127,9 @@ RUN addgroup -g 10001 -S sundae \
 # The hooks call the binary through SUNDAE_BIN_PATH, which Sundae sets
 # to its own path. Keep it here so existing repositories keep working.
 COPY --from=build /out/sundae /usr/local/bin/sundae
+
+# jj, for the Changes tab of jj repositories (pkg/jjview).
+COPY --from=jj /out-jj /usr/bin/jj
 
 # The osewa builds Sundae uploads to sandboxes (sessions.osewa.binary_dir).
 COPY --from=osewa /out/osewa/ /usr/local/share/sundae/osewa/

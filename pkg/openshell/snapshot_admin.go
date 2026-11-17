@@ -54,7 +54,9 @@ type StoredSnapshot struct {
 }
 
 // Info returns the snapshot's location, size and time.
-func (s StoredSnapshot) Info() SnapshotInfo { return SnapshotInfo{URL: s.URL, Size: s.Size, Time: s.Time} }
+func (s StoredSnapshot) Info() SnapshotInfo {
+	return SnapshotInfo{URL: s.URL, Size: s.Size, Time: s.Time}
+}
 
 // Label names the snapshot's session: "repo / session", the session alone,
 // or the sandbox when the snapshot has no metadata.

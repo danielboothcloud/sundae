@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/danielboothcloud/sundae/git"
+	"github.com/danielboothcloud/sundae/pkg/jjview"
 	"github.com/danielboothcloud/sundae/pkg/proto"
 	"github.com/danielboothcloud/sundae/pkg/ui/common"
 	"github.com/danielboothcloud/sundae/pkg/ui/components/footer"
@@ -82,6 +83,16 @@ func (ui *UI) getMargins() (wm, hm int) {
 		hm += lipgloss.Height(ui.footerView())
 	}
 	return
+}
+
+// jjViewer is the server's jj viewer, for the Changes tab of jj
+// repositories; nil without a config.
+func (ui *UI) jjViewer() *jjview.Viewer {
+	cfg := ui.common.Config()
+	if cfg == nil {
+		return nil
+	}
+	return jjview.ForDataPath(cfg.DataPath)
 }
 
 // selection returns the home page.
@@ -200,7 +211,7 @@ func (ui *UI) Init() tea.Cmd {
 	tabs := []common.TabComponent{
 		repo.NewReadme(ui.common),
 		repo.NewFiles(ui.common),
-		repo.NewLog(ui.common),
+		repo.NewHistory(ui.common, ui.jjViewer()),
 		repo.NewRefs(ui.common, git.RefsHeads),
 		repo.NewRefs(ui.common, git.RefsTags),
 	}
