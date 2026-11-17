@@ -330,6 +330,7 @@ name all in uppercase. Here are some examples:
 - `SUNDAE_FORGES_0_NAME`, `SUNDAE_FORGES_0_KIND`, ...: The first entry of `forges` (see [Forges](#forges)); list values are comma-separated; `SUNDAE_FORGES_0_GIT_IDENTITY_NAME` and `..._EMAIL` set its `git_identity`
 - `SUNDAE_SESSIONS_GIT_IDENTITY_NAME`, `SUNDAE_SESSIONS_GIT_IDENTITY_EMAIL`: `sessions.git_identity` (see [OpenShell Agent Sessions](#openshell-agent-sessions), "Git identity")
 - `SUNDAE_NOTIFICATIONS_ON`, `SUNDAE_NOTIFICATIONS_NTFY_ENABLED`, ...: The `notifications` section (see [Notifications](#notifications)); `on` is comma-separated
+- `SUNDAE_JJ_PATH`: The jj binary for the TUI's Changes tab of jj repositories (default: `jj` from `PATH`); `off` shows them with the git log (see [Jujutsu (jj) Repositories](#jujutsu-jj-repositories))
 
 #### Database Configuration
 
@@ -395,6 +396,10 @@ ssh    -p 23231 localhost session signals --attention --follow      # keep print
 ssh    -p 23231 localhost session park review                       # suspend that session's sandbox now
 ssh    -p 23231 localhost session resume review                     # resume it without attaching
 ssh    -p 23231 localhost session end review                        # delete that session's sandbox and revoke its token
+ssh    -p 23231 localhost session end review --delete-snapshot      # ... and delete its S3 snapshot too
+ssh    -p 23231 localhost session snapshot ls                       # your S3 snapshots: live, parked or ended
+ssh    -p 23231 localhost session snapshot rm review                # delete one session's snapshot
+ssh    -p 23231 localhost session snapshot prune --older-than 720h  # delete ended sessions' snapshots older than 30 days
 ```
 
 **Sessions and repositories.** A session is named (1 to 32 lowercase
@@ -1121,8 +1126,24 @@ complete and its MD5 checks out, so a failed upload leaves the previous
 snapshot as it was. One upload carries at most 5 GiB (the AWS S3 and Ceph
 RGW limit for a single PUT): a larger compressed archive fails the snapshot
 with that message, before anything is uploaded. Interrupted uploads leave no
-partial objects. Nothing deletes snapshots; use a bucket lifecycle rule if you
-want old ones gone.
+partial objects. A snapshot outlives its session: nothing deletes it on its
+own (see "Deleting snapshots"), and starting a session of the same name
+restores it.
+
+**Deleting snapshots.** `session snapshot ls` lists your snapshots, newest
+first, with what became of each session: `live` (it has a sandbox),
+`parked` (parked to this snapshot, its only copy of `/sandbox`) or `ended`.
+`session snapshot rm SESSION` deletes one; the snapshot a session is parked
+to is refused, since deleting it would lose the session's work.
+`session snapshot prune` deletes the snapshots of ended sessions only,
+`--older-than 720h` keeps those stored in the last 30 days, and `--dry-run`
+lists what would go. `session end SESSION --delete-snapshot` ends a session
+and deletes its snapshot, taking none on end, so its work is gone for good.
+In the TUI, <kbd>S</kbd> on the Sessions tab opens the same list
+(<kbd>x</kbd> deletes the highlighted snapshot, <kbd>P</kbd> prunes those of
+ended sessions, both after a confirm) and <kbd>D</kbd> ends the highlighted
+session and deletes its snapshot. A bucket lifecycle rule on the prefix is
+another way to expire old snapshots.
 
 **What is left out.** Everything under `/sandbox` is saved except: osewa's
 runtime (`~/.config/osewa`, `~/.local/state/osewa`, the bridge's client key
@@ -1883,15 +1904,29 @@ ssh -p 23231 localhost repo create icecream --vcs git
 
 Storage and transport are always a bare Git repository. jj has no wire
 protocol of its own, so you push and fetch with `jj git push` and
-`jj git fetch`, and the server never runs `jj`. The kind only changes how the
-repository is presented:
+`jj git fetch`, and the server never runs `jj` on a repository (the TUI's
+Changes tab runs it on a cache copy; see below). The kind only changes how
+the repository is presented:
 
 - the clone hint is `jj git clone <url>` in the CLI, TUI and the `go-get` page;
 - branches are called bookmarks (`repo bookmark` is an alias of `repo branch`,
   and the TUI tab is "Bookmarks");
 - commits show their jj change ID next to the short commit ID in the TUI log,
   and `repo commit` prints the full change ID on its own line. The ID is read from the `change-id` header jj writes
-  into pushed commits; commits without it fall back to the short hash.
+  into pushed commits; commits without it fall back to the short hash;
+- when the server has jj (the image includes it), the TUI's Commits tab is
+  **Changes**: `jj log` of everything reachable from a bookmark or tag, as jj
+  draws it (graph and colours), with <kbd>j</kbd>/<kbd>k</kbd> moving between
+  changes, <kbd>enter</kbd> showing `jj show` of one and <kbd>h</kbd> going
+  back. jj never runs on the served repository, which it would write its own
+  objects and `refs/jj/keep/*` refs into: it runs on a cache copy under
+  `<data path>/cache/jj`, a bare repository that borrows the served
+  repository's objects (git alternates) and holds a copy of its branches and
+  tags, fetched again each time the tab lists the changes. A cache that cannot
+  be updated (history rewritten and old objects pruned) is rebuilt. Only what
+  was pushed is shown: no operation log, working copy or hidden changes.
+  `SUNDAE_JJ_PATH` sets the jj binary (default: `jj` from `PATH`); `off`
+  shows jj repositories with the git log.
 
 ```sh
 jj git clone ssh://localhost:23231/icecream.git
@@ -1987,17 +2022,42 @@ You can copy text to your clipboard over SSH. For instance, you can press
 <kbd>c</kbd> on the highlighted repo in the menu to copy the clone command
 [^osc52].
 
-The home page has tabs: <kbd>1</kbd>–<kbd>n</kbd> jump to one, <kbd>tab</kbd> and
-<kbd>shift+tab</kbd> cycle forward and back (while a form or filter is open,
-they stay with it). Keys mean the same on every tab: <kbd>n</kbd> new,
+**Moving around.** <kbd>j</kbd>/<kbd>k</kbd> (or the arrows) move in every
+list, <kbd>H</kbd>/<kbd>L</kbd> switch to the previous and next tab (as
+<kbd>shift+tab</kbd>/<kbd>tab</kbd> do; <kbd>1</kbd>–<kbd>n</kbd> jump to a
+home tab), and <kbd>h</kbd>/<kbd>l</kbd> move out and in: back from a file
+or diff to its list, from the Signal history to the sessions, and into a
+directory, a commit or the history. The help line reads the same on every
+tab: move, the main action, the tab's keys, filter, tabs, `? more`. Keys
+are colour-coded: the main action's key (<kbd>enter</kbd>) in pink, keys
+that delete or end something, and their words, in red, the rest in blue.
+Above the help, the **action bar** names the highlighted row and what you can
+do with it (`▸ infra / claude-1  z park • A add repos • u sync … • space
+more`). Results show as a notice under the list: `✓ Ended infra / claude-1.`
+in green, `✗ …` in red.
+
+**Forms are modal.** The new-session, new-repository and import forms open in
+NORMAL mode (the badge at the top right): <kbd>j</kbd>/<kbd>k</kbd> move
+between fields (or rows of a repository list), <kbd>h</kbd>/<kbd>l</kbd>
+change a choice or a yes/no, <kbd>space</kbd> picks, <kbd>enter</kbd>
+submits and <kbd>esc</kbd> cancels (first clearing a filter). On a text
+field or a list that filters, <kbd>/</kbd> (or <kbd>i</kbd>) starts TYPING:
+keys go to the field until <kbd>enter</kbd> or <kbd>esc</kbd> ends it, and
+<kbd>tab</kbd> moves on. The focused field has a `▸` and says what
+<kbd>/</kbd> does there. No repository is picked when the new-session form
+opens from the Sessions tab; <kbd>s</kbd> on a repository picks it.
+
+The home page has tabs; while a form or filter is open, the keys stay with
+it. Keys mean the same on every tab: <kbd>n</kbd> new,
 <kbd>enter</kbd> open/attach, <kbd>d</kbd> delete/end (always confirmed),
 <kbd>r</kbd> refresh/sync, <kbd>c</kbd> copy a command, <kbd>/</kbd> filter.
 On a Repositories, Sessions or Forges row, <kbd>space</kbd> or <kbd>.</kbd>
 opens a menu of what you can do with it, each with its key, showing only the
 actions allowed for that row: <kbd>↑</kbd>/<kbd>↓</kbd> (or <kbd>j</kbd>/<kbd>k</kbd>)
-move, <kbd>enter</kbd> runs the highlighted action, an action's key runs it
-directly (exactly as pressing it on the row does, confirms included), and
-<kbd>esc</kbd>, <kbd>space</kbd> or <kbd>.</kbd> close it.
+move, <kbd>enter</kbd> (or <kbd>l</kbd>) runs the highlighted action, an
+action's key runs it directly (exactly as pressing it on the row does,
+confirms included), and <kbd>esc</kbd>, <kbd>h</kbd>, <kbd>space</kbd> or
+<kbd>.</kbd> close it.
 <kbd>:</kbd> opens the command palette: every action of every tab in one
 list, e.g. `Sessions › End  d`, the tab switches (`Go to Forges`) and a sync
 of each listed forge (`Forges › Sync forge github`). Type to filter (every
@@ -2013,13 +2073,15 @@ row), <kbd>n</kbd> starts a session (pick any number of repositories with
 repositories to the highlighted session or remove some, <kbd>u</kbd> syncs it
 with its forges (see below), <kbd>d</kbd> ends it after a confirm,
 <kbd>z</kbd> parks or resumes it, <kbd>c</kbd> copies its `session attach`
-command, and <kbd>/</kbd> filters. Below the list, **Signals · *session***
+command, and <kbd>/</kbd> filters. With S3 snapshots, <kbd>D</kbd> ends it
+and deletes its snapshot, and <kbd>S</kbd> lists your snapshots (see
+"Deleting snapshots"). Below the list, **Signals · *session***
 shows the highlighted session's latest signals, newest first, and follows the
 cursor (on short or narrow terminals, just its latest signal on one line).
-<kbd>e</kbd> opens the full **Signal history**: the `session signals` feed,
-live, newest first (<kbd>/</kbd> filters, <kbd>a</kbd> shows only what needs
-you, <kbd>g</kbd> goes back to the top and follows new signals);
-<kbd>esc</kbd> goes back.
+<kbd>l</kbd> (or <kbd>e</kbd>) opens the full **Signal history**: the
+`session signals` feed, live, newest first (<kbd>/</kbd> filters,
+<kbd>a</kbd> shows only what needs you, <kbd>g</kbd> goes back to the top
+and follows new signals); <kbd>h</kbd> or <kbd>esc</kbd> goes back.
 When the OpenShell gateway is unreachable the tab says so and <kbd>r</kbd>
 retries; the other tabs keep working.
 

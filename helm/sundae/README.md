@@ -573,3 +573,7 @@ Not checked, because it needs an image build or a live cluster:
   OpenShell sandbox passes its Landlock, seccomp and task-memory probes
   under Kata, and whether Kata alone lets podman run in a sandbox (the
   OpenShell sandbox drops all capabilities and sets `NoNewPrivs`).
+- The jj binary in the Sundae image (the Changes tab of jj repositories):
+  the Containerfile's new jj stage has not been built. The tab was tested
+  with jj 0.47.1 on macOS against local repositories. Its cache lives on
+  the data volume, under `cache/jj`, and can be deleted at any time.
