@@ -60,7 +60,7 @@
 
 # Pinned by tag and by digest (a multi-arch index: amd64, arm64, ppc64le,
 # s390x): Fedora rebuilds this tag with updates. Fedora 45.
-ARG BASE_IMAGE=quay.io/fedora/fedora:45@sha256:e203b4174f6a2ce6c160ddc4917d85e6bfce32dfc610d953b355d63ec4c17909
+ARG BASE_IMAGE=quay.io/fedora/fedora:45@sha256:8430348a73c5a0e607b5de2cf9dd4741d9aa0891bbce3108588298102015f8c6
 
 # Jujutsu release and the SHA-256 of its static musl tarball per architecture,
 # from https://github.com/jj-vcs/jj/releases/tag/v0.47.1. Change all three

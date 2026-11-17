@@ -52,7 +52,7 @@ func jjRepo(t *testing.T) (string, string) {
 	src, bare := filepath.Join(dir, "src"), filepath.Join(dir, "bare.git")
 	run := func(d, bin string, args ...string) string {
 		t.Helper()
-		cmd := exec.Command(bin, args...)
+		cmd := exec.CommandContext(t.Context(), bin, args...)
 		cmd.Dir = d
 		cmd.Env = append(os.Environ(), "JJ_CONFIG="+cfg)
 		out, err := cmd.CombinedOutput()

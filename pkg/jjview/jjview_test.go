@@ -42,7 +42,7 @@ func served(t *testing.T, jj, git string) (string, func()) {
 	src, bare := filepath.Join(dir, "src"), filepath.Join(dir, "bare.git")
 	run := func(d, bin string, args ...string) string {
 		t.Helper()
-		cmd := exec.Command(bin, args...)
+		cmd := exec.CommandContext(t.Context(), bin, args...)
 		cmd.Dir = d
 		cmd.Env = append(os.Environ(), "JJ_CONFIG="+cfg)
 		out, err := cmd.CombinedOutput()
@@ -187,7 +187,7 @@ func TestBrokenCacheIsRebuilt(t *testing.T) {
 func TestEmptyRepoAndNoJJ(t *testing.T) {
 	jj, git := tools(t)
 	bare := filepath.Join(t.TempDir(), "empty.git")
-	if out, err := exec.Command(git, "init", "-q", "--bare", bare).CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(t.Context(), git, "init", "-q", "--bare", bare).CombinedOutput(); err != nil {
 		t.Fatalf("%v %s", err, out)
 	}
 	v := New(jj, git, t.TempDir())

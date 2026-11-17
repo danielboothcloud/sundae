@@ -165,6 +165,7 @@ func (f *fakeSource) Park(context.Context, string) (bool, error) { return true, 
 func (f *fakeSource) SyncRepos(context.Context, string, []string) ([]sessions.RepoSync, error) {
 	return nil, nil
 }
+
 func (f *fakeSource) Prepare(_ context.Context, req sessionctl.Request) (sessions.Attacher, error) {
 	if req.Name != "main" || req.Create {
 		return nil, fmt.Errorf("unexpected request %+v", req)
