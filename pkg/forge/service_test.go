@@ -70,6 +70,9 @@ type fakeForge struct {
 	srv   *httptest.Server
 	mu    sync.Mutex
 	repos []map[string]any
+	// calls counts listing requests; fail makes them fail.
+	calls int
+	fail  bool
 }
 
 func newFakeForge(t *testing.T) *fakeForge {
@@ -82,6 +85,11 @@ func newFakeForge(t *testing.T) *fakeForge {
 		}
 		ff.mu.Lock()
 		defer ff.mu.Unlock()
+		ff.calls++
+		if ff.fail {
+			http.Error(w, "down", http.StatusBadGateway)
+			return
+		}
 		json.NewEncoder(w).Encode(ff.repos) //nolint:errcheck
 	}))
 	t.Cleanup(ff.srv.Close)

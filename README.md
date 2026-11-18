@@ -1817,6 +1817,11 @@ forges:
   rotated token is picked up without a restart. Discovery needs it: GitHub
   `repo` (or a fine-grained token with Contents read, plus write to push),
   GitLab `read_api` and `read_repository` (`write_repository` to push).
+- Each successful listing is stored in `<data>/forge-listings/<forge>.json`
+  (mode 0600, no token), so after a restart the Forges tab shows the last
+  listing at once, with its age when it is older than the last sync. A
+  file listed for another URL or token is ignored. A failed listing keeps
+  the stored one.
 - `include` and `exclude` match the forge path case-insensitively. `*` does
   not cross `/`, `**` does. Write alternatives as separate entries.
 - `prefix` must be unique and must not nest inside another forge's prefix, so

@@ -178,7 +178,11 @@ func (m *Forges) headerRow(g group, selected bool, w int) []string {
 		doing = sel.Updated.Render("listing…")
 	}
 	if s.Matching != nil {
-		counts = sel.Desc.Render(plural(*s.Matching, "repo", "repos") + " · ")
+		n := plural(*s.Matching, "repo", "repos")
+		if listingOutdated(s) {
+			n += " listed " + ago(*s.ListedAt, m.now())
+		}
+		counts = sel.Desc.Render(n + " · ")
 	}
 	counts += sel.Desc.Render(fmt.Sprintf("%d imported", s.Imported))
 	if text, ok := m.forgeError(s); ok {
@@ -354,6 +358,15 @@ func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 // ago renders how long ago t was: "now" under a minute, then "3m ago",
 // "5h ago", "2d ago".
+// listingOutdated reports a listing older than the last sync, e.g. one
+// restored from disk after a restart, so its age is worth showing.
+func listingOutdated(s forge.ForgeStatus) bool {
+	if s.ListedAt == nil {
+		return false
+	}
+	return s.LastSync == nil || s.LastSync.Sub(*s.ListedAt) > 5*time.Minute
+}
+
 func ago(t, now time.Time) string {
 	d := now.Sub(t)
 	switch {

@@ -620,6 +620,23 @@ func TestForgesListErrorStaysInTheHeader(t *testing.T) {
 	golden(t, "forges-list-error-100", view(m))
 }
 
+// TestForgesListingAge: a listing much older than the last sync (restored
+// after a restart) shows its age; a current one does not.
+func TestForgesListingAge(t *testing.T) {
+	src := newFakeSource()
+	listed := now.Add(-5 * time.Hour)
+	src.status[0].ListedAt = &listed
+	if got := view(started(t, 120, 20, src)); !strings.Contains(got, "4 repos listed 5h ago") {
+		t.Fatalf("view:\n%s", got)
+	}
+	src = newFakeSource()
+	current := *src.status[0].LastSync
+	src.status[0].ListedAt = &current
+	if got := view(started(t, 120, 20, src)); strings.Contains(got, "listed ") {
+		t.Fatalf("view shows the age of a current listing:\n%s", got)
+	}
+}
+
 // TestForgesImportTellsHomeToReload: a successful import asks the home page
 // to list the repositories again; a failed one does not.
 func TestForgesImportTellsHomeToReload(t *testing.T) {

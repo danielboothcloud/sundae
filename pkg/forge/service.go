@@ -68,6 +68,11 @@ type Service struct {
 	notifier Notifier
 	states   map[string]*forgeState
 	locks    map[string]*sync.Mutex
+
+	// dataPath holds the listing files; empty keeps listings in memory only.
+	dataPath string
+	// saveMu serializes listing file writes.
+	saveMu sync.Mutex
 }
 
 // forgeState is what the service remembers about a forge while it runs.
@@ -78,6 +83,10 @@ type forgeState struct {
 	listing  *Listing
 	// listErr is why the last discovery failed; empty when it succeeded.
 	listErr string
+	// restore loads the listing file once; savedAt is the time of the
+	// listing last written to it.
+	restore sync.Once
+	savedAt time.Time
 }
 
 // NewService returns the forge service for the forges in cfg, which must
@@ -95,6 +104,7 @@ func NewService(cfg *config.Config, be Backend, logger *log.Logger, opts ...Opti
 		notifier:    nopNotifier{},
 		states:      map[string]*forgeState{},
 		locks:       map[string]*sync.Mutex{},
+		dataPath:    cfg.DataPath,
 	}
 	for _, fc := range cfg.Forges {
 		f, err := New(fc)
@@ -302,6 +312,8 @@ type ForgeStatus struct {
 	// Matching those passing include and exclude. Nil before any discovery.
 	Listed   *int `json:"listed"`
 	Matching *int `json:"matching"`
+	// ListedAt is when the last discovery ran; it can predate this process.
+	ListedAt *time.Time `json:"listed_at,omitempty"`
 	// LastSync is the last scheduled or forge-wide sync in this process, or
 	// failing that the newest sync recorded in an imported repository.
 	LastSync  *time.Time `json:"last_sync"`
@@ -330,6 +342,7 @@ func (s *Service) Status(ctx context.Context) ([]ForgeStatus, error) {
 			Transport: f.Transport(),
 			SSHURL:    f.SSHURL(),
 		}
+		s.restoreListing(f)
 		var newest time.Time
 		for _, l := range links {
 			if l.Forge != f.Name() {
@@ -350,6 +363,8 @@ func (s *Service) Status(ctx context.Context) ([]ForgeStatus, error) {
 				}
 			}
 			st.Listed, st.Matching = &listed, &matching
+			t := fs.listing.Time
+			st.ListedAt = &t
 		}
 		if !fs.lastSync.IsZero() {
 			newest = fs.lastSync
@@ -381,6 +396,9 @@ func (s *Service) Discover(ctx context.Context, name string) (*Listing, error) {
 		s.states[name].listErr = strings.Join(strings.Fields(err.Error()), " ")
 	}
 	s.mu.Unlock()
+	if err == nil {
+		s.saveListing(f, listing)
+	}
 	s.notify(ctx, Event{Kind: EventDiscover, Forge: name, Err: err})
 	if err == nil && len(listing.Rejected) > 0 {
 		for _, r := range listing.Rejected {
@@ -429,17 +447,24 @@ func (s *Service) Repos(ctx context.Context, name string, all bool) ([]RepoStatu
 }
 
 // KnownRepos is Repos from the last discovery instead of a new one: it
-// never calls the forge. Before any discovery succeeded it lists the
-// imported repositories only, all with Listed false.
+// never calls the forge. The listing can come from an earlier process (the
+// listing file). Before any discovery succeeded it lists the imported
+// repositories only, all with Listed false.
 func (s *Service) KnownRepos(ctx context.Context, name string, all bool) ([]RepoStatus, error) {
 	f, err := s.Forge(name)
 	if err != nil {
 		return nil, err
 	}
+	return s.reposFrom(ctx, f, s.knownListing(f), all)
+}
+
+// knownListing is the forge's last listing, from memory or its listing
+// file; nil before any discovery succeeded.
+func (s *Service) knownListing(f *Forge) *Listing {
+	s.restoreListing(f)
 	s.mu.Lock()
-	listing := s.states[name].listing
-	s.mu.Unlock()
-	return s.reposFrom(ctx, f, listing, all)
+	defer s.mu.Unlock()
+	return s.states[f.Name()].listing
 }
 
 // reposFrom lists the repositories of a listing (nil for none) and the
@@ -858,10 +883,7 @@ func (s *Service) SyncRepo(ctx context.Context, name, repo string) (RepoSyncResu
 	want := utils.SanitizeRepo(repo)
 	for _, l := range links {
 		if l.Repo == want || strings.EqualFold(l.Path, strings.Trim(repo, "/")) {
-			s.mu.Lock()
-			listing := s.states[name].listing
-			s.mu.Unlock()
-			return s.syncLink(ctx, f, l, listing), nil
+			return s.syncLink(ctx, f, l, s.knownListing(f)), nil
 		}
 	}
 	return RepoSyncResult{}, fmt.Errorf("%w: %s (forge %s)", ErrRepoNotImported, repo, name)
@@ -998,9 +1020,7 @@ func (s *Service) pushLocked(ctx context.Context, f *Forge, l *Link, branch stri
 	if err := checkBranchName(ctx, l.Dir, branch); err != nil {
 		return nil, err
 	}
-	s.mu.Lock()
-	rr, _ := s.states[f.Name()].listing.Find(l.Path)
-	s.mu.Unlock()
+	rr, _ := s.knownListing(f).Find(l.Path)
 	remote, err := s.linkRemote(ctx, f, l, rr.CloneURL)
 	if err != nil {
 		return nil, err
