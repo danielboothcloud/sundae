@@ -245,6 +245,22 @@ func TestStartFailures(t *testing.T) {
 		t.Fatalf("fatal: %v", err)
 	}
 
+	// A crash-looping container fails the start.
+	r2, cs2 := newTestRuntime(t, testConfig(t), &notReady)
+	cs2.PrependReactor("create", "pods", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		p := a.(k8stesting.CreateAction).GetObject().(*corev1.Pod)
+		p.Status = corev1.PodStatus{Phase: corev1.PodPending, InitContainerStatuses: []corev1.ContainerStatus{{
+			Name: seedContainerName, RestartCount: crashLimit,
+			State:                corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "CrashLoopBackOff"}},
+			LastTerminationState: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 1}},
+		}}}
+		return false, nil, nil
+	})
+	_, _, err = r2.EnsureSandbox(ctx, "sd-c", request(""))
+	if err == nil || !strings.Contains(err.Error(), "container seed keeps failing (exit code 1)") || !strings.Contains(err.Error(), "logs sd-c -c seed") {
+		t.Fatalf("crash loop: %v", err)
+	}
+
 	// No image.
 	req := request("")
 	req.Image = ""

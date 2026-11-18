@@ -55,10 +55,21 @@ const (
 var keepAlive = []string{"/bin/sh", "-c", "trap 'exit 0' TERM INT; while :; do sleep 3600 & wait $!; done"}
 
 // seedScript copies the image's /sandbox (the shell start-up files) into a
-// new volume once, as OpenShell's Kubernetes driver does.
+// new volume once, as OpenShell's Kubernetes driver does. It is best effort:
+// what cannot be copied is reported in the container's log and the session
+// starts anyway. Directories a failed attempt left read-only are made
+// writable first, so a retry is not stuck on them; tar, as a non-root user,
+// copies modes but not ownership.
 const seedScript = `set -e
 [ -e ` + seedMount + `/` + seededMarker + ` ] && exit 0
-if [ -d ` + SandboxRoot + ` ]; then cp -a ` + SandboxRoot + `/. ` + seedMount + `/ 2>/dev/null || cp -R ` + SandboxRoot + `/. ` + seedMount + `/; fi
+if [ -d ` + SandboxRoot + ` ]; then
+	chmod -R u+w ` + seedMount + ` 2>/dev/null || true
+	if command -v tar >/dev/null 2>&1; then
+		(cd ` + SandboxRoot + ` && tar -cf - .) | (cd ` + seedMount + ` && tar -xf -) || echo "sundae: warning: the image's ` + SandboxRoot + ` was not copied completely" >&2
+	else
+		cp -R ` + SandboxRoot + `/. ` + seedMount + `/ || echo "sundae: warning: the image's ` + SandboxRoot + ` was not copied completely" >&2
+	fi
+fi
 : > ` + seedMount + `/` + seededMarker
 
 // Runtime is the pod runtime.
@@ -559,14 +570,26 @@ var fatalReasons = map[string]bool{
 	"CreateContainerError":       true,
 }
 
+// crashLimit is how many restarts of a crash-looping container a start
+// waits through before it gives up.
+const crashLimit = 2
+
 // podFatal returns why the pod cannot start, or "".
 func podFatal(pod *corev1.Pod) string {
 	if pod.Status.Phase == corev1.PodFailed {
 		return fmt.Sprintf("pod failed: %s %s", pod.Status.Reason, pod.Status.Message)
 	}
 	for _, cs := range append(slicesClone(pod.Status.InitContainerStatuses), pod.Status.ContainerStatuses...) {
-		if w := cs.State.Waiting; w != nil && fatalReasons[w.Reason] {
+		w := cs.State.Waiting
+		switch {
+		case w != nil && fatalReasons[w.Reason]:
 			return fmt.Sprintf("container %s: %s: %s", cs.Name, w.Reason, w.Message)
+		case w != nil && w.Reason == "CrashLoopBackOff" && cs.RestartCount >= crashLimit:
+			msg := fmt.Sprintf("container %s keeps failing", cs.Name)
+			if t := cs.LastTerminationState.Terminated; t != nil {
+				msg += fmt.Sprintf(" (exit code %d)", t.ExitCode)
+			}
+			return msg + fmt.Sprintf("; see kubectl -n %s logs %s -c %s", pod.Namespace, pod.Name, cs.Name)
 		}
 	}
 	return ""
