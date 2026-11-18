@@ -10,7 +10,7 @@
 # What OpenShell 0.1.8 expects of a sandbox image, and what follows from it:
 #
 # - A standard glibc Linux userland; distroless and scratch images are not
-#   supported. The base is Fedora (quay.io/fedora/fedora); OpenShell's own
+#   supported. The base is Fedora (docker.io/library/fedora); OpenShell's own
 #   default sandbox image is Ubuntu, and nothing here depends on either.
 # - The image's ENTRYPOINT and CMD never run: OpenShell replaces the container
 #   command with its own sandbox runtime, which it stages into /.openshell.
@@ -59,8 +59,9 @@
 #   /tmp are writable.
 
 # Pinned by tag and by digest (a multi-arch index: amd64, arm64, ppc64le,
-# s390x): Fedora rebuilds this tag with updates. Fedora 45.
-ARG BASE_IMAGE=quay.io/fedora/fedora:45@sha256:2f80a0ca2d1ed94d8979b2fc5f766f4ad6763bfdf290eca0de3df862340e7e83
+# s390x): Fedora rebuilds this tag with updates. Fedora 45, from Docker Hub's
+# official image: quay.io deletes a tag's old digests, which broke the pin.
+ARG BASE_IMAGE=docker.io/library/fedora:45@sha256:a7d72ba2745b100a3351087472e5ee7b2450af7cf331e7673007e3817612839c
 
 # Jujutsu release and the SHA-256 of its static musl tarball per architecture,
 # from https://github.com/jj-vcs/jj/releases/tag/v0.47.1. Change all three
