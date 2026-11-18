@@ -704,9 +704,10 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 	case s.Started && s.Unparked && parked != nil:
 		// A snapshot keeps /sandbox, not running programs.
 		fmt.Fprintf(progress, "Started %s again: it was not running when the session resumed (the session was parked to a snapshot of /sandbox, which keeps files but not running programs)\n", strings.Join(command, " ")) //nolint:errcheck
-	case s.Started && s.Unparked && s.Runtime == config.RuntimePod:
-		// Parking a pod session deletes its pod.
-		fmt.Fprintf(progress, "Started %s again: parking stopped it (a parked pod session keeps /sandbox, not running programs)\n", strings.Join(command, " ")) //nolint:errcheck
+	case s.Started && s.Unparked && s.Runtime != config.RuntimeOpenShell:
+		// Parking a pod session deletes its pod; a docker session's
+		// container is stopped.
+		fmt.Fprintf(progress, "Started %s again: parking stopped it (a parked %s session keeps /sandbox, not running programs)\n", strings.Join(command, " "), s.Runtime) //nolint:errcheck
 	case s.Started && s.Unparked:
 		// The sandbox's memory was not restored (it restarted cleanly,
 		// see resumeRestartIfRestoreFails), or the program had exited

@@ -283,6 +283,10 @@ type Config struct {
 	// pods (sessions.runtime: pod).
 	Pod PodConfig `envPrefix:"POD_" yaml:"pod"`
 
+	// Docker configures the docker session runtime: sessions as
+	// containers on a Docker engine (sessions.runtime: docker).
+	Docker DockerConfig `envPrefix:"DOCKER_" yaml:"docker"`
+
 	// Projects configures how new repositories are initialised: the
 	// templates `repo create --template` and the TUI offer.
 	Projects ProjectsConfig `envPrefix:"PROJECTS_" yaml:"projects"`
@@ -403,6 +407,8 @@ func (c *Config) Environ() []string {
 	envs = append(envs, c.sessionsEnviron()...)
 
 	envs = append(envs, c.podEnviron()...)
+
+	envs = append(envs, c.dockerEnviron()...)
 
 	// projects.templates is a map and has no environment form; hook
 	// subprocesses read it from the config file.
@@ -761,6 +767,7 @@ func DefaultConfig() *Config {
 			ReadyTimeout: DefaultReadyTimeout,
 			PodSettings:  PodSettings{StorageSize: DefaultPodStorageSize},
 		},
+		Docker: DockerConfig{ReadyTimeout: DefaultReadyTimeout},
 		Sessions: SessionsConfig{
 			Osewa: OsewaConfig{
 				BinaryDir: DefaultOsewaBinaryDir,
@@ -837,7 +844,7 @@ func (c *Config) Validate() error {
 
 	c.HTTP.CORS.AllowedOrigins = append([]string{c.HTTP.PublicURL}, c.HTTP.CORS.AllowedOrigins...)
 
-	return errors.Join(c.validateOpenShell(), c.validateProviders(), c.validateSandboxPolicy(), c.validateSessions(), c.validatePod(), c.validateProjects(), c.validateForges(), c.validateGitIdentities(), c.validateNotifications(), c.validateSnapshots())
+	return errors.Join(c.validateOpenShell(), c.validateProviders(), c.validateSandboxPolicy(), c.validateSessions(), c.validatePod(), c.validateDocker(), c.validateProjects(), c.validateForges(), c.validateGitIdentities(), c.validateNotifications(), c.validateSnapshots())
 }
 
 // validateOpenShell validates the OpenShell configuration and resolves its

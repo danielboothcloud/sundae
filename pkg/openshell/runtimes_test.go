@@ -11,6 +11,8 @@ import (
 	"github.com/NVIDIA/OpenShell/sdk/go/openshell/v1/fake"
 	"github.com/danielboothcloud/sundae/pkg/config"
 	sbx "github.com/danielboothcloud/sundae/pkg/sandbox"
+	"github.com/danielboothcloud/sundae/pkg/sandbox/docker"
+	"github.com/danielboothcloud/sundae/pkg/sandbox/docker/dockertest"
 	"github.com/danielboothcloud/sundae/pkg/sandbox/pod"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -204,5 +206,79 @@ func TestPodRuntimeDefault(t *testing.T) {
 	p, err := h.cs.CoreV1().Pods("sundae").Get(ctx, s.Sandbox, metav1.GetOptions{})
 	if err != nil || p.Spec.Containers[0].Image != "custom" || p.Spec.RuntimeClassName != nil {
 		t.Fatalf("pod = %+v, %v", p, err)
+	}
+}
+
+func TestDockerRuntimeSession(t *testing.T) {
+	ctx := context.Background()
+	cfg := newHarnessConfig()
+	cfg.DataPath = t.TempDir()
+	cfg.Sessions.Runtime = config.RuntimeDocker
+	cfg.Docker.Image = "docker-image"
+	cfg.Sessions.Profiles = map[string]config.SessionProfile{
+		"gvisor": {Docker: &config.DockerSettings{Runtime: "runsc"}},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	ex := newFakeExec()
+	engine := dockertest.New()
+	engine.OnStart = func(name string) {
+		// A started container: whatever ran in it before is gone.
+		ex.mu.Lock()
+		b := ex.box(name)
+		b.server, b.sessions = false, map[string]bool{}
+		ex.mu.Unlock()
+	}
+	dr := docker.NewWithAPI(cfg, engine)
+	dr.SetStream(func(ctx context.Context, name string, o docker.StreamOptions) (int, error) {
+		command, opts := o.Command, v1.ExecOptions{NoLoginShell: true, Env: o.Env, WorkDir: o.WorkDir}
+		if len(command) > 3 && command[0] == "/bin/sh" && command[2] == docker.LoginWrapper {
+			command, opts.NoLoginShell = command[4:], false
+		}
+		res, err := ex.Run(ctx, "", name, command, opts)
+		if err != nil {
+			return 0, err
+		}
+		_, _ = o.Stdout.Write(res.Stdout)
+		_, _ = o.Stderr.Write(res.Stderr)
+		return res.ExitCode, nil
+	})
+	tokens := newFakeTokens()
+	mgr := NewManager(NewRouter(cfg.RuntimesInUse(), map[string]sbx.Runtime{config.RuntimeDocker: dr}), tokens, cfg)
+	var progress strings.Builder
+
+	s, err := mgr.Start(ctx, StartOptions{User: alice, Repo: "r", Profile: "gvisor", Progress: &progress})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.Created || !s.Started || s.Runtime != config.RuntimeDocker {
+		t.Fatalf("session = %+v", s)
+	}
+	c := engine.Containers[s.Sandbox]
+	if c.Config.Image != "docker-image" || c.HostConfig.Runtime != "runsc" || c.Config.Labels[AnnotationProfile] != "gvisor" || c.Config.Labels[AnnotationRuntime] != config.RuntimeDocker {
+		t.Fatalf("container = %+v", c)
+	}
+	if b := ex.boxes[s.Sandbox]; !b.dirs["/sandbox/r"] || len(b.sessions) != 1 {
+		t.Fatalf("box = %+v", b)
+	}
+	infos, err := mgr.List(ctx, alice)
+	if err != nil || len(infos) != 1 || infos[0].Runtime != config.RuntimeDocker || infos[0].Profile != "gvisor" {
+		t.Fatalf("list: %+v %v", infos, err)
+	}
+
+	if parked, err := mgr.Park(ctx, alice, "main"); err != nil || !parked {
+		t.Fatalf("park: %v %v", parked, err)
+	}
+	progress.Reset()
+	s, err = mgr.Resume(ctx, StartOptions{User: alice, Name: "main", Progress: &progress})
+	if err != nil || !s.Unparked || !s.Started {
+		t.Fatalf("resume: %+v %v", s, err)
+	}
+	if !strings.Contains(progress.String(), "a parked docker session keeps /sandbox") {
+		t.Fatalf("progress = %q", progress.String())
+	}
+	if existed, err := mgr.End(ctx, alice, "main"); err != nil || !existed || len(engine.Containers)+len(engine.Volumes) != 0 {
+		t.Fatalf("end: %v %v", existed, err)
 	}
 }

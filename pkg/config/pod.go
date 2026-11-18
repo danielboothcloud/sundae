@@ -249,14 +249,19 @@ func mergeStrings(base, over map[string]string) map[string]string {
 }
 
 // ProfileImage returns the image of a new sandbox of the named profile:
-// the profile's image, else, for the pod runtime, its pod image, else
+// the profile's image, else its runtime's (pod or docker) image, else
 // openshell.image.
 func (c *Config) ProfileImage(profile string) string {
 	if img := c.Sessions.Profiles[profile].Image; img != "" {
 		return img
 	}
-	if c.ProfileRuntime(profile) == RuntimePod {
+	switch c.ProfileRuntime(profile) {
+	case RuntimePod:
 		if img := c.PodSettingsFor(profile).Image; img != "" {
+			return img
+		}
+	case RuntimeDocker:
+		if img := c.DockerSettingsFor(profile).Image; img != "" {
 			return img
 		}
 	}

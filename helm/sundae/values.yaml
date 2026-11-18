@@ -339,9 +339,10 @@ config:
   # (session start <repo> --name <name>), each from a profile.
   sessions:
     # Where sessions run unless their profile sets `runtime`: "openshell"
-    # (the OpenShell gateway, config.openshell) or "pod" (a plain Kubernetes
-    # Pod, config.pod; see podRuntime below). An existing session keeps the
-    # runtime it was created in.
+    # (the OpenShell gateway, config.openshell), "pod" (a plain Kubernetes
+    # Pod, config.pod; see podRuntime below) or "docker" (a container on the
+    # engine at config.docker.host; the chart mounts no engine socket). An
+    # existing session keeps the runtime it was created in.
     runtime: openshell
     osewa:
       # The pinned osewa builds this image carries, uploaded to sandboxes

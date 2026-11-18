@@ -9,6 +9,7 @@ import (
 
 	"github.com/danielboothcloud/sundae/pkg/config"
 	sbx "github.com/danielboothcloud/sundae/pkg/sandbox"
+	"github.com/danielboothcloud/sundae/pkg/sandbox/docker"
 	"github.com/danielboothcloud/sundae/pkg/sandbox/pod"
 )
 
@@ -41,6 +42,13 @@ func NewClient(cfg *config.Config) (Client, error) {
 				return nil, err
 			}
 			backends[r] = p
+		case config.RuntimeDocker:
+			d, err := docker.New(cfg)
+			if err != nil {
+				closeAll()
+				return nil, err
+			}
+			backends[r] = d
 		default:
 			closeAll()
 			return nil, fmt.Errorf("session runtime %q is not implemented", r)

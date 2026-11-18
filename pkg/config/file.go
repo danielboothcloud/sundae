@@ -348,14 +348,52 @@ pod:
   volumes: {{ json .Pod.Volumes }}
   volume_mounts: {{ json .Pod.VolumeMounts }}
 
+# The docker session runtime (sessions.runtime: docker): each session is a
+# container with a named volume at /sandbox, on a Docker-compatible engine.
+# Parking stops the container (its program stops) and keeps it; ending
+# removes the container and the volume. Profiles override these settings in
+# sessions.profiles.<name>.docker. Lists: null uses Sundae's defaults, []
+# sets none.
+docker:
+  # unix:///path or tcp://host:port. Empty: $DOCKER_HOST, else the default
+  # socket.
+  host: {{ printf "%q" .Docker.Host }}
+  # TLS for a tcp:// host: CA, client certificate and key (PEM files).
+  tls_ca: {{ printf "%q" .Docker.TLSCA }}
+  tls_cert: {{ printf "%q" .Docker.TLSCert }}
+  tls_key: {{ printf "%q" .Docker.TLSKey }}
+  ready_timeout: "{{ .Docker.ReadyTimeout }}"
+  # Empty: openshell.image. A profile's image wins.
+  image: {{ printf "%q" .Docker.Image }}
+  # Empty: the image's user.
+  user: {{ printf "%q" .Docker.User }}
+  # Empty: the engine's default network.
+  network: {{ printf "%q" .Docker.Network }}
+  # The engine's OCI runtime, e.g. runsc. Empty: the engine's default.
+  runtime: {{ printf "%q" .Docker.Runtime }}
+  # /sandbox's named volume. Empty driver: local.
+  volume_driver: {{ printf "%q" .Docker.VolumeDriver }}
+  volume_options: {{ json .Docker.VolumeOptions }}
+  # Limits as quantities (4Gi; 2 or 500m). Empty: none.
+  memory: {{ printf "%q" .Docker.Memory }}
+  cpus: {{ printf "%q" .Docker.CPUs }}
+  cap_add: {{ json .Docker.CapAdd }}
+  # Default: [ALL].
+  cap_drop: {{ json .Docker.CapDrop }}
+  # Default: [no-new-privileges:true].
+  security_opt: {{ json .Docker.SecurityOpt }}
+  # host-path[:container-path[:permissions]]
+  devices: {{ json .Docker.Devices }}
+  labels: {{ json .Docker.Labels }}
+
 # Sessions: what runs in the sandboxes. Each user can have several named
 # sessions per repository (session start REPO --name NAME), one sandbox
 # each. Changes take effect on restart, and only for sandboxes created after.
 sessions:
   # Where sessions run unless their profile says otherwise: "openshell"
-  # (the OpenShell gateway, see openshell:) or "pod" (a Kubernetes pod per
-  # session, see pod:). An existing session keeps the runtime it was
-  # created in.
+  # (the OpenShell gateway, see openshell:), "pod" (a Kubernetes pod per
+  # session, see pod:) or "docker" (a container per session, see docker:).
+  # An existing session keeps the runtime it was created in.
   runtime: {{ printf "%q" .Sessions.Runtime }}
   osewa:
     # Pinned osewa Linux builds (osewa-linux-amd64.gz, osewa-linux-arm64.gz)
@@ -407,6 +445,22 @@ sessions:
     {{ printf "%q" $name }}:
       image: {{ printf "%q" $p.Image }}
       command: {{ printf "%q" $p.Command }}
+{{- with $p.Docker }}
+      docker:
+        image: {{ printf "%q" .Image }}
+        user: {{ printf "%q" .User }}
+        network: {{ printf "%q" .Network }}
+        runtime: {{ printf "%q" .Runtime }}
+        volume_driver: {{ printf "%q" .VolumeDriver }}
+        volume_options: {{ json .VolumeOptions }}
+        memory: {{ printf "%q" .Memory }}
+        cpus: {{ printf "%q" .CPUs }}
+        cap_add: {{ json .CapAdd }}
+        cap_drop: {{ json .CapDrop }}
+        security_opt: {{ json .SecurityOpt }}
+        devices: {{ json .Devices }}
+        labels: {{ json .Labels }}
+{{- end }}
 {{- with $p.Pod }}
       pod:
         image: {{ printf "%q" .Image }}

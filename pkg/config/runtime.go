@@ -22,9 +22,6 @@ const (
 // Runtimes lists the session runtimes Sundae knows.
 var Runtimes = []string{RuntimeOpenShell, RuntimePod, RuntimeDocker}
 
-// availableRuntimes are the runtimes this build implements.
-var availableRuntimes = []string{RuntimeOpenShell, RuntimePod}
-
 // SessionsEnabled reports whether agent sessions are on: with
 // sessions.runtime openshell, when openshell.enabled is; with any other
 // runtime, always.
@@ -68,8 +65,6 @@ func runtimeProblem(r string) string {
 	switch {
 	case !slices.Contains(Runtimes, r):
 		return fmt.Sprintf("must be one of %s", strings.Join(Runtimes, ", "))
-	case !slices.Contains(availableRuntimes, r):
-		return "is not implemented yet"
 	}
 	return ""
 }

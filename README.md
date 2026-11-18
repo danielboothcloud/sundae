@@ -497,8 +497,8 @@ openshell:
   network_policies: []
 
 sessions:
-  # Where sessions run unless their profile says otherwise: openshell or
-  # pod (see "Session runtimes").
+  # Where sessions run unless their profile says otherwise: openshell,
+  # pod or docker (see "Session runtimes").
   runtime: openshell
   osewa:
     # Pinned osewa builds uploaded to sandboxes whose image lacks osewa.
@@ -582,10 +582,10 @@ keeps the runtime it was created in (recorded in its sandbox's
   `openshell.network_policies`) and suspend.
 - `pod`: a plain Kubernetes Pod per session, with a PersistentVolumeClaim
   mounted at `/sandbox`, configured by `pod:` (below).
-- `docker` is planned: a Docker container per session. `sundae config
-  check` reports it as not implemented yet.
+- `docker`: a container per session on a Docker-compatible engine, with a
+  named volume mounted at `/sandbox`, configured by `docker:` (below).
 
-Sessions are on when `sessions.runtime` is `pod`, or when it is
+Sessions are on when `sessions.runtime` is `pod` or `docker`, or when it is
 `openshell` and `openshell.enabled` is true. A profile whose runtime is
 `openshell` needs `openshell.enabled`. In every runtime, sessions clone over
 `openshell.clone_url` (else `http.public_url`), get git tokens valid for
@@ -624,6 +624,34 @@ Sundae sets no workload-specific settings: what a workload needs (another
 RuntimeClass, a relaxed seccomp profile, capabilities, a device volume) goes
 into `pod:` or a profile's `pod:`, and what it needs in the image goes into
 the image.
+
+**Docker runtime.** Sundae talks to the engine at `docker.host`
+(`unix:///path` or `tcp://host:port`, with `tls_ca`, `tls_cert` and
+`tls_key` for TLS; empty: `$DOCKER_HOST`, else the default socket). Podman's
+Docker-compatible API works too.
+
+- The container runs the image with `/bin/sh` as its main process,
+  `HOME=/sandbox`, restart policy `unless-stopped`, and the session's labels
+  (`sundae.*`). `/sandbox` is a named volume of the same name as the
+  container, which the engine fills from the image's `/sandbox` on first
+  use. A missing image is pulled.
+- Parking stops the container: the session's program stops, the container
+  and `/sandbox` stay. Start and attach start it again and start the program
+  again. Ending removes the container and the volume. A container that
+  stopped by itself also shows as parked.
+- Settings: `image` (empty: `openshell.image`), `user` (empty: the image's),
+  `network` (empty: the engine's default), `runtime` (the engine's OCI
+  runtime, e.g. `runsc`), `volume_driver`, `volume_options`, `memory` and
+  `cpus` (quantities: `4Gi`, `2` or `500m`), `cap_add`, `cap_drop` (default
+  `[ALL]`), `security_opt` (default `[no-new-privileges:true]`), `devices`
+  (`host-path[:container-path[:permissions]]`), `labels`, and
+  `ready_timeout` (default `15m`). For the lists, unset (null) means the
+  defaults and `[]` means none.
+- `sessions.profiles.<name>.docker` overrides any of them except `host`,
+  the TLS files and `ready_timeout`: a value it sets replaces the default,
+  while `labels` and `volume_options` are merged.
+- Sandboxes reach Sundae over `openshell.clone_url`, which must be
+  reachable from the container's network.
 
 A profile's runtime-specific settings sit under the runtime's name:
 `sessions.profiles.<name>.openshell` holds `providers` and `runtime_class`,

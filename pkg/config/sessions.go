@@ -173,6 +173,10 @@ type SessionProfile struct {
 	// Pod overrides pod: for this profile; only a profile whose runtime
 	// is RuntimePod may set it.
 	Pod *PodSettings `yaml:"pod"`
+
+	// Docker overrides docker: for this profile; only a profile whose
+	// runtime is RuntimeDocker may set it.
+	Docker *DockerSettings `yaml:"docker"`
 }
 
 // ProfileOpenShell is a profile's OpenShell settings.
@@ -394,6 +398,9 @@ func (c *Config) validateSessions() error {
 		}
 		if p.Pod != nil && runtime != RuntimePod {
 			fail("%s.pod is set, but the profile's runtime is %s: pod settings apply to %s profiles only; remove them, or set sessions.%s.runtime: %s", key, runtime, RuntimePod, key, RuntimePod)
+		}
+		if p.Docker != nil && runtime != RuntimeDocker {
+			fail("%s.docker is set, but the profile's runtime is %s: docker settings apply to %s profiles only; remove them, or set sessions.%s.runtime: %s", key, runtime, RuntimeDocker, key, RuntimeDocker)
 		}
 		if runtime == RuntimeOpenShell && sc.Runtime != RuntimeOpenShell && !c.OpenShell.Enabled {
 			fail("%s.runtime is %s, but openshell.enabled is false", key, RuntimeOpenShell)

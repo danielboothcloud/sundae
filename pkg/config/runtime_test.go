@@ -71,9 +71,44 @@ func TestSessionRuntimeValidation(t *testing.T) {
 			},
 			[]string{"sessions.profiles.podman: set image or pod.image, not both"},
 		},
-		"runtime not implemented": {
-			func(c *Config) { c.Sessions.Profiles["claude"] = SessionProfile{Runtime: RuntimeDocker} },
-			[]string{`sessions.profiles.claude.runtime "docker" is not implemented yet`},
+		"docker runtime without an image": {
+			func(c *Config) { c.Sessions.Runtime = RuntimeDocker },
+			[]string{"docker.image (or openshell.image) is required: sessions.runtime is docker"},
+		},
+		"docker runtime": {
+			func(c *Config) {
+				c.Sessions.Runtime = RuntimeDocker
+				c.Docker.Image = "img"
+				c.Docker.Host = "tcp://engine:2376"
+				c.Docker.TLSCA = "ca.pem"
+				c.Sessions.Profiles["gvisor"] = SessionProfile{Docker: &DockerSettings{Runtime: "runsc", Memory: "4Gi", CPUs: "2"}}
+			}, nil,
+		},
+		"docker settings": {
+			func(c *Config) {
+				c.Sessions.Runtime = RuntimeDocker
+				c.Docker.Image = "img"
+				c.Docker.Host = "http://engine"
+				c.Docker.TLSCert = "c.pem"
+				c.Docker.Memory = "lots"
+				c.Docker.Network = "bad net"
+				c.Docker.Labels = map[string]string{"sundae.user-id": "1"}
+				c.Sessions.Profiles["x"] = SessionProfile{Image: "a", Docker: &DockerSettings{Image: "b", CPUs: "-1", Devices: []string{"dev/fuse"}}}
+			},
+			[]string{
+				`docker.host "http://engine" must be unix:///path or tcp://host:port`,
+				"docker.tls_cert and docker.tls_key must be set together",
+				`docker.memory "lots"`,
+				`docker.network "bad net"`,
+				`docker.labels: key "sundae.user-id"`,
+				`sessions.profiles.x.docker.cpus "-1"`,
+				`sessions.profiles.x.docker.devices: "dev/fuse"`,
+				"sessions.profiles.x: set image or docker.image, not both",
+			},
+		},
+		"docker settings on another runtime": {
+			func(c *Config) { c.Sessions.Profiles["claude"] = SessionProfile{Docker: &DockerSettings{}} },
+			[]string{"sessions.profiles.claude.docker is set, but the profile's runtime is openshell"},
 		},
 		"openshell settings on another runtime": {
 			func(c *Config) {
@@ -229,4 +264,51 @@ func TestPodConfigFileRoundTrip(t *testing.T) {
 	is.Equal(got.Sessions.Profiles["podman"].Pod.RuntimeClass, "kata")
 	is.Equal(got.Sessions.Profiles["podman"].Pod.SecurityContext, map[string]any{}) // {} stays none
 	is.Equal(got.Sessions.Profiles["podman"].Pod.Resources, nil)                    // null inherits
+}
+
+func TestDockerSettingsFor(t *testing.T) {
+	is := is.New(t)
+	cfg := DefaultConfig()
+	cfg.DataPath = t.TempDir()
+	cfg.Sessions.Runtime = RuntimeDocker
+	cfg.Docker.Image = "img"
+	cfg.Docker.Labels = map[string]string{"a": "1", "b": "1"}
+	cfg.Sessions.Profiles = map[string]SessionProfile{
+		"x":     {Docker: &DockerSettings{Runtime: "runsc", CapDrop: []string{}, Labels: map[string]string{"b": "2"}}},
+		"plain": {},
+	}
+	is.NoErr(cfg.Validate())
+	is.Equal(cfg.Docker.CapDrop, DefaultDockerCapDrop())
+	is.Equal(cfg.Docker.SecurityOpt, DefaultDockerSecurityOpt())
+
+	s := cfg.DockerSettingsFor("x")
+	is.Equal(s.Runtime, "runsc")
+	is.Equal(s.CapDrop, []string{})                           // [] is none
+	is.Equal(s.SecurityOpt, DefaultDockerSecurityOpt())       // inherited
+	is.Equal(s.Labels, map[string]string{"a": "1", "b": "2"}) // merged
+	is.Equal(cfg.Docker.Labels["b"], "1")                     // untouched
+	is.Equal(cfg.ProfileImage("x"), "img")
+	is.Equal(DockerSettings{Memory: "1Gi", CPUs: "250m"}.MemoryBytes(), int64(1<<30))
+	is.Equal(DockerSettings{Memory: "1Gi", CPUs: "250m"}.NanoCPUs(), int64(250_000_000))
+	is.True(cfg.SessionsEnabled())
+}
+
+func TestDockerConfigFileRoundTrip(t *testing.T) {
+	is := is.New(t)
+	cfg := DefaultConfig()
+	cfg.DataPath = t.TempDir()
+	cfg.Sessions.Runtime = RuntimeDocker
+	cfg.Docker.Image = "img"
+	cfg.Docker.Host = "unix:///run/docker.sock"
+	cfg.Sessions.Profiles = map[string]SessionProfile{"x": {Docker: &DockerSettings{SecurityOpt: []string{"seccomp=unconfined"}, CapDrop: []string{}}}}
+	is.NoErr(cfg.Validate())
+	is.NoErr(cfg.WriteConfig())
+
+	got := &Config{DataPath: cfg.DataPath}
+	is.NoErr(parseFile(got, cfg.ConfigPath()))
+	is.Equal(got.Docker.Host, "unix:///run/docker.sock")
+	is.Equal(got.Docker.CapDrop, DefaultDockerCapDrop())
+	is.Equal(got.Sessions.Profiles["x"].Docker.SecurityOpt, []string{"seccomp=unconfined"})
+	is.Equal(got.Sessions.Profiles["x"].Docker.CapDrop, []string{}) // [] stays none
+	is.Equal(got.Sessions.Profiles["x"].Docker.CapAdd, nil)         // null inherits
 }
