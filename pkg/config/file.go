@@ -432,6 +432,12 @@ sessions:
     # They are kept in memory only, so the feed is empty after a restart.
     # At most 100000.
     keep: {{ .Sessions.Signals.Keep }}
+  attach:
+    # Prefix key while attached: it then d detaches, it twice sends it, it
+    # then ? shows help. "ctrl-<c>" for c in ] \ ^ _ @ or a-z, or "none"
+    # (only osewa's ~. after a newline detaches). ctrl-a and ctrl-b clash
+    # with screen, tmux and shell line editing.
+    detach_key: {{ printf "%q" .Sessions.Attach.DetachKey }}
   # Named presets for "session start --profile NAME". Empty image and
   # command fall back to openshell.image and openshell.command. runtime
   # overrides sessions.runtime for the profile's sessions. openshell holds

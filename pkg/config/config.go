@@ -787,6 +787,7 @@ func DefaultConfig() *Config {
 			Signals: SessionSignalsConfig{
 				Keep: DefaultSignalsKeep,
 			},
+			Attach: SessionAttachConfig{DetachKey: DefaultDetachKey},
 		},
 		Notifications: NotificationsConfig{
 			On:       append([]string(nil), DefaultTriggers...),

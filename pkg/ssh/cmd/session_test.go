@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -52,6 +53,8 @@ type fakeOpenShell struct {
 	interactiveErr error
 	// ensureErr makes EnsureSandbox fail.
 	ensureErr error
+	// blockUntilCancel makes the attach client run until it is cancelled.
+	blockUntilCancel bool
 	// scripts, when set, answers the scripts it knows first.
 	scripts func(sandbox string, command []string) (*openshell.ExecResult, bool)
 }
@@ -254,8 +257,25 @@ func (f *fakeOpenShell) Interactive(_ context.Context, name string, command []st
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.interactive = append(f.interactive, command)
+	if f.blockUntilCancel {
+		return &blockingShell{done: make(chan struct{})}, nil
+	}
 	return &scriptedShell{out: strings.NewReader(f.output), code: f.exitCode}, nil
 }
+
+// blockingShell runs until it is cancelled, as osewa attach does.
+type blockingShell struct {
+	done chan struct{}
+	once sync.Once
+}
+
+func (s *blockingShell) Read([]byte) (int, error)    { <-s.done; return 0, io.EOF }
+func (s *blockingShell) Write(p []byte) (int, error) { return len(p), nil }
+func (s *blockingShell) Resize(uint32, uint32) error { return nil }
+func (s *blockingShell) ExitCode() (int, error)      { <-s.done; return -1, errors.New("cancelled") }
+
+func (s *blockingShell) Cancel() error { s.once.Do(func() { close(s.done) }); return nil }
+func (s *blockingShell) Close() error  { return s.Cancel() }
 
 func (f *fakeOpenShell) Close() error { return nil }
 
@@ -275,14 +295,22 @@ func (s *scriptedShell) Close() error                { return nil }
 // fakeSSHSession is the parts of ssh.Session the session commands use.
 type fakeSSHSession struct {
 	ssh.Session
-	noPty    bool
+	noPty bool
+	// in is what the user types; none when nil.
+	in       io.Reader
 	mu       sync.Mutex
 	out      bytes.Buffer
 	exitCode int
 	exited   bool
 }
 
-func (s *fakeSSHSession) Read([]byte) (int, error) { return 0, io.EOF }
+func (s *fakeSSHSession) Read(p []byte) (int, error) {
+	if s.in == nil {
+		return 0, io.EOF
+	}
+	return s.in.Read(p) //nolint:wrapcheck
+}
+
 func (s *fakeSSHSession) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

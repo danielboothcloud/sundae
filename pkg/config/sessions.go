@@ -86,6 +86,45 @@ type SessionsConfig struct {
 	// whose forge has no git_identity. Optional: without one, Sundae
 	// configures no identity in the sandbox.
 	GitIdentity GitIdentity `envPrefix:"GIT_IDENTITY_" yaml:"git_identity"`
+
+	// Attach configures attaching a terminal to a session.
+	Attach SessionAttachConfig `envPrefix:"ATTACH_" yaml:"attach"`
+}
+
+// SessionAttachConfig configures attaching to a session.
+type SessionAttachConfig struct {
+	// DetachKey is the prefix key (it then d detaches): see ParseDetachKey.
+	// Empty means DefaultDetachKey.
+	DetachKey string `env:"DETACH_KEY" yaml:"detach_key"`
+}
+
+// DefaultDetachKey is the default sessions.attach.detach_key.
+const DefaultDetachKey = "ctrl-]"
+
+// DetachKeyNone turns the prefix key off.
+const DetachKeyNone = "none"
+
+// ParseDetachKey parses a sessions.attach.detach_key: it returns the
+// character typed with Ctrl (']' for "ctrl-]"), or 0 for "none".
+func ParseDetachKey(s string) (byte, error) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == DetachKeyNone {
+		return 0, nil
+	}
+	c, ok := strings.CutPrefix(s, "ctrl-")
+	if ok && len(c) == 1 && (strings.Contains(`]\^_@`, c) || c[0] >= 'a' && c[0] <= 'z') {
+		return c[0], nil
+	}
+	return 0, fmt.Errorf("%q is not ctrl-<key> (key one of ] \\ ^ _ @ a-z) or %q", s, DetachKeyNone)
+}
+
+// DetachChar returns the character of the validated detach key; 0 for none.
+func (a SessionAttachConfig) DetachChar() byte {
+	c, err := ParseDetachKey(a.DetachKey)
+	if err != nil {
+		c, _ = ParseDetachKey(DefaultDetachKey)
+	}
+	return c
 }
 
 // OsewaConfig configures osewa in the sandboxes.
@@ -324,6 +363,14 @@ func (c *Config) validateSessions() error {
 		fail("signals.keep %d must be between 1 and %d", sc.Signals.Keep, MaxSignalsKeep)
 	}
 
+	sc.Attach.DetachKey = strings.ToLower(strings.TrimSpace(sc.Attach.DetachKey))
+	if sc.Attach.DetachKey == "" {
+		sc.Attach.DetachKey = DefaultDetachKey
+	}
+	if _, err := ParseDetachKey(sc.Attach.DetachKey); err != nil {
+		fail("attach.detach_key: %v", err)
+	}
+
 	sc.Runtime = strings.ToLower(strings.TrimSpace(sc.Runtime))
 	if sc.Runtime == "" {
 		sc.Runtime = RuntimeOpenShell
@@ -441,6 +488,7 @@ func (c *Config) sessionsEnviron() []string {
 		fmt.Sprintf("SUNDAE_SESSIONS_SUSPEND_ENABLED=%t", c.Sessions.Suspend.Enabled),
 		"SUNDAE_SESSIONS_SUSPEND_AFTER=" + c.Sessions.Suspend.After.String(),
 		fmt.Sprintf("SUNDAE_SESSIONS_SIGNALS_KEEP=%d", c.Sessions.Signals.Keep),
+		"SUNDAE_SESSIONS_ATTACH_DETACH_KEY=" + c.Sessions.Attach.DetachKey,
 		"SUNDAE_SESSIONS_GIT_IDENTITY_NAME=" + c.Sessions.GitIdentity.Name,
 		"SUNDAE_SESSIONS_GIT_IDENTITY_EMAIL=" + c.Sessions.GitIdentity.Email,
 	}

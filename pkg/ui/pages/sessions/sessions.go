@@ -21,6 +21,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/danielboothcloud/sundae/pkg/config"
 	"github.com/danielboothcloud/sundae/pkg/events"
 	"github.com/danielboothcloud/sundae/pkg/openshell"
 	"github.com/danielboothcloud/sundae/pkg/sessionctl"
@@ -960,7 +961,7 @@ func (m *Sessions) attachCmd(repos []string, name, key string, suspended bool) t
 		m.notice = notice{text: errNoTerminal.Error(), err: true}
 		return nil
 	}
-	title := "Attaching to " + sessionLabel(name, repos) + " …  detach with ~."
+	title := "Attaching to " + sessionLabel(name, repos) + " …  " + m.detachHint()
 	op, ctx := newOperation(m.ctx, title, repos, name, true)
 	op.key = key
 	m.op, m.opLines = op, nil
@@ -1008,6 +1009,11 @@ func (m *Sessions) start(repos []string, name, profile string, attach bool) tea.
 	op, ctx := newOperation(m.ctx, title, repos, name, attach)
 	m.op, m.opLines = op, nil
 	return op.run(ctx, m.src, sessionctl.Request{Repos: repos, Name: name, Profile: profile, Create: true, Term: m.term()})
+}
+
+// detachHint says how to detach, with the configured prefix key.
+func (m *Sessions) detachHint() string {
+	return sessionctl.DetachHint(sessionctl.PrefixKey(config.FromContext(m.common.Context())))
 }
 
 // term is the TERM given to the attach client.
@@ -1061,6 +1067,8 @@ func (m *Sessions) onOp(op *operation) tea.Cmd {
 func (m *Sessions) onAttachDone(msg attachDoneMsg) tea.Cmd {
 	label := sessionLabel(msg.name, msg.repos)
 	switch {
+	case errors.Is(msg.err, openshell.ErrDetached):
+		m.notice = notice{text: "✓ Detached from " + label + "; it keeps running."}
 	case msg.err != nil:
 		m.notice = notice{text: "✗ " + label + ": " + msg.err.Error(), err: true}
 	case msg.code > 0:

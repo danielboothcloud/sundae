@@ -989,7 +989,7 @@ func TestEnterAttachesFromBothPanes(t *testing.T) {
 	m.handoff = &fakeHandoff{}
 	keys(m, "G")
 	cmd := keys(m, "k", "enter")
-	if m.op == nil || !strings.Contains(view(m), "Attaching to dotfiles / main …  detach with ~.") || !strings.Contains(view(m), "Resuming…") {
+	if m.op == nil || !strings.Contains(view(m), "Attaching to dotfiles / main …  Detach: Ctrl-] d (or ~. after a newline).") || !strings.Contains(view(m), "Resuming…") {
 		t.Fatalf("attach of a suspended session:\n%s", view(m))
 	}
 	run(m, cmd, 1)
@@ -1044,6 +1044,10 @@ func TestAttachExec(t *testing.T) {
 	m.Update(attachDoneMsg{repos: []string{"infra"}, name: "claude-1"})
 	if !strings.Contains(view(m), "Detached from infra / claude-1.") {
 		t.Fatalf("view:\n%s", view(m))
+	}
+	m.Update(attachDoneMsg{repos: []string{"infra"}, name: "claude-1", err: openshell.ErrDetached})
+	if v := view(m); !strings.Contains(v, "✓ Detached from infra / claude-1; it keeps running.") || strings.Contains(v, "✗") {
+		t.Fatalf("view:\n%s", v)
 	}
 }
 

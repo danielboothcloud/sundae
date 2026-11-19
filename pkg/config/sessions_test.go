@@ -22,6 +22,8 @@ func TestSessionsDefaults(t *testing.T) {
 	is.True(cfg.Sessions.Suspend.Enabled)
 	is.Equal(cfg.Sessions.Suspend.After, DefaultSuspendAfter)
 	is.Equal(cfg.Sessions.Signals.Keep, DefaultSignalsKeep)
+	is.Equal(cfg.Sessions.Attach.DetachKey, DefaultDetachKey)
+	is.Equal(cfg.Sessions.Attach.DetachChar(), byte(']'))
 
 	// A zeroed section gets the defaults too, except that suspend stays
 	// off: false is a value, not an absence.
@@ -33,6 +35,7 @@ func TestSessionsDefaults(t *testing.T) {
 	is.Equal(cfg.Sessions.Suspend.After, DefaultSuspendAfter)
 	is.Equal(cfg.Sessions.Signals.Keep, DefaultSignalsKeep)
 	is.True(!cfg.Sessions.Suspend.Enabled)
+	is.Equal(cfg.Sessions.Attach.DetachKey, DefaultDetachKey)
 
 	// A relative binary_dir is resolved against the data path.
 	cfg.Sessions.Osewa.BinaryDir = "osewa"
@@ -88,6 +91,20 @@ func TestValidateSessions(t *testing.T) {
 		},
 		"signals keep max": {
 			func(c *Config) { c.Sessions.Signals.Keep = MaxSignalsKeep }, "",
+		},
+		"detach key ctrl-a": {
+			func(c *Config) { c.Sessions.Attach.DetachKey = " Ctrl-A " }, "",
+		},
+		"detach key none": {
+			func(c *Config) { c.Sessions.Attach.DetachKey = "none" }, "",
+		},
+		"detach key not ctrl": {
+			func(c *Config) { c.Sessions.Attach.DetachKey = "alt-d" },
+			`sessions.attach.detach_key: "alt-d" is not ctrl-<key>`,
+		},
+		"detach key digit": {
+			func(c *Config) { c.Sessions.Attach.DetachKey = "ctrl-1" },
+			`sessions.attach.detach_key: "ctrl-1" is not ctrl-<key>`,
 		},
 		"profile name": {
 			func(c *Config) { c.Sessions.Profiles["Bad_Name"] = SessionProfile{} },
@@ -262,6 +279,7 @@ func TestSessionsConfigFileRoundTrip(t *testing.T) {
 	cfg.Sessions.Status.PollInterval = 15 * time.Second
 	cfg.Sessions.Suspend = SessionSuspendConfig{Enabled: false, After: 2 * time.Hour}
 	cfg.Sessions.Signals.Keep = 250
+	cfg.Sessions.Attach.DetachKey = "ctrl-\\"
 	cfg.Sessions.Profiles = map[string]SessionProfile{
 		"claude": {Image: "ghcr.io/me/agent-claude:latest", Command: `claude --model "opus"`, OpenShell: &ProfileOpenShell{Providers: []string{"my-claude", "gh.work"}}},
 		"shell":  {},
@@ -278,6 +296,7 @@ func TestSessionsConfigFileRoundTrip(t *testing.T) {
 	is.Equal(got.Sessions.Status.PollInterval, 15*time.Second)
 	is.Equal(got.Sessions.Suspend, SessionSuspendConfig{Enabled: false, After: 2 * time.Hour})
 	is.Equal(got.Sessions.Signals.Keep, 250)
+	is.Equal(got.Sessions.Attach.DetachKey, "ctrl-\\")
 	is.Equal(got.Sessions.Profiles["claude"], cfg.Sessions.Profiles["claude"])
 	is.Equal(got.Sessions.Profiles["shell"].OpenShellProviders(), nil)
 	is.Equal(got.Sessions.Profiles["shell"].OpenShellRuntimeClass(), "")
@@ -335,6 +354,7 @@ func TestSessionsEnv(t *testing.T) {
 	t.Setenv("SUNDAE_SESSIONS_SUSPEND_ENABLED", "false")
 	t.Setenv("SUNDAE_SESSIONS_SUSPEND_AFTER", "45m")
 	t.Setenv("SUNDAE_SESSIONS_SIGNALS_KEEP", "500")
+	t.Setenv("SUNDAE_SESSIONS_ATTACH_DETACH_KEY", "none")
 	cfg := DefaultConfig()
 	is.NoErr(cfg.ParseEnv())
 	is.Equal(cfg.Sessions.Osewa.BinaryDir, "/opt/osewa")
@@ -342,6 +362,8 @@ func TestSessionsEnv(t *testing.T) {
 	is.Equal(cfg.Sessions.Status.PollInterval, 20*time.Second)
 	is.Equal(cfg.Sessions.Suspend, SessionSuspendConfig{Enabled: false, After: 45 * time.Minute})
 	is.Equal(cfg.Sessions.Signals.Keep, 500)
+	is.Equal(cfg.Sessions.Attach.DetachKey, "none")
+	is.Equal(cfg.Sessions.Attach.DetachChar(), byte(0))
 
 	envs := strings.Join(cfg.Environ(), "\n")
 	is.True(strings.Contains(envs, "SUNDAE_SESSIONS_OSEWA_BINARY_DIR=/opt/osewa\n"))
@@ -350,6 +372,7 @@ func TestSessionsEnv(t *testing.T) {
 	is.True(strings.Contains(envs, "SUNDAE_SESSIONS_SUSPEND_ENABLED=false"))
 	is.True(strings.Contains(envs, "SUNDAE_SESSIONS_SUSPEND_AFTER=45m0s"))
 	is.True(strings.Contains(envs, "SUNDAE_SESSIONS_SIGNALS_KEEP=500"))
+	is.True(strings.Contains(envs, "SUNDAE_SESSIONS_ATTACH_DETACH_KEY=none"))
 
 	// Hook subprocesses rebuild the config from Environ.
 	for _, kv := range cfg.Environ() {

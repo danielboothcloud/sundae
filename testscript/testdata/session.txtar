@@ -41,6 +41,11 @@ stdout 'delete'
 stderr 'requires a terminal \(ssh -t\)'
 ! sundae session attach repo1
 stderr 'requires a terminal \(ssh -t\)'
+! sundae session attach a b
+stderr 'accepts at most 1 arg'
+sundae session attach --help
+stdout 'attach \[SESSION\]'
+stdout 'Ctrl-\] d'
 ! sundae session start repo1 --detach
 stderr 'Starting sandbox sd-[0-9a-f]{16}'
 

@@ -427,9 +427,20 @@ that was not pushed is gone. Earlier releases called these `park` and `end`;
 the old names are gone.
 
 **Detach and re-attach.** `session start` and `session attach` need a
-terminal, so pass `-t`. Detach with `~.` after a newline (osewa's escape), or
-just close the connection: either ends only the bridge, and the program keeps
-running. `session start` or `session attach` re-attaches to the same program,
+terminal, so pass `-t`. Detach with <kbd>Ctrl-]</kbd> then <kbd>d</kbd>, with
+`~.` after a newline (osewa's escape), or just close the connection: each ends
+only the bridge, and the program keeps running. After <kbd>Ctrl-]</kbd>,
+<kbd>Ctrl-]</kbd> again sends one <kbd>Ctrl-]</kbd> to the program,
+<kbd>?</kbd> shows this help, and any other key goes to the program with the
+<kbd>Ctrl-]</kbd> before it. The prefix also works when the program turns on
+the kitty keyboard protocol or modifyOtherKeys; a <kbd>Ctrl-]</kbd> with no key
+after it waits for the next key. A detach resets the terminal modes programs
+commonly set (alternate screen, mouse, bracketed paste, kitty keyboard).
+`sessions.attach.detach_key` changes the prefix (`ctrl-a` and `ctrl-b` clash
+with screen, tmux and shell line editing) or turns it off (`none`; `~.` still
+works). `session attach` with no argument attaches to your only session, or,
+with several, lists them most urgent first and asks for a number.
+`session start` or `session attach` re-attaches to the same program,
 starting it again only if it has exited or the sandbox was restarted. The
 attach exits with the program's exit status when the program ends. A new
 attach takes over from an earlier one, which stays connected as a read-only
@@ -514,6 +525,10 @@ sessions:
   signals:
     # How many signals `session signals` keeps, across all users, in memory.
     keep: 1000
+  attach:
+    # Prefix key while attached: it then d detaches (see "Detach and
+    # re-attach"). ctrl-<c> for c in ] \ ^ _ @ a-z, or none.
+    detach_key: ctrl-]
   # Named presets for `session start --profile NAME`.
   profiles:
     claude:
@@ -539,10 +554,11 @@ sessions:
 ```
 
 The `openshell` settings and `sessions.osewa`, `sessions.status`,
-`sessions.suspend`, `sessions.signals` and `sessions.git_identity` can also
-be set with `SUNDAE_OPENSHELL_*` and `SUNDAE_SESSIONS_OSEWA_*`,
-`SUNDAE_SESSIONS_STATUS_*`, `SUNDAE_SESSIONS_SUSPEND_*`,
-`SUNDAE_SESSIONS_SIGNALS_*` and `SUNDAE_SESSIONS_GIT_IDENTITY_*`
+`sessions.suspend`, `sessions.signals`, `sessions.attach` and
+`sessions.git_identity` can also be set with `SUNDAE_OPENSHELL_*` and
+`SUNDAE_SESSIONS_OSEWA_*`, `SUNDAE_SESSIONS_STATUS_*`,
+`SUNDAE_SESSIONS_SUSPEND_*`, `SUNDAE_SESSIONS_SIGNALS_*`,
+`SUNDAE_SESSIONS_ATTACH_*` and `SUNDAE_SESSIONS_GIT_IDENTITY_*`
 environment variables (`sessions.runtime` as `SUNDAE_SESSIONS_RUNTIME`), for example
 `SUNDAE_OPENSHELL_ENABLED=true` or
 `SUNDAE_SESSIONS_SUSPEND_AFTER=1h` (`openshell.providers` as
@@ -550,7 +566,9 @@ environment variables (`sessions.runtime` as `SUNDAE_SESSIONS_RUNTIME`), for exa
 lines); `sessions.profiles` and
 `sessions.repos` only in the file. `status.poll_interval` must be at least
 `1s`, and `suspend.after` must not be shorter than it. `signals.keep` is
-between 1 and 100000 (default 1000). When OpenShell is
+between 1 and 100000 (default 1000). `attach.detach_key` is `ctrl-<c>`
+for `c` in `]`, `\`, `^`, `_`, `@` or `a`–`z`, or `none` (default
+`ctrl-]`). When OpenShell is
 enabled, `gateway_address` and `image` are required, and a `token_file`, if
 set, must be readable and not empty. Setting both `token` and `token_file` is
 an error. `openshell.runtime_class` and `sessions.profiles.<name>.openshell.runtime_class`
@@ -2073,8 +2091,8 @@ word must appear in the label), <kbd>↑</kbd>/<kbd>↓</kbd> move,
 selected row; forges appear once the Forges tab has listed them. When OpenShell is enabled and you are signed in with a key, a
 **Sessions** tab lists your agent sessions, what needs you first, and the
 header counts the ones blocked, errored, done and working. In it:
-<kbd>enter</kbd> attaches (detach with <kbd>~.</kbd> to come back to the same
-row), <kbd>n</kbd> starts a session (pick any number of repositories with
+<kbd>enter</kbd> attaches (detach with <kbd>Ctrl-]</kbd> <kbd>d</kbd>, or
+<kbd>~.</kbd> after a newline, to come back to the same row), <kbd>n</kbd> starts a session (pick any number of repositories with
 <kbd>space</kbd>, a name and a profile), <kbd>A</kbd> and <kbd>R</kbd> add
 repositories to the highlighted session or remove some, <kbd>u</kbd> syncs it
 with its forges (see below), <kbd>d</kbd> deletes it, its sandbox and its

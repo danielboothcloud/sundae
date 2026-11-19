@@ -844,8 +844,9 @@ func (m *Manager) profileCommand(profile string, progress io.Writer) ([]string, 
 }
 
 // Attach runs the osewa attach client for s with a cols x rows PTY. Ending
-// it, by detaching (~.), closing the SSH connection or cancelling ctx, ends
-// only the client: the session's program keeps running.
+// it, by detaching (~., or Bridge's prefix key), closing the SSH connection
+// or cancelling ctx, ends only the client: the session's program keeps
+// running.
 func (m *Manager) Attach(ctx context.Context, s *Session, cols, rows uint32) (InteractiveSession, error) {
 	is, err := m.client.Interactive(ctx, s.Sandbox, s.AttachCommand(), cols, rows, ExecOptions{
 		Env:          maps.Clone(s.Env),
@@ -1097,17 +1098,42 @@ type Terminal interface {
 // remote command has exited.
 const drainTimeout = 2 * time.Second
 
+// BridgeOption configures Bridge.
+type BridgeOption func(*bridgeOptions)
+
+type bridgeOptions struct {
+	prefix PrefixKey
+}
+
+// WithPrefixKey makes Bridge watch the input for k: k d detaches, k ? shows
+// help, k k sends k. Without it, or with none, input passes untouched.
+func WithPrefixKey(k PrefixKey) BridgeOption {
+	return func(o *bridgeOptions) { o.prefix = k }
+}
+
+// terminalReset undoes modes a detached program leaves set; kitty keyboard is
+// popped first as its stack is per screen, before leaving the alt screen.
+const terminalReset = "\x1b[<u\x1b[>4m\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1004l\x1b[?2004l\x1b[0m\x1b[?25h\x1b[?1049l\r\n"
+
 // Bridge connects term to the interactive session: it copies input and
 // output in both directions, resizes the remote PTY when the terminal's
 // window changes, and returns the remote command's exit code.
 //
+// With WithPrefixKey, prefix then d detaches: Bridge returns 0, ErrDetached.
+// osewa's own ~. passes through either way.
+//
 // Cancelling ctx (e.g. the SSH client disconnecting) aborts the stream. The
 // sandbox itself keeps running.
-func Bridge(ctx context.Context, term Terminal, is InteractiveSession) (int, error) {
+func Bridge(ctx context.Context, term Terminal, is InteractiveSession, opts ...BridgeOption) (int, error) {
+	var o bridgeOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
 	defer is.Close() //nolint:errcheck
 
 	done := make(chan struct{})
 	defer close(done)
+	out := &bridgeOutput{w: term}
 
 	_, winch, _ := term.Pty()
 	go func() {
@@ -1134,20 +1160,22 @@ func Bridge(ctx context.Context, term Terminal, is InteractiveSession) (int, err
 		}
 	}()
 
-	go func() {
-		_, _ = io.Copy(is, term)
-		// The client closed its input; let the remote side see EOF.
-		_ = sbx.CloseInput(is)
-	}()
+	detached := make(chan struct{})
+	go forwardInput(term, is, o.prefix, out, detached)
 
 	outDone := make(chan struct{})
 	go func() {
 		defer close(outDone)
-		_, _ = io.Copy(term, is)
+		_, _ = io.Copy(out, is)
 	}()
 
 	code, err := is.ExitCode()
 
+	select {
+	case <-detached:
+		return 0, ErrDetached
+	default:
+	}
 	select {
 	case <-outDone:
 	case <-time.After(drainTimeout):

@@ -384,6 +384,12 @@ config:
       # keep for `session signals` and the TUI, across all users. In memory
       # only: the feed is empty after a restart. At most 100000.
       keep: 1000
+    attach:
+      # Prefix key while attached: it then d detaches, it twice sends it,
+      # it then ? shows help. ctrl-<c> for c in ] \ ^ _ @ a-z, or "none"
+      # (only osewa's ~. after a newline detaches). ctrl-a and ctrl-b clash
+      # with screen, tmux and shell line editing.
+      detach_key: "ctrl-]"
     # Named presets for `session start --profile <name>`. Empty image and
     # command fall back to openshell.image and openshell.command; `runtime`
     # overrides sessions.runtime. `openshell` holds settings for profiles

@@ -1,12 +1,18 @@
 package sessionctl
 
 import (
+	"bytes"
+	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"charm.land/ssh"
 	"github.com/danielboothcloud/sundae/git"
 	"github.com/danielboothcloud/sundae/pkg/config"
 	"github.com/danielboothcloud/sundae/pkg/events"
@@ -185,5 +191,107 @@ func TestGitIdentity(t *testing.T) {
 	// An unreadable repository is an error, not the default identity.
 	if _, err := GitIdentity(cfg, linkedRepo{dir: filepath.Join(t.TempDir(), "missing.git")}); err == nil {
 		t.Fatal("no error for a repository that cannot be opened")
+	}
+}
+
+// detachClient is an openshell.Client whose attach client runs until it is
+// cancelled.
+type detachClient struct {
+	openshell.Client
+	is *detachShell
+}
+
+func (c *detachClient) Interactive(context.Context, string, []string, uint32, uint32, openshell.ExecOptions) (openshell.InteractiveSession, error) {
+	return c.is, nil
+}
+
+type detachShell struct {
+	mu                  sync.Mutex
+	input               []byte
+	inClosed, cancelled bool
+	done                chan struct{}
+	once                sync.Once
+}
+
+func (s *detachShell) Read([]byte) (int, error) { <-s.done; return 0, io.EOF }
+func (s *detachShell) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.input = append(s.input, p...)
+	return len(p), nil
+}
+func (s *detachShell) Resize(uint32, uint32) error { return nil }
+func (s *detachShell) ExitCode() (int, error)      { <-s.done; return -1, errors.New("stream cancelled") }
+
+func (s *detachShell) CloseWrite() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.inClosed = true
+	return nil
+}
+
+func (s *detachShell) Cancel() error {
+	s.mu.Lock()
+	s.cancelled = true
+	s.mu.Unlock()
+	s.once.Do(func() { close(s.done) })
+	return nil
+}
+func (s *detachShell) Close() error { return s.Cancel() }
+
+// detachTerm types its input once, then blocks.
+type detachTerm struct {
+	in  *strings.Reader
+	out bytes.Buffer
+	mu  sync.Mutex
+}
+
+func (t *detachTerm) Read(p []byte) (int, error) {
+	if t.in.Len() == 0 {
+		select {}
+	}
+	return t.in.Read(p)
+}
+
+func (t *detachTerm) Write(p []byte) (int, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.out.Write(p)
+}
+
+func (t *detachTerm) Pty() (ssh.Pty, <-chan ssh.Window, bool) {
+	return ssh.Pty{Window: ssh.Window{Width: 80, Height: 24}}, nil, true
+}
+
+func TestPreparedAttachDetach(t *testing.T) {
+	cfg := config.DefaultConfig()
+	shell := &detachShell{done: make(chan struct{})}
+	p := &Prepared{
+		Session: &openshell.Session{Name: "main", Sandbox: "sb"},
+		mgr:     openshell.NewManager(&detachClient{is: shell}, nil, cfg),
+		prefix:  PrefixKey(cfg),
+	}
+	code, err := p.Attach(context.Background(), &detachTerm{in: strings.NewReader("ls\x1dd")})
+	if code != 0 || !errors.Is(err, openshell.ErrDetached) {
+		t.Fatalf("code %d err %v", code, err)
+	}
+	shell.mu.Lock()
+	defer shell.mu.Unlock()
+	if string(shell.input) != "ls" || !shell.inClosed || !shell.cancelled {
+		t.Fatalf("input %q closed %v cancelled %v", shell.input, shell.inClosed, shell.cancelled)
+	}
+}
+
+func TestPrefixKeyAndHint(t *testing.T) {
+	cfg := config.DefaultConfig()
+	if k := PrefixKey(cfg); k != openshell.DefaultPrefixKey || DetachHint(k) != "Detach: Ctrl-] d (or ~. after a newline)." {
+		t.Fatalf("%q %q", byte(k), DetachHint(k))
+	}
+	cfg.Sessions.Attach.DetachKey = "none"
+	if k := PrefixKey(cfg); k.Enabled() || DetachHint(k) != "Detach: ~. after a newline." {
+		t.Fatalf("%q %q", byte(k), DetachHint(k))
+	}
+	if PrefixKey(nil) != openshell.DefaultPrefixKey {
+		t.Fatal("nil config")
 	}
 }

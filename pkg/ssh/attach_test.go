@@ -97,6 +97,7 @@ func (s *echoShell) seen() (string, []string) {
 // fakeAttacher bridges to an echoShell with the real openshell.Bridge.
 type fakeAttacher struct {
 	shell  *echoShell
+	prefix openshell.PrefixKey
 	size   string
 	closed chan struct{}
 	once   sync.Once
@@ -109,7 +110,7 @@ func (a *fakeAttacher) Session() *openshell.Session {
 func (a *fakeAttacher) Attach(ctx context.Context, term openshell.Terminal) (int, error) {
 	pty, _, _ := term.Pty()
 	a.size = fmt.Sprintf("%dx%d", pty.Window.Width, pty.Window.Height)
-	return openshell.Bridge(ctx, term, a.shell) //nolint:wrapcheck
+	return openshell.Bridge(ctx, term, a.shell, openshell.WithPrefixKey(a.prefix)) //nolint:wrapcheck
 }
 
 func (a *fakeAttacher) Close() { a.once.Do(func() { close(a.closed) }) }
@@ -336,6 +337,79 @@ func TestTUIAttachRoundTrip(t *testing.T) {
 	waitUntil(t, func() bool {
 		return goroutines("pkg/ssh.(*terminalSwitch)", "pages/sessions.") <= before
 	}, "TUI goroutines are left running:\n"+goroutineDump())
+}
+
+// TestTUIAttachPrefixDetach detaches from the Sessions tab with Ctrl-] d:
+// the TUI shows the detach, keeps the row and reads the keyboard again.
+func TestTUIAttachPrefixDetach(t *testing.T) {
+	cfg, dbx, dbstore, be := newTestBackend(t)
+
+	att := &fakeAttacher{shell: newEchoShell(), prefix: openshell.DefaultPrefixKey, closed: make(chan struct{})}
+	src := &fakeSource{att: att}
+	handlerDone := make(chan struct{})
+	srv := &ssh.Server{
+		Handler: ContextMiddleware(cfg, dbx, dbstore, be, log.Default())(func(s ssh.Session) {
+			s.Context().SetValue(sessions.SourceKey, sessions.Source(src))
+			TUIMiddleware(func(ssh.Session) { close(handlerDone) })(s)
+		}),
+	}
+	if err := ssh.EmulatePty()(srv); err != nil {
+		t.Fatal(err)
+	}
+	sess := testsession.New(t, srv, nil)
+	var out screen
+	sess.Stdout = &out
+	stdin, err := sess.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.RequestPty("xterm-256color", 24, 80, gossh.TerminalModes{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Shell(); err != nil {
+		t.Fatal(err)
+	}
+	send := func(s string) {
+		t.Helper()
+		if _, err := io.WriteString(stdin, s); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	out.waitFor(t, 0, "Repositories")
+	send("2")
+	out.waitFor(t, 0, "idle")
+	mark := out.len()
+	send("\r")
+	out.waitFor(t, mark, "Detach: Ctrl-] d (or ~. after a newline).")
+	out.waitFor(t, mark, "REMOTE READY")
+
+	mark = out.len()
+	send("abc\x1dd")
+	out.waitFor(t, mark, "✓ Detached from r / main; it keeps running.")
+	select {
+	case <-att.closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the attacher was not closed")
+	}
+	if !strings.Contains(out.raw(mark), "\x1b[?1049l") {
+		t.Error("the terminal modes were not reset")
+	}
+
+	mark = out.len()
+	send("d")
+	out.waitFor(t, mark, "Delete r / main?")
+	send("n")
+	if in, _ := att.shell.seen(); in != "abc" {
+		t.Errorf("the session read %q, want abc", in)
+	}
+	send("q")
+	select {
+	case <-handlerDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the TUI did not quit")
+	}
+	_ = sess.Close()
 }
 
 func waitUntil(t *testing.T, cond func() bool, msg string) {

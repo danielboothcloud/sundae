@@ -192,6 +192,8 @@ type Prepared struct {
 	Session     *openshell.Session
 	mgr         *openshell.Manager
 	closeBridge func()
+	// prefix is the detach prefix key (sessions.attach.detach_key).
+	prefix openshell.PrefixKey
 }
 
 // Close stops counting the bridge. It is safe to call more than once.
@@ -387,7 +389,7 @@ func Prepare(ctx context.Context, mgr *openshell.Manager, req Request) (_ *Prepa
 	if err != nil {
 		return nil, err //nolint:wrapcheck
 	}
-	return &Prepared{Session: s, mgr: mgr, closeBridge: closeBridge}, nil
+	return &Prepared{Session: s, mgr: mgr, closeBridge: closeBridge, prefix: PrefixKey(config.FromContext(ctx))}, nil
 }
 
 // GitIdentity returns the git identity for sessions of the repository: the
@@ -406,11 +408,30 @@ func GitIdentity(cfg *config.Config, rr proto.Repository) (config.GitIdentity, e
 	return cfg.SessionGitIdentity(name), nil
 }
 
-// Attach bridges term to the session until the user detaches (~.), the
-// program exits, or ctx is done. It returns the program's exit status when
-// it exited with one other than 0, and an error when the stream failed or
-// ended without an exit status (ErrSessionLost). Cancelling ctx is not an
-// error.
+// PrefixKey returns the detach prefix key cfg configures; the default for
+// no config.
+func PrefixKey(cfg *config.Config) openshell.PrefixKey {
+	if cfg == nil {
+		return openshell.DefaultPrefixKey
+	}
+	return openshell.PrefixKey(cfg.Sessions.Attach.DetachChar())
+}
+
+// DetachHint says how to detach with prefix, e.g. "Detach: Ctrl-] d (or ~.
+// after a newline)."
+func DetachHint(prefix openshell.PrefixKey) string {
+	if !prefix.Enabled() {
+		return "Detach: ~. after a newline."
+	}
+	return "Detach: " + prefix.String() + " d (or ~. after a newline)."
+}
+
+// Attach bridges term to the session until the user detaches (the prefix
+// key then d, or osewa's ~.), the program exits, or ctx is done. It returns
+// the program's exit status when it exited with one other than 0,
+// openshell.ErrDetached (with 0) when the user detached with the prefix key,
+// and an error when the stream failed or ended without an exit status
+// (ErrSessionLost). Cancelling ctx is not an error.
 func (p *Prepared) Attach(ctx context.Context, term openshell.Terminal) (int, error) {
 	pty, _, _ := term.Pty()
 	is, err := p.mgr.Attach(ctx, p.Session, uint32(pty.Window.Width), uint32(pty.Window.Height)) //nolint:gosec
@@ -418,7 +439,10 @@ func (p *Prepared) Attach(ctx context.Context, term openshell.Terminal) (int, er
 		return 0, err //nolint:wrapcheck
 	}
 
-	code, err := openshell.Bridge(ctx, term, is)
+	code, err := openshell.Bridge(ctx, term, is, openshell.WithPrefixKey(p.prefix))
+	if errors.Is(err, openshell.ErrDetached) {
+		return 0, err //nolint:wrapcheck
+	}
 	if code < 0 && ctx.Err() == nil {
 		// The stream ended without an exit status: surface why.
 		if err == nil {

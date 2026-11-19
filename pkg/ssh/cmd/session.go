@@ -137,8 +137,9 @@ first repository's own profile ("repo profile"), else the first
 sessions.repos match among its repositories, else none; --image overrides
 the image. Both only apply when the session is created.
 
-Detach with ~. (after a newline), or just close the connection: the program
-keeps running. "session attach" re-attaches, "session suspend" stops the
+Detach with the prefix key then d (Ctrl-] d unless
+sessions.attach.detach_key says otherwise), ~. after a newline, or just close
+the connection: the program keeps running. "session attach" re-attaches, "session suspend" stops the
 sandbox and keeps its storage, and "session delete" deletes the sandbox and
 its storage. With --detach, start the session without attaching. A
 suspended session is resumed first.`
@@ -171,22 +172,44 @@ sessions.`
 func sessionAttachCommand() *cobra.Command {
 	var name string
 	cmd := &cobra.Command{
-		Use:   "attach SESSION",
+		Use:   "attach [SESSION]",
 		Short: "Attach to a running agent session (requires ssh -t)",
 		Long: `Attach to an existing agent session.
 
 The session is resumed first if it is suspended, and its program is started
-again if it is not running. Detach with ~. (after a newline), or close the
-connection; the program keeps running.
+again if it is not running. Detach with the prefix key then d (Ctrl-] d
+unless sessions.attach.detach_key says otherwise), ~. after a newline, or
+close the connection; the program keeps running.
+
+Without SESSION, attach to your only session; with several, pick one from a
+numbered list, most urgent first.
 
 ` + sessionArgHelp,
-		Args: cobra.ExactArgs(1),
-		PreRunE: func(cmd *cobra.Command, _ []string) error {
+		Args: cobra.MaximumNArgs(1),
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 && name == "" {
+				// The picker says what to do when there is no terminal.
+				return nil
+			}
 			return checkTerminal(cmd)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			n, err := resolveSession(cmd, args[0], name)
+			var n string
+			var err error
+			switch {
+			case len(args) > 0 || name != "":
+				n, err = resolveSession(cmd, strings.Join(args, ""), name)
+			default:
+				n, err = pickSession(cmd)
+				if errors.Is(err, errPickCancelled) {
+					cmd.PrintErrln("Cancelled.")
+					return nil
+				}
+			}
 			if err != nil {
+				return err
+			}
+			if err := checkTerminal(cmd); err != nil {
 				return err
 			}
 			return runSession(cmd, sessionctl.Request{Name: n}, false)
@@ -325,14 +348,21 @@ func runSession(cmd *cobra.Command, req sessionctl.Request, detach bool) error {
 		return nil
 	}
 
-	return attach(ctx, p, sess)
+	return attach(ctx, cmd, p, sess)
 }
 
 // attach bridges the SSH session to the osewa session and propagates the
 // exit code of the attach client: the program's exit code when it ended, 0
 // when the user detached.
-func attach(ctx context.Context, p *sessionctl.Prepared, sess sshSession) error {
+func attach(ctx context.Context, cmd *cobra.Command, p *sessionctl.Prepared, sess sshSession) error {
+	s := p.Session
+	label := signals.SessionLabel(s.Name, s.Repos)
+	cmd.PrintErrf("Attached to %s. %s\n", label, sessionctl.DetachHint(sessionctl.PrefixKey(config.FromContext(ctx))))
 	code, err := p.Attach(ctx, sess)
+	if errors.Is(err, openshell.ErrDetached) {
+		cmd.PrintErrf("Detached from %s; it keeps running. Re-attach: session attach %s\n", label, s.Name)
+		return nil
+	}
 	if err != nil {
 		return err
 	}
