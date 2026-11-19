@@ -171,6 +171,7 @@ func CommandMiddleware(sh ssh.Handler) ssh.Handler {
 
 		ctx := s.Context()
 		cfg := config.FromContext(ctx)
+		ctx.SetValue(cmd.SessionsScreenKey, sessionsScreen(s))
 
 		cliCommandCounter.WithLabelValues(cmd.CommandName(args)).Inc()
 		rootCmd := &cobra.Command{

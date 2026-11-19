@@ -164,6 +164,10 @@ func New(c common.Common) *Selection {
 	selector.DisableQuitKeybindings()
 	sel.selector = selector
 	sel.readme = readme
+	if f, ok := c.Context().Value(sessions.FocusKey).(sessions.Focus); ok && sel.sessions != nil {
+		sel.selectPane(sessionsPane)
+		sel.sessions.SetFocus(f)
+	}
 	return sel
 }
 
@@ -369,6 +373,10 @@ func (s *Selection) ShortHelp() []key.Binding {
 	case sessionsPane:
 		s.bindSessions()
 		kb = s.sessions.ShortHelp()
+		if len(kb) > 0 && kb[0].Help().Key == "enter" {
+			// After leaving an attached session: enter goes back, q quits; both must fit.
+			kb = append([]key.Binding{kb[0], s.common.KeyMap.Quit}, kb[1:]...)
+		}
 	default:
 		return []key.Binding{s.tabsHelp()}
 	}
@@ -574,6 +582,14 @@ func (s *Selection) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 		return s, s.onRepoDeleted(msg)
 	case forges.ReposChangedMsg:
 		return s, s.refreshRepos()
+	case sessions.ShowMsg:
+		if s.sessions == nil {
+			return s, nil
+		}
+		s.menu, s.palette = nil, nil
+		cmd := s.selectPane(sessionsPane)
+		s.bindSessions()
+		return s, cmd
 	case tea.KeyPressMsg:
 		if s.activePane == selectorPane {
 			s.repoNotice = ""

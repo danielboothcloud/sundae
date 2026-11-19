@@ -844,7 +844,7 @@ func (m *Manager) profileCommand(profile string, progress io.Writer) ([]string, 
 }
 
 // Attach runs the osewa attach client for s with a cols x rows PTY. Ending
-// it, by detaching (~., or Bridge's prefix key), closing the SSH connection
+// it, by detaching (~., or Bridge's home key), closing the SSH connection
 // or cancelling ctx, ends only the client: the session's program keeps
 // running.
 func (m *Manager) Attach(ctx context.Context, s *Session, cols, rows uint32) (InteractiveSession, error) {
@@ -1102,37 +1102,30 @@ const drainTimeout = 2 * time.Second
 type BridgeOption func(*bridgeOptions)
 
 type bridgeOptions struct {
-	prefix PrefixKey
-	// others reports whether there is another session to switch to; nil
-	// leaves the switch keys unbound.
-	others func() bool
+	home HomeKey
+	// bar shows the status bar, with label.
+	bar   bool
+	label string
 }
 
-// WithPrefixKey makes Bridge watch the input for k: k d detaches, k ? shows
-// help, k k sends k. Without it, or with none, input passes untouched.
-func WithPrefixKey(k PrefixKey) BridgeOption {
-	return func(o *bridgeOptions) { o.prefix = k }
+// WithHomeKey makes Bridge watch the input for k, which leaves the session
+// for the Sessions screen. Without it, or with none, input passes untouched.
+func WithHomeKey(k HomeKey) BridgeOption {
+	return func(o *bridgeOptions) { o.home = k }
 }
 
-// WithSwitching binds the prefix's switch keys: n and p (next and previous
-// session) and s (choose one) end Bridge with a *SwitchRequest. others is
-// asked on n and p: when it says there is no other session, Bridge says so
-// and stays attached. It does nothing without a prefix key.
-func WithSwitching(others func() bool) BridgeOption {
-	return func(o *bridgeOptions) { o.others = others }
+// WithStatusBar keeps a status bar naming the session (label) and the home
+// key on the terminal's bottom row; the PTY must be sized with RemoteSize.
+func WithStatusBar(label string) BridgeOption {
+	return func(o *bridgeOptions) { o.bar, o.label = true, label }
 }
-
-// terminalReset undoes modes a detached program leaves set; kitty keyboard is
-// popped first as its stack is per screen, before leaving the alt screen.
-const terminalReset = "\x1b[<u\x1b[>4m\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1004l\x1b[?2004l\x1b[0m\x1b[?25h\x1b[?1049l\r\n"
 
 // Bridge connects term to the interactive session: it copies input and
 // output in both directions, resizes the remote PTY when the terminal's
 // window changes, and returns the remote command's exit code.
 //
-// With WithPrefixKey, prefix then d detaches: Bridge returns 0, ErrDetached.
-// With WithSwitching too, prefix then n, p or s ends it the same way and
-// returns 0 and a *SwitchRequest. osewa's own ~. passes through either way.
+// With WithHomeKey, the home key ends it: Bridge returns 0, ErrHome. osewa's
+// own ~. passes through either way.
 //
 // Cancelling ctx (e.g. the SSH client disconnecting) aborts the stream. The
 // sandbox itself keeps running.
@@ -1145,9 +1138,10 @@ func Bridge(ctx context.Context, term Terminal, is InteractiveSession, opts ...B
 
 	done := make(chan struct{})
 	defer close(done)
-	out := &bridgeOutput{w: term}
+	pty, winch, _ := term.Pty()
+	out := newStatusBar(term, pty.Window, o.bar, o.label, o.home)
+	out.start()
 
-	_, winch, _ := term.Pty()
 	go func() {
 		for {
 			select {
@@ -1158,7 +1152,7 @@ func Bridge(ctx context.Context, term Terminal, is InteractiveSession, opts ...B
 					return
 				}
 				if w.Width > 0 && w.Height > 0 {
-					_ = is.Resize(uint32(w.Width), uint32(w.Height)) //nolint:gosec
+					_ = is.Resize(out.resize(w))
 				}
 			}
 		}
@@ -1172,8 +1166,8 @@ func Bridge(ctx context.Context, term Terminal, is InteractiveSession, opts ...B
 		}
 	}()
 
-	ended := make(chan action, 1)
-	go forwardInput(term, is, o, out, ended)
+	home := make(chan struct{}, 1)
+	go forwardInput(term, is, o.home, out, home)
 
 	outDone := make(chan struct{})
 	go func() {
@@ -1184,17 +1178,15 @@ func Bridge(ctx context.Context, term Terminal, is InteractiveSession, opts ...B
 	code, err := is.ExitCode()
 
 	select {
-	case act := <-ended:
-		if dir := act.switchDir(); dir != 0 {
-			return 0, &SwitchRequest{Dir: dir}
-		}
-		return 0, ErrDetached
+	case <-home:
+		return 0, ErrHome
 	default:
 	}
 	select {
 	case <-outDone:
 	case <-time.After(drainTimeout):
 	}
+	out.close()
 
 	return code, err //nolint:wrapcheck
 }

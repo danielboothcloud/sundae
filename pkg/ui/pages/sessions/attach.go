@@ -171,18 +171,18 @@ func (op *operation) state() (lines []string, done bool, att Attacher, err error
 // attachExec is the tea.ExecCommand of an attach: Bubble Tea releases the
 // terminal (stops its renderer, leaves the alt screen, cancels its input
 // reader), runs it, then restores the terminal and repaints. Run bridges
-// the handed-over terminal to the session, switching sessions with sw.
+// the handed-over terminal to the session.
 type attachExec struct {
 	ctx     context.Context
 	att     Attacher
-	sw      *sessionctl.Switcher
 	term    openshell.Terminal
 	release func()
 	banner  string
+	// repos, name and key (its sandbox) are the session's.
+	repos     []string
+	name, key string
 
-	// last, code and err are the outcome; read them after Run. last is the
-	// session attached last.
-	last *openshell.Session
+	// code and err are the outcome; read them after Run.
 	code int
 	err  error
 }
@@ -198,22 +198,19 @@ func (a *attachExec) SetStdout(io.Writer) {}
 // SetStderr implements tea.ExecCommand.
 func (a *attachExec) SetStderr(io.Writer) {}
 
-// Run implements tea.ExecCommand. It always closes the Attachers and gives
+// Run implements tea.ExecCommand. It always closes the Attacher and gives
 // the input back, also when the TUI is gone by the time it returns.
 func (a *attachExec) Run() error {
 	defer a.release()
+	defer a.att.Close()
 	if a.banner != "" {
 		_, _ = io.WriteString(a.term, "\r\n"+a.banner+"\r\n")
 	}
-	sw := a.sw
-	if sw == nil {
-		sw = &sessionctl.Switcher{}
-	}
-	a.last, a.code, a.err = sw.Run(a.ctx, a.term, a.att)
+	a.code, a.err = a.att.Attach(a.ctx, a.term)
 	return nil
 }
 
-// attachDoneMsg reports the end of an attach: the session attached last.
+// attachDoneMsg reports the end of an attach.
 type attachDoneMsg struct {
 	repos []string
 	name  string
@@ -224,27 +221,32 @@ type attachDoneMsg struct {
 }
 
 // attachCmd hands the terminal to the prepared session.
-func attachCmd(ctx context.Context, h Handoff, att Attacher, sw *sessionctl.Switcher, repos []string, name, banner string) tea.Cmd {
+func attachCmd(ctx context.Context, h Handoff, att Attacher, repos []string, name, banner string) tea.Cmd {
 	term, release := h.Take()
-	ex := &attachExec{ctx: ctx, att: att, sw: sw, term: term, release: release, banner: banner}
+	ex := newAttachExec(ctx, att, term, release, repos, name, banner)
 	return tea.Exec(ex, func(err error) tea.Msg {
 		// Exec failed to release the terminal: Run never ran.
 		if err != nil {
 			release()
 			att.Close()
 		}
-		return ex.doneMsg(err, repos, name)
+		return ex.doneMsg(err)
 	})
 }
 
-// doneMsg reports the attach's outcome for the session attached last; repos
-// and name are the first one's, used when Run never ran.
-func (a *attachExec) doneMsg(execErr error, repos []string, name string) attachDoneMsg {
-	msg := attachDoneMsg{repos: repos, name: name, code: a.code, err: errors.Join(execErr, a.err)}
-	if s := a.last; s != nil {
-		msg.repos, msg.name, msg.key = s.Repos, s.Name, s.Sandbox
+// newAttachExec returns the attach of att on term; repos and name name the
+// session when att does not know it.
+func newAttachExec(ctx context.Context, att Attacher, term openshell.Terminal, release func(), repos []string, name, banner string) *attachExec {
+	ex := &attachExec{ctx: ctx, att: att, term: term, release: release, banner: banner, repos: repos, name: name}
+	if s := att.Session(); s != nil {
+		ex.repos, ex.name, ex.key = s.Repos, s.Name, s.Sandbox
 	}
-	return msg
+	return ex
+}
+
+// doneMsg reports the attach's outcome; execErr is Bubble Tea's.
+func (a *attachExec) doneMsg(execErr error) attachDoneMsg {
+	return attachDoneMsg{repos: a.repos, name: a.name, key: a.key, code: a.code, err: errors.Join(execErr, a.err)}
 }
 
 // sessionLabel names a session: "repo / name" for one repository, else

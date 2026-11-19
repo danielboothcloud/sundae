@@ -653,10 +653,13 @@ for every `config.forges[].token_file`, `ssh_key_file` and
   `suspend_sandbox`), so with that driver the gateway refuses, Sundae
   logs that once and leaves the sandboxes running. Set
   `config.sessions.suspend.enabled: false` to skip the attempt.
-- **Detach key.** `config.sessions.attach.detach_key` (default `ctrl-]`) is
-  the prefix key while attached: it then `d` detaches. `ctrl-<c>` for `c` in
-  `]`, `\`, `^`, `_`, `@` or `a`–`z`, or `none` to leave only osewa's `~.`;
+- **Sessions key and status bar.** `config.sessions.attach.detach_key`
+  (default `ctrl-]`) leaves an attached session for the Sessions screen; the
+  program keeps running and never gets the key. `ctrl-<c>` for `c` in `]`,
+  `\`, `^`, `_`, `@` or `a`–`z`, or `none` to leave only osewa's `~.`;
   `ctrl-a` and `ctrl-b` clash with screen, tmux and shell line editing.
+  `config.sessions.attach.status_bar` (default `true`) keeps a status line on
+  the terminal's bottom row while attached.
 - **S3 snapshots were removed.** The chart refuses `config.snapshots`,
   `snapshots.s3Credentials` and `config.sessions.suspend.fallback` with a
   message saying so; delete them from your values.

@@ -195,13 +195,15 @@ func TestGitIdentity(t *testing.T) {
 }
 
 // detachClient is an openshell.Client whose attach client runs until it is
-// cancelled.
+// cancelled; size is the PTY it was asked for.
 type detachClient struct {
 	openshell.Client
-	is *detachShell
+	is   *detachShell
+	size [2]uint32
 }
 
-func (c *detachClient) Interactive(context.Context, string, []string, uint32, uint32, openshell.ExecOptions) (openshell.InteractiveSession, error) {
+func (c *detachClient) Interactive(_ context.Context, _ string, _ []string, cols, rows uint32, _ openshell.ExecOptions) (openshell.InteractiveSession, error) {
+	c.size = [2]uint32{cols, rows}
 	return c.is, nil
 }
 
@@ -263,16 +265,19 @@ func (t *detachTerm) Pty() (ssh.Pty, <-chan ssh.Window, bool) {
 	return ssh.Pty{Window: ssh.Window{Width: 80, Height: 24}}, nil, true
 }
 
-func TestPreparedAttachDetach(t *testing.T) {
+func TestPreparedAttachHomeKey(t *testing.T) {
 	cfg := config.DefaultConfig()
 	shell := &detachShell{done: make(chan struct{})}
+	client := &detachClient{is: shell}
 	p := &Prepared{
-		sess:   &openshell.Session{Name: "main", Sandbox: "sb"},
-		mgr:    openshell.NewManager(&detachClient{is: shell}, nil, cfg),
-		prefix: PrefixKey(cfg),
+		sess: &openshell.Session{Name: "main", Repos: []string{"r"}, Sandbox: "sb"},
+		mgr:  openshell.NewManager(client, nil, cfg),
+		home: HomeKey(cfg),
+		bar:  StatusBar(cfg),
 	}
-	code, err := p.Attach(context.Background(), &detachTerm{in: strings.NewReader("ls\x1dd")})
-	if code != 0 || !errors.Is(err, openshell.ErrDetached) {
+	term := &detachTerm{in: strings.NewReader("ls\x1dd")}
+	code, err := p.Attach(context.Background(), term)
+	if code != 0 || !errors.Is(err, openshell.ErrHome) {
 		t.Fatalf("code %d err %v", code, err)
 	}
 	shell.mu.Lock()
@@ -280,18 +285,54 @@ func TestPreparedAttachDetach(t *testing.T) {
 	if string(shell.input) != "ls" || !shell.inClosed || !shell.cancelled {
 		t.Fatalf("input %q closed %v cancelled %v", shell.input, shell.inClosed, shell.cancelled)
 	}
+	// The program gets every row but the status bar's.
+	if client.size != [2]uint32{80, 23} {
+		t.Fatalf("PTY %v, want 80x23", client.size)
+	}
+	term.mu.Lock()
+	defer term.mu.Unlock()
+	if !strings.Contains(term.out.String(), " r / main ") {
+		t.Fatalf("no status bar: %q", term.out.String())
+	}
 }
 
-func TestPrefixKeyAndHint(t *testing.T) {
+func TestPreparedAttachWithoutStatusBar(t *testing.T) {
 	cfg := config.DefaultConfig()
-	if k := PrefixKey(cfg); k != openshell.DefaultPrefixKey || DetachHint(k) != "Detach: Ctrl-] d (or ~. after a newline)." {
-		t.Fatalf("%q %q", byte(k), DetachHint(k))
+	cfg.Sessions.Attach.StatusBar = false
+	shell := &detachShell{done: make(chan struct{})}
+	client := &detachClient{is: shell}
+	p := &Prepared{
+		sess: &openshell.Session{Name: "main", Sandbox: "sb"},
+		mgr:  openshell.NewManager(client, nil, cfg),
+		home: HomeKey(cfg),
+		bar:  StatusBar(cfg),
+	}
+	if _, err := p.Attach(context.Background(), &detachTerm{in: strings.NewReader("\x1d")}); !errors.Is(err, openshell.ErrHome) {
+		t.Fatal(err)
+	}
+	if client.size != [2]uint32{80, 24} {
+		t.Fatalf("PTY %v, want 80x24", client.size)
+	}
+}
+
+func TestHomeKeyStatusBarAndHint(t *testing.T) {
+	cfg := config.DefaultConfig()
+	k := HomeKey(cfg)
+	if k != openshell.DefaultHomeKey || AttachHint("r / main", k) != "Attached to r / main. Ctrl-] opens the Sessions screen." {
+		t.Fatalf("%q %q", byte(k), AttachHint("r / main", k))
+	}
+	if !ShowsStatusBar(cfg, 24) || ShowsStatusBar(cfg, 4) {
+		t.Fatal("the bar shows on 5 rows or more")
 	}
 	cfg.Sessions.Attach.DetachKey = "none"
-	if k := PrefixKey(cfg); k.Enabled() || DetachHint(k) != "Detach: ~. after a newline." {
-		t.Fatalf("%q %q", byte(k), DetachHint(k))
+	cfg.Sessions.Attach.StatusBar = false
+	if k := HomeKey(cfg); k.Enabled() || AttachHint("x", k) != "Attached to x. ~. after a newline leaves." {
+		t.Fatalf("%q %q", byte(k), AttachHint("x", k))
 	}
-	if PrefixKey(nil) != openshell.DefaultPrefixKey {
+	if ShowsStatusBar(cfg, 24) {
+		t.Fatal("the bar is off")
+	}
+	if HomeKey(nil) != openshell.DefaultHomeKey || !StatusBar(nil) {
 		t.Fatal("nil config")
 	}
 }

@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"image/color"
-	"io"
 	"path"
 	"slices"
 	"strings"
@@ -962,7 +961,7 @@ func (m *Sessions) attachCmd(repos []string, name, key string, suspended bool) t
 		m.notice = notice{text: errNoTerminal.Error(), err: true}
 		return nil
 	}
-	title := "Attaching to " + sessionLabel(name, repos) + " …  " + m.detachHint()
+	title := "Attaching to " + sessionLabel(name, repos) + " …" + m.homeHint()
 	op, ctx := newOperation(m.ctx, title, repos, name, true)
 	op.key = key
 	m.op, m.opLines = op, nil
@@ -1012,9 +1011,13 @@ func (m *Sessions) start(repos []string, name, profile string, attach bool) tea.
 	return op.run(ctx, m.src, sessionctl.Request{Repos: repos, Name: name, Profile: profile, Create: true, Term: m.term()})
 }
 
-// detachHint says how to detach, with the configured prefix key.
-func (m *Sessions) detachHint() string {
-	return sessionctl.DetachHint(sessionctl.PrefixKey(config.FromContext(m.common.Context())))
+// homeHint says how to come back here from the session; "" without a key.
+func (m *Sessions) homeHint() string {
+	k := sessionctl.HomeKey(config.FromContext(m.common.Context()))
+	if !k.Enabled() {
+		return ""
+	}
+	return "  " + k.String() + " comes back here."
 }
 
 // term is the TERM given to the attach client.
@@ -1062,28 +1065,12 @@ func (m *Sessions) onOp(op *operation) tea.Cmd {
 	if s := att.Session(); s != nil {
 		m.selKey = s.Sandbox
 	}
-	return attachCmd(m.ctx, m.handoff, att, m.switcher(), op.repos, op.name, op.title)
+	return attachCmd(m.ctx, m.handoff, att, op.repos, op.name, op.title)
 }
 
-// switcher switches sessions while attached (prefix n and p); prefix s
-// comes back to the tab, which is the picker.
-func (m *Sessions) switcher() *sessionctl.Switcher {
-	src, term := m.src, m.term()
-	return &sessionctl.Switcher{
-		Names: func(ctx context.Context) ([]string, error) {
-			rows, err := src.List(ctx)
-			names := make([]string, len(rows))
-			for i, r := range rows {
-				names[i] = r.Info.Name
-			}
-			return names, err //nolint:wrapcheck
-		},
-		Prepare: func(ctx context.Context, name string, progress io.Writer) (sessionctl.Attacher, error) {
-			return src.Prepare(ctx, sessionctl.Request{Name: name, Term: term, Progress: progress}) //nolint:wrapcheck
-		},
-		Prefix: sessionctl.PrefixKey(config.FromContext(m.common.Context())),
-	}
-}
+// ShowMsg asks the home page to show the Sessions tab: the user left an
+// attached session with the home key.
+type ShowMsg struct{}
 
 func (m *Sessions) onAttachDone(msg attachDoneMsg) tea.Cmd {
 	label := sessionLabel(msg.name, msg.repos)
@@ -1091,21 +1078,45 @@ func (m *Sessions) onAttachDone(msg attachDoneMsg) tea.Cmd {
 		m.selKey = msg.key
 		m.sortRows()
 	}
-	var sw *openshell.SwitchRequest
+	var show tea.Cmd
 	switch {
-	case errors.As(msg.err, &sw):
+	case errors.Is(msg.err, openshell.ErrHome):
 		m.pane = sessionsPane
-		m.notice = notice{text: "Choose a session: enter attaches"}
-	case errors.Is(msg.err, openshell.ErrDetached):
-		m.notice = notice{text: "✓ Detached from " + label + "; it keeps running."}
+		m.notice = notice{text: "Left " + label + "; it keeps running. enter goes back."}
+		show = func() tea.Msg { return ShowMsg{} }
 	case msg.err != nil:
 		m.notice = notice{text: "✗ " + label + ": " + msg.err.Error(), err: true}
 	case msg.code > 0:
 		m.notice = notice{text: fmt.Sprintf("%s: the program exited with status %d.", label, msg.code)}
 	default:
-		m.notice = notice{text: "Detached from " + label + "."}
+		m.notice = notice{text: "Left " + label + ". enter goes back."}
 	}
-	return m.listCmd()
+	return tea.Batch(show, m.listCmd())
+}
+
+// Focus is what the Sessions tab opens with when the TUI starts on it: the
+// session selected and a notice that it was left.
+type Focus struct {
+	// Sandbox is the session to select; "" for none.
+	Sandbox string
+	// Left labels the session the user left; "" for no notice.
+	Left string
+}
+
+// FocusKey is the key of the Focus in the context of common.Common; with
+// one, the TUI starts on the Sessions tab.
+var FocusKey = &struct{ string }{"sessions-focus"}
+
+// SetFocus selects the session f names, once listed, and shows the notice.
+func (m *Sessions) SetFocus(f Focus) {
+	m.pane = sessionsPane
+	if f.Sandbox != "" {
+		m.selKey = f.Sandbox
+		m.sortRows()
+	}
+	if f.Left != "" {
+		m.notice = notice{text: "Left " + f.Left + "; it keeps running. enter goes back."}
+	}
 }
 
 // ask opens the confirm with question; yes runs onYes.

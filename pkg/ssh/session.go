@@ -34,13 +34,13 @@ var tuiSessionDuration = promauto.NewCounterVec(prometheus.CounterOpts{
 // This middleware must be run after the ContextMiddleware. Its TUI cannot
 // attach to agent sessions; TUIMiddleware's can.
 func SessionHandler(s ssh.Session) *tea.Program {
-	return sessionProgram(s, nil)
+	return sessionProgram(s, nil, nil)
 }
 
 // sessionProgram returns the TUI program of a PTY session; nil when there
 // is none. sw, when set, is the terminal the TUI hands to an attached
-// agent session.
-func sessionProgram(s ssh.Session, sw *terminalSwitch) *tea.Program {
+// agent session; focus, when set, starts it on the Sessions tab.
+func sessionProgram(s ssh.Session, sw *terminalSwitch, focus *sessions.Focus) *tea.Program {
 	pty, _, active := s.Pty()
 	if !active {
 		return nil
@@ -73,6 +73,9 @@ func sessionProgram(s ssh.Session, sw *terminalSwitch) *tea.Program {
 	if sw != nil {
 		c.SetValue(sessions.HandoffKey, sw)
 		c.SetValue(sessions.TermKey, pty.Term)
+	}
+	if focus != nil {
+		c.SetValue(sessions.FocusKey, *focus)
 	}
 	m := NewUI(c, initialRepo)
 	p := tea.NewProgram(m, opts...)

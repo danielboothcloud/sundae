@@ -433,11 +433,16 @@ sessions:
     # At most 100000.
     keep: {{ .Sessions.Signals.Keep }}
   attach:
-    # Prefix key while attached: it then d detaches, it twice sends it, it
-    # then ? shows help. "ctrl-<c>" for c in ] \ ^ _ @ or a-z, or "none"
-    # (only osewa's ~. after a newline detaches). ctrl-a and ctrl-b clash
-    # with screen, tmux and shell line editing.
+    # Key that leaves an attached session for the Sessions screen; the
+    # program keeps running. "ctrl-<c>" for c in ] \ ^ _ @ or a-z, or "none"
+    # (only osewa's ~. after a newline leaves). The program never gets this
+    # key: pick another to send Ctrl-] to it. ctrl-a and ctrl-b clash with
+    # screen, tmux and shell line editing.
     detach_key: {{ printf "%q" .Sessions.Attach.DetachKey }}
+    # Keep a status line (the session and the key above) on the terminal's
+    # bottom row while attached; the program gets one row less. Terminals
+    # under 5 rows get no bar.
+    status_bar: {{ .Sessions.Attach.StatusBar }}
   # Named presets for "session start --profile NAME". Empty image and
   # command fall back to openshell.image and openshell.command. runtime
   # overrides sessions.runtime for the profile's sessions. openshell holds

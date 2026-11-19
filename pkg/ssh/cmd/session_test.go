@@ -55,6 +55,8 @@ type fakeOpenShell struct {
 	ensureErr error
 	// blockUntilCancel makes the attach client run until it is cancelled.
 	blockUntilCancel bool
+	// sizes are the PTY sizes the attach clients were started with.
+	sizes [][2]uint32
 	// scripts, when set, answers the scripts it knows first.
 	scripts func(sandbox string, command []string) (*openshell.ExecResult, bool)
 }
@@ -244,7 +246,7 @@ func (f *fakeOpenShell) Run(_ context.Context, name string, command []string, _ 
 	return &openshell.ExecResult{Stdout: []byte(out)}, nil
 }
 
-func (f *fakeOpenShell) Interactive(_ context.Context, name string, command []string, _, _ uint32, _ openshell.ExecOptions) (openshell.InteractiveSession, error) {
+func (f *fakeOpenShell) Interactive(_ context.Context, name string, command []string, cols, rows uint32, _ openshell.ExecOptions) (openshell.InteractiveSession, error) {
 	f.mu.Lock()
 	onInteractive, err := f.onInteractive, f.interactiveErr
 	f.mu.Unlock()
@@ -257,6 +259,7 @@ func (f *fakeOpenShell) Interactive(_ context.Context, name string, command []st
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.interactive = append(f.interactive, command)
+	f.sizes = append(f.sizes, [2]uint32{cols, rows})
 	if f.blockUntilCancel {
 		return &blockingShell{done: make(chan struct{})}, nil
 	}
@@ -296,6 +299,8 @@ func (s *scriptedShell) Close() error                { return nil }
 type fakeSSHSession struct {
 	ssh.Session
 	noPty bool
+	// rows is the terminal's height; 24 when 0.
+	rows int
 	// in is what the user types; none when nil.
 	in       io.Reader
 	mu       sync.Mutex
@@ -321,7 +326,18 @@ func (s *fakeSSHSession) Pty() (ssh.Pty, <-chan ssh.Window, bool) {
 	if s.noPty {
 		return ssh.Pty{}, nil, false
 	}
-	return ssh.Pty{Term: "xterm", Window: ssh.Window{Width: 80, Height: 24}}, make(chan ssh.Window), true
+	rows := s.rows
+	if rows == 0 {
+		rows = 24
+	}
+	return ssh.Pty{Term: "xterm", Window: ssh.Window{Width: 80, Height: rows}}, make(chan ssh.Window), true
+}
+
+// output returns what was written to the terminal.
+func (s *fakeSSHSession) output() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.out.String()
 }
 
 func (s *fakeSSHSession) Exit(code int) error {

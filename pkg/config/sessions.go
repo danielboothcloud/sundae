@@ -93,15 +93,18 @@ type SessionsConfig struct {
 
 // SessionAttachConfig configures attaching to a session.
 type SessionAttachConfig struct {
-	// DetachKey is the prefix key (it then d detaches): see ParseDetachKey.
-	// Empty means DefaultDetachKey.
+	// DetachKey is the key that leaves an attached session for the Sessions
+	// screen: see ParseDetachKey. Empty means DefaultDetachKey.
 	DetachKey string `env:"DETACH_KEY" yaml:"detach_key"`
+	// StatusBar keeps a status line on the terminal's bottom row while
+	// attached.
+	StatusBar bool `env:"STATUS_BAR" yaml:"status_bar"`
 }
 
 // DefaultDetachKey is the default sessions.attach.detach_key.
 const DefaultDetachKey = "ctrl-]"
 
-// DetachKeyNone turns the prefix key off.
+// DetachKeyNone turns the key off.
 const DetachKeyNone = "none"
 
 // ParseDetachKey parses a sessions.attach.detach_key: it returns the
@@ -489,6 +492,7 @@ func (c *Config) sessionsEnviron() []string {
 		"SUNDAE_SESSIONS_SUSPEND_AFTER=" + c.Sessions.Suspend.After.String(),
 		fmt.Sprintf("SUNDAE_SESSIONS_SIGNALS_KEEP=%d", c.Sessions.Signals.Keep),
 		"SUNDAE_SESSIONS_ATTACH_DETACH_KEY=" + c.Sessions.Attach.DetachKey,
+		fmt.Sprintf("SUNDAE_SESSIONS_ATTACH_STATUS_BAR=%t", c.Sessions.Attach.StatusBar),
 		"SUNDAE_SESSIONS_GIT_IDENTITY_NAME=" + c.Sessions.GitIdentity.Name,
 		"SUNDAE_SESSIONS_GIT_IDENTITY_EMAIL=" + c.Sessions.GitIdentity.Email,
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -138,14 +137,13 @@ first repository's own profile ("repo profile"), else the first
 sessions.repos match among its repositories, else none; --image overrides
 the image. Both only apply when the session is created.
 
-Detach with the prefix key then d (Ctrl-] d unless
-sessions.attach.detach_key says otherwise), ~. after a newline, or just close
-the connection: the program keeps running. While attached, the prefix key
-then n or p switches to your next or previous session by name, and s picks
-one from a numbered list (q goes back). "session attach" re-attaches, "session suspend" stops the
-sandbox and keeps its storage, and "session delete" deletes the sandbox and
-its storage. With --detach, start the session without attaching. A
-suspended session is resumed first.`
+While attached, the bottom row shows the session and the key that opens
+the Sundae Sessions screen (Ctrl-] unless sessions.attach.detach_key says
+otherwise); the program keeps running. ~. after a newline, or closing the
+connection, also leaves it running. "session attach" re-attaches, "session
+suspend" stops the sandbox and keeps its storage, and "session delete"
+deletes the sandbox and its storage. With --detach, start the session
+without attaching. A suspended session is resumed first.`
 
 // addCreateFlags adds the flags start and new share. name may be nil.
 func addCreateFlags(cmd *cobra.Command, name, profile, image *string, detach *bool) {
@@ -180,20 +178,20 @@ func sessionAttachCommand() *cobra.Command {
 		Long: `Attach to an existing agent session.
 
 The session is resumed first if it is suspended, and its program is started
-again if it is not running. Detach with the prefix key then d (Ctrl-] d
-unless sessions.attach.detach_key says otherwise), ~. after a newline, or
-close the connection; the program keeps running. The prefix key then n or p
-switches to your next or previous session by name, s picks one from a
-numbered list (q goes back), ? lists the keys; ~. only detaches.
+again if it is not running. While attached, the bottom row shows the session
+and the key that opens the Sundae Sessions screen (Ctrl-] unless
+sessions.attach.detach_key says otherwise); enter there attaches again. ~.
+after a newline, or closing the connection, leaves too. The program keeps
+running either way.
 
-Without SESSION, attach to your only session; with several, pick one from a
-numbered list, most urgent first.
+Without SESSION, attach to your only session; with several, open the
+Sessions screen to choose one.
 
 ` + sessionArgHelp,
 		Args: cobra.MaximumNArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 && name == "" {
-				// The picker says what to do when there is no terminal.
+				// Without a terminal, several sessions need a name.
 				return nil
 			}
 			return checkTerminal(cmd)
@@ -205,9 +203,9 @@ numbered list, most urgent first.
 			case len(args) > 0 || name != "":
 				n, err = resolveSession(cmd, strings.Join(args, ""), name)
 			default:
-				n, err = pickSession(cmd)
-				if errors.Is(err, errPickCancelled) {
-					cmd.PrintErrln("Cancelled.")
+				var chosen bool
+				n, chosen, err = defaultSession(cmd)
+				if chosen {
 					return nil
 				}
 			}
@@ -340,8 +338,7 @@ func runSession(cmd *cobra.Command, req sessionctl.Request, detach bool) error {
 		}
 	}
 
-	mgr := newManager(ctx, client)
-	p, err := sessionctl.Prepare(ctx, mgr, req)
+	p, err := sessionctl.Prepare(ctx, newManager(ctx, client), req)
 	if err != nil {
 		return err
 	}
@@ -354,49 +351,71 @@ func runSession(cmd *cobra.Command, req sessionctl.Request, detach bool) error {
 		return nil
 	}
 
-	return attach(ctx, cmd, p, sess, cliSwitcher(ctx, mgr, req.Term))
+	return attach(ctx, cmd, p, sess)
 }
 
-// cliSwitcher switches sessions on the SSH terminal; prefix s shows the
-// numbered picker of `session attach`.
-func cliSwitcher(ctx context.Context, mgr *openshell.Manager, term string) *sessionctl.Switcher {
-	user := proto.UserFromContext(ctx)
-	return &sessionctl.Switcher{
-		Names: func(ctx context.Context) ([]string, error) {
-			infos, err := mgr.List(ctx, user)
-			names := make([]string, len(infos))
-			for i, info := range infos {
-				names[i] = info.Name
-			}
-			return names, err //nolint:wrapcheck
-		},
-		Prepare: func(ctx context.Context, name string, progress io.Writer) (sessionctl.Attacher, error) {
-			return sessionctl.Prepare(ctx, mgr, sessionctl.Request{Name: name, Term: term, Progress: progress}) //nolint:wrapcheck
-		},
-		Pick: func(ctx context.Context, t openshell.Terminal, current string) (string, error) {
-			rows, err := sessionctl.List(ctx, mgr, openshell.MonitorFromContext(ctx), user)
-			if err != nil {
-				return "", err //nolint:wrapcheck
-			}
-			name, err := promptSession(t, rows, current)
-			if errors.Is(err, errPickCancelled) {
-				return current, nil
-			}
-			return name, err
-		},
-		Prefix: sessionctl.PrefixKey(config.FromContext(ctx)),
+// SessionsScreen runs the Sundae TUI on the connection's terminal, on the
+// Sessions tab with the session in sandbox selected ("" for none) and a
+// notice that the session labelled label was left ("" for none), until the
+// user quits. It reports false when there is no TUI to run.
+type SessionsScreen func(sandbox, label string) bool
+
+// SessionsScreenKey is the context key of the connection's SessionsScreen;
+// the SSH server sets it.
+var SessionsScreenKey = &struct{ string }{"sessions-screen"}
+
+// showSessions runs the context's SessionsScreen; false without one.
+func showSessions(ctx context.Context, sandbox, label string) bool {
+	show, ok := ctx.Value(SessionsScreenKey).(SessionsScreen)
+	return ok && show != nil && show(sandbox, label)
+}
+
+// defaultSession returns the session `session attach` without SESSION
+// attaches to: the user's only one. With several, the user chooses on the
+// Sessions screen (chosen), or, without a terminal, must name one.
+func defaultSession(cmd *cobra.Command) (name string, chosen bool, err error) {
+	ctx := cmd.Context()
+	client, err := newOpenShellClient(config.FromContext(ctx))
+	if err != nil {
+		return "", false, err
 	}
+	infos, err := newManager(ctx, client).List(ctx, proto.UserFromContext(ctx))
+	_ = client.Close()
+	switch {
+	case err != nil:
+		return "", false, err //nolint:wrapcheck
+	case len(infos) == 0:
+		return "", false, errors.New("you have no sessions; start one with: session start REPO")
+	case len(infos) == 1:
+		return infos[0].Name, false, nil
+	case checkTerminal(cmd) == nil && showSessions(ctx, "", ""):
+		return "", true, nil
+	}
+	names := make([]string, len(infos))
+	for i, info := range infos {
+		names[i] = info.Name
+	}
+	return "", false, fmt.Errorf("you have %d sessions (%s); name one: session attach SESSION", len(infos), strings.Join(names, ", "))
 }
 
-// attach bridges the SSH session to the osewa session, switching sessions as
-// the user asks (sw), and propagates the exit code of the last attach
-// client: its program's exit code when it ended, 0 when the user detached.
-func attach(ctx context.Context, cmd *cobra.Command, p *sessionctl.Prepared, sess sshSession, sw *sessionctl.Switcher) error {
+// attach bridges the SSH session to the osewa session and propagates the
+// exit code of the attach client: its program's exit code when it ended, 0
+// when the user left. The home key opens the Sessions screen on the same
+// connection, with the session selected.
+func attach(ctx context.Context, cmd *cobra.Command, p *sessionctl.Prepared, sess sshSession) error {
 	s := p.Session()
-	cmd.PrintErrf("Attached to %s. %s\n", signals.SessionLabel(s.Name, s.Repos), sessionctl.DetachHint(sessionctl.PrefixKey(config.FromContext(ctx))))
-	last, code, err := sw.Run(ctx, sess, p)
-	if errors.Is(err, openshell.ErrDetached) {
-		cmd.PrintErrf("Detached from %s; it keeps running. Re-attach: session attach %s\n", signals.SessionLabel(last.Name, last.Repos), last.Name)
+	label := signals.SessionLabel(s.Name, s.Repos)
+	cfg := config.FromContext(ctx)
+	if pty, _, _ := sess.Pty(); !sessionctl.ShowsStatusBar(cfg, pty.Window.Height) {
+		cmd.PrintErrln(sessionctl.AttachHint(label, sessionctl.HomeKey(cfg)))
+	}
+	code, err := p.Attach(ctx, sess)
+	if errors.Is(err, openshell.ErrHome) {
+		// The Sessions screen must not keep the session from suspending.
+		p.Close()
+		if !showSessions(ctx, s.Sandbox, label) {
+			cmd.PrintErrf("Left %s; it keeps running. Re-attach: session attach %s\n", label, s.Name)
+		}
 		return nil
 	}
 	if err != nil {

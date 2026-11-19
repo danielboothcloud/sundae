@@ -3,6 +3,7 @@ package ssh
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"regexp"
@@ -94,31 +95,49 @@ func (s *echoShell) seen() (string, []string) {
 	return s.input.String(), append([]string(nil), s.resizes...)
 }
 
-// fakeAttacher bridges to an echoShell with the real openshell.Bridge.
+// fakeAttacher bridges to an echoShell with the real openshell.Bridge, as
+// sessionctl.Prepared does: with the home key and, with bar, the status bar.
 type fakeAttacher struct {
 	shell  *echoShell
-	prefix openshell.PrefixKey
+	home   openshell.HomeKey
+	bar    bool
+	name   string
 	size   string
 	closed chan struct{}
 	once   sync.Once
 }
 
-func (a *fakeAttacher) Session() *openshell.Session {
-	return &openshell.Session{Repo: "r", Repos: []string{"r"}, Name: "main", Sandbox: "sb-r"}
+func newFakeAttacher(name string, home openshell.HomeKey, bar bool) *fakeAttacher {
+	return &fakeAttacher{shell: newEchoShell(), home: home, bar: bar, name: name, closed: make(chan struct{})}
 }
 
-func (a *fakeAttacher) Attach(ctx context.Context, term openshell.Terminal, opts ...openshell.BridgeOption) (int, error) {
+func (a *fakeAttacher) Session() *openshell.Session {
+	name := a.name
+	if name == "" {
+		name = "main"
+	}
+	return &openshell.Session{Repo: "r", Repos: []string{"r"}, Name: name, Sandbox: "sb-r-" + name}
+}
+
+func (a *fakeAttacher) Attach(ctx context.Context, term openshell.Terminal) (int, error) {
 	pty, _, _ := term.Pty()
-	a.size = fmt.Sprintf("%dx%d", pty.Window.Width, pty.Window.Height)
-	opts = append([]openshell.BridgeOption{openshell.WithPrefixKey(a.prefix)}, opts...)
+	cols, rows := openshell.RemoteSize(pty.Window, a.bar)
+	a.size = fmt.Sprintf("%dx%d", cols, rows)
+	opts := []openshell.BridgeOption{openshell.WithHomeKey(a.home)}
+	if a.bar {
+		s := a.Session()
+		opts = append(opts, openshell.WithStatusBar(signals.SessionLabel(s.Name, s.Repos)))
+	}
 	return openshell.Bridge(ctx, term, a.shell, opts...) //nolint:wrapcheck
 }
 
 func (a *fakeAttacher) Close() { a.once.Do(func() { close(a.closed) }) }
 
 // fakeSource is a Sessions tab Source: rows, or one session, r / main.
+// Prepare hands out att, or the attacher of the session named.
 type fakeSource struct {
 	att      *fakeAttacher
+	atts     map[string]*fakeAttacher
 	rows     []sessionctl.Row
 	statuses map[string]openshell.SessionStatus
 }
@@ -152,6 +171,9 @@ func (f *fakeSource) SyncRepos(context.Context, string, []string) ([]sessions.Re
 }
 
 func (f *fakeSource) Prepare(_ context.Context, req sessionctl.Request) (sessions.Attacher, error) {
+	if a, ok := f.atts[req.Name]; ok && !req.Create {
+		return a, nil
+	}
 	if req.Name != "main" || req.Create {
 		return nil, fmt.Errorf("unexpected request %+v", req)
 	}
@@ -234,7 +256,7 @@ func newTestBackend(t *testing.T) (*config.Config, *db.DB, store.Store, *backend
 func TestTUIAttachRoundTrip(t *testing.T) {
 	cfg, dbx, dbstore, be := newTestBackend(t)
 
-	att := &fakeAttacher{shell: newEchoShell(), closed: make(chan struct{})}
+	att := newFakeAttacher("main", 0, false)
 	src := &fakeSource{att: att}
 	handlerDone := make(chan struct{})
 	srv := &ssh.Server{
@@ -300,7 +322,7 @@ func TestTUIAttachRoundTrip(t *testing.T) {
 	// Detach; the TUI comes back on the same row.
 	mark = out.len()
 	send("\r~.")
-	out.waitFor(t, mark, "Detached from r / main")
+	out.waitFor(t, mark, "Left r / main. enter goes back.")
 	select {
 	case <-att.closed:
 	case <-time.After(5 * time.Second):
@@ -340,12 +362,13 @@ func TestTUIAttachRoundTrip(t *testing.T) {
 	}, "TUI goroutines are left running:\n"+goroutineDump())
 }
 
-// TestTUIAttachPrefixDetach detaches from the Sessions tab with Ctrl-] d:
-// the TUI shows the detach, keeps the row and reads the keyboard again.
-func TestTUIAttachPrefixDetach(t *testing.T) {
+// TestTUIAttachHomeKey leaves a session attached from the Sessions tab with
+// Ctrl-]: the status bar showed while attached, the TUI comes back on the
+// row with the notice and reads the keyboard again.
+func TestTUIAttachHomeKey(t *testing.T) {
 	cfg, dbx, dbstore, be := newTestBackend(t)
 
-	att := &fakeAttacher{shell: newEchoShell(), prefix: openshell.DefaultPrefixKey, closed: make(chan struct{})}
+	att := newFakeAttacher("main", openshell.DefaultHomeKey, true)
 	src := &fakeSource{att: att}
 	handlerDone := make(chan struct{})
 	srv := &ssh.Server{
@@ -354,47 +377,34 @@ func TestTUIAttachPrefixDetach(t *testing.T) {
 			TUIMiddleware(func(ssh.Session) { close(handlerDone) })(s)
 		}),
 	}
-	if err := ssh.EmulatePty()(srv); err != nil {
-		t.Fatal(err)
-	}
-	sess := testsession.New(t, srv, nil)
-	var out screen
-	sess.Stdout = &out
-	stdin, err := sess.StdinPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := sess.RequestPty("xterm-256color", 24, 80, gossh.TerminalModes{}); err != nil {
-		t.Fatal(err)
-	}
-	if err := sess.Shell(); err != nil {
-		t.Fatal(err)
-	}
-	send := func(s string) {
-		t.Helper()
-		if _, err := io.WriteString(stdin, s); err != nil {
-			t.Fatal(err)
-		}
-	}
+	out, send := startPtySession(t, srv)
 
 	out.waitFor(t, 0, "Repositories")
 	send("2")
 	out.waitFor(t, 0, "idle")
 	mark := out.len()
 	send("\r")
-	out.waitFor(t, mark, "Detach: Ctrl-] d (or ~. after a newline).")
+	out.waitFor(t, mark, "Attaching to r / main …  Ctrl-] comes back here.")
 	out.waitFor(t, mark, "REMOTE READY")
+	out.waitFor(t, mark, " r / main ")
+	out.waitFor(t, mark, " Ctrl-] sessions ")
+	if att.size != "80x23" {
+		t.Errorf("attached with a %s PTY, want 80x23 (a row for the status bar)", att.size)
+	}
+	if !strings.Contains(out.raw(mark), "\x1b[1;23r") {
+		t.Error("the scroll region was not set above the status bar")
+	}
 
 	mark = out.len()
 	send("abc\x1dd")
-	out.waitFor(t, mark, "✓ Detached from r / main; it keeps running.")
+	out.waitFor(t, mark, "Left r / main; it keeps running. enter goes back.")
 	select {
 	case <-att.closed:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the attacher was not closed")
 	}
-	if !strings.Contains(out.raw(mark), "\x1b[?1049l") {
-		t.Error("the terminal modes were not reset")
+	if raw := out.raw(mark); !strings.Contains(raw, "\x1b[?1049l") || !strings.Contains(raw, "\x1b7\x1b[r\x1b[24;1H\x1b[2K\x1b8") {
+		t.Error("the terminal modes and the status bar were not reset")
 	}
 
 	mark = out.len()
@@ -410,7 +420,99 @@ func TestTUIAttachPrefixDetach(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the TUI did not quit")
 	}
-	_ = sess.Close()
+}
+
+// TestCLIHomeKeyOpensSessionsScreen attaches as `session attach` does, on
+// the SSH session itself, and presses Ctrl-]: the Sundae TUI opens on the
+// same connection, on the Sessions tab with the session selected (enter
+// attaches to it again), and quitting it ends the command.
+func TestCLIHomeKeyOpensSessionsScreen(t *testing.T) {
+	cfg, dbx, dbstore, be := newTestBackend(t)
+
+	cli := newFakeAttacher("tool", openshell.DefaultHomeKey, true)
+	again := newFakeAttacher("tool", openshell.DefaultHomeKey, true)
+	idle := &openshell.SessionStatus{Record: events.Record{State: events.StateIdle}}
+	src := &fakeSource{
+		// "main" sorts first: the cursor is on "tool" only if selected.
+		rows: []sessionctl.Row{
+			{Info: openshell.Info{Repo: "r", Repos: []string{"r"}, Name: "main", Sandbox: "sb-r-main", Phase: "Ready"}, Status: &openshell.SessionStatus{Record: events.Record{State: events.StateBlocked}}},
+			{Info: openshell.Info{Repo: "r", Repos: []string{"r"}, Name: "tool", Sandbox: "sb-r-tool", Phase: "Ready"}, Status: idle},
+		},
+		atts: map[string]*fakeAttacher{"tool": again},
+	}
+	handlerDone := make(chan bool, 1)
+	srv := &ssh.Server{
+		Handler: ContextMiddleware(cfg, dbx, dbstore, be, log.Default())(func(s ssh.Session) {
+			s.Context().SetValue(sessions.SourceKey, sessions.Source(src))
+			_, err := cli.Attach(s.Context(), s)
+			if !errors.Is(err, openshell.ErrHome) {
+				t.Errorf("attach: %v", err)
+			}
+			cli.Close()
+			handlerDone <- sessionsScreen(s)("sb-r-tool", "r / tool")
+		}),
+	}
+	out, send := startPtySession(t, srv)
+
+	out.waitFor(t, 0, "REMOTE READY")
+	out.waitFor(t, 0, " r / tool ")
+	mark := out.len()
+	send("x\x1b[93;5u")
+	out.waitFor(t, mark, "Left r / tool; it keeps running. enter goes back.")
+	out.waitFor(t, mark, "enter attach")
+	out.waitFor(t, mark, "q quit")
+	out.waitFor(t, mark, "idle") // listed: enter has a row to attach to
+	if in, _ := cli.shell.seen(); in != "x" {
+		t.Errorf("the session read %q, want x", in)
+	}
+
+	// Enter attaches to the selected session through the TUI's handoff.
+	mark = out.len()
+	send("\r")
+	out.waitFor(t, mark, "REMOTE READY")
+	send("hi")
+	out.waitFor(t, mark, "echo:hi")
+	mark = out.len()
+	send("\x1d")
+	out.waitFor(t, mark, "Left r / tool; it keeps running.")
+
+	send("q")
+	select {
+	case ok := <-handlerDone:
+		if !ok {
+			t.Fatal("the Sessions screen did not run")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the TUI did not quit")
+	}
+}
+
+// startPtySession opens an 80x24 PTY shell session on srv; send types.
+func startPtySession(t *testing.T, srv *ssh.Server) (*screen, func(string)) {
+	t.Helper()
+	if err := ssh.EmulatePty()(srv); err != nil {
+		t.Fatal(err)
+	}
+	sess := testsession.New(t, srv, nil)
+	out := &screen{}
+	sess.Stdout = out
+	stdin, err := sess.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.RequestPty("xterm-256color", 24, 80, gossh.TerminalModes{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Shell(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	return out, func(s string) {
+		t.Helper()
+		if _, err := io.WriteString(stdin, s); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func waitUntil(t *testing.T, cond func() bool, msg string) {

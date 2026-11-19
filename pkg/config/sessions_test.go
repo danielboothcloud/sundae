@@ -24,6 +24,7 @@ func TestSessionsDefaults(t *testing.T) {
 	is.Equal(cfg.Sessions.Signals.Keep, DefaultSignalsKeep)
 	is.Equal(cfg.Sessions.Attach.DetachKey, DefaultDetachKey)
 	is.Equal(cfg.Sessions.Attach.DetachChar(), byte(']'))
+	is.True(cfg.Sessions.Attach.StatusBar)
 
 	// A zeroed section gets the defaults too, except that suspend stays
 	// off: false is a value, not an absence.
@@ -280,6 +281,7 @@ func TestSessionsConfigFileRoundTrip(t *testing.T) {
 	cfg.Sessions.Suspend = SessionSuspendConfig{Enabled: false, After: 2 * time.Hour}
 	cfg.Sessions.Signals.Keep = 250
 	cfg.Sessions.Attach.DetachKey = "ctrl-\\"
+	cfg.Sessions.Attach.StatusBar = false
 	cfg.Sessions.Profiles = map[string]SessionProfile{
 		"claude": {Image: "ghcr.io/me/agent-claude:latest", Command: `claude --model "opus"`, OpenShell: &ProfileOpenShell{Providers: []string{"my-claude", "gh.work"}}},
 		"shell":  {},
@@ -297,6 +299,7 @@ func TestSessionsConfigFileRoundTrip(t *testing.T) {
 	is.Equal(got.Sessions.Suspend, SessionSuspendConfig{Enabled: false, After: 2 * time.Hour})
 	is.Equal(got.Sessions.Signals.Keep, 250)
 	is.Equal(got.Sessions.Attach.DetachKey, "ctrl-\\")
+	is.True(!got.Sessions.Attach.StatusBar)
 	is.Equal(got.Sessions.Profiles["claude"], cfg.Sessions.Profiles["claude"])
 	is.Equal(got.Sessions.Profiles["shell"].OpenShellProviders(), nil)
 	is.Equal(got.Sessions.Profiles["shell"].OpenShellRuntimeClass(), "")
@@ -355,6 +358,7 @@ func TestSessionsEnv(t *testing.T) {
 	t.Setenv("SUNDAE_SESSIONS_SUSPEND_AFTER", "45m")
 	t.Setenv("SUNDAE_SESSIONS_SIGNALS_KEEP", "500")
 	t.Setenv("SUNDAE_SESSIONS_ATTACH_DETACH_KEY", "none")
+	t.Setenv("SUNDAE_SESSIONS_ATTACH_STATUS_BAR", "false")
 	cfg := DefaultConfig()
 	is.NoErr(cfg.ParseEnv())
 	is.Equal(cfg.Sessions.Osewa.BinaryDir, "/opt/osewa")
@@ -364,6 +368,7 @@ func TestSessionsEnv(t *testing.T) {
 	is.Equal(cfg.Sessions.Signals.Keep, 500)
 	is.Equal(cfg.Sessions.Attach.DetachKey, "none")
 	is.Equal(cfg.Sessions.Attach.DetachChar(), byte(0))
+	is.True(!cfg.Sessions.Attach.StatusBar)
 
 	envs := strings.Join(cfg.Environ(), "\n")
 	is.True(strings.Contains(envs, "SUNDAE_SESSIONS_OSEWA_BINARY_DIR=/opt/osewa\n"))

@@ -192,8 +192,18 @@ type Prepared struct {
 	sess        *openshell.Session
 	mgr         *openshell.Manager
 	closeBridge func()
-	// prefix is the detach prefix key (sessions.attach.detach_key).
-	prefix openshell.PrefixKey
+	// home is the key that leaves for the Sessions screen
+	// (sessions.attach.detach_key); bar shows the status bar.
+	home openshell.HomeKey
+	bar  bool
+}
+
+// Attacher is a prepared session to attach to; *Prepared is one. Close
+// releases its bridge count and is safe to call more than once.
+type Attacher interface {
+	Session() *openshell.Session
+	Attach(ctx context.Context, term openshell.Terminal) (int, error)
+	Close()
 }
 
 // Session is the prepared session.
@@ -392,7 +402,8 @@ func Prepare(ctx context.Context, mgr *openshell.Manager, req Request) (_ *Prepa
 	if err != nil {
 		return nil, err //nolint:wrapcheck
 	}
-	return &Prepared{sess: s, mgr: mgr, closeBridge: closeBridge, prefix: PrefixKey(config.FromContext(ctx))}, nil
+	cfg := config.FromContext(ctx)
+	return &Prepared{sess: s, mgr: mgr, closeBridge: closeBridge, home: HomeKey(cfg), bar: StatusBar(cfg)}, nil
 }
 
 // GitIdentity returns the git identity for sessions of the repository: the
@@ -411,43 +422,56 @@ func GitIdentity(cfg *config.Config, rr proto.Repository) (config.GitIdentity, e
 	return cfg.SessionGitIdentity(name), nil
 }
 
-// PrefixKey returns the detach prefix key cfg configures; the default for
-// no config.
-func PrefixKey(cfg *config.Config) openshell.PrefixKey {
+// HomeKey returns the key cfg configures to leave an attached session for
+// the Sessions screen; the default for no config.
+func HomeKey(cfg *config.Config) openshell.HomeKey {
 	if cfg == nil {
-		return openshell.DefaultPrefixKey
+		return openshell.DefaultHomeKey
 	}
-	return openshell.PrefixKey(cfg.Sessions.Attach.DetachChar())
+	return openshell.HomeKey(cfg.Sessions.Attach.DetachChar())
 }
 
-// DetachHint says how to detach with prefix, e.g. "Detach: Ctrl-] d (or ~.
-// after a newline)."
-func DetachHint(prefix openshell.PrefixKey) string {
-	if !prefix.Enabled() {
-		return "Detach: ~. after a newline."
-	}
-	return "Detach: " + prefix.String() + " d (or ~. after a newline)."
+// StatusBar reports whether cfg shows the status bar while attached; it
+// does for no config.
+func StatusBar(cfg *config.Config) bool {
+	return cfg == nil || cfg.Sessions.Attach.StatusBar
 }
 
-// Attach bridges term to the session until the user detaches (the prefix
-// key then d, or osewa's ~.), the program exits, or ctx is done; opts are
-// added to Bridge's (Switcher passes openshell.WithSwitching). It returns
-// the program's exit status when it exited with one other than 0,
-// openshell.ErrDetached or a *openshell.SwitchRequest (with 0) when the user
-// detached or switched with the prefix key, and an error when the stream
+// ShowsStatusBar reports whether an attach on a terminal rows high shows
+// the status bar.
+func ShowsStatusBar(cfg *config.Config, rows int) bool {
+	return StatusBar(cfg) && openshell.StatusBarFits(rows)
+}
+
+// AttachHint is the line shown on attaching without the status bar, e.g.
+// "Attached to r / main. Ctrl-] opens the Sessions screen."
+func AttachHint(label string, home openshell.HomeKey) string {
+	if !home.Enabled() {
+		return "Attached to " + label + ". ~. after a newline leaves."
+	}
+	return "Attached to " + label + ". " + home.String() + " opens the Sessions screen."
+}
+
+// Attach bridges term to the session until the user leaves (the home key,
+// or osewa's ~.), the program exits, or ctx is done. It returns the
+// program's exit status when it exited with one other than 0,
+// openshell.ErrHome (with 0) on the home key, and an error when the stream
 // failed or ended without an exit status (ErrSessionLost). Cancelling ctx is
 // not an error.
-func (p *Prepared) Attach(ctx context.Context, term openshell.Terminal, opts ...openshell.BridgeOption) (int, error) {
+func (p *Prepared) Attach(ctx context.Context, term openshell.Terminal) (int, error) {
 	pty, _, _ := term.Pty()
-	is, err := p.mgr.Attach(ctx, p.sess, uint32(pty.Window.Width), uint32(pty.Window.Height)) //nolint:gosec
+	cols, rows := openshell.RemoteSize(pty.Window, p.bar)
+	is, err := p.mgr.Attach(ctx, p.sess, cols, rows)
 	if err != nil {
 		return 0, err //nolint:wrapcheck
 	}
 
-	opts = append([]openshell.BridgeOption{openshell.WithPrefixKey(p.prefix)}, opts...)
+	opts := []openshell.BridgeOption{openshell.WithHomeKey(p.home)}
+	if p.bar {
+		opts = append(opts, openshell.WithStatusBar(signals.SessionLabel(p.sess.Name, p.sess.Repos)))
+	}
 	code, err := openshell.Bridge(ctx, term, is, opts...)
-	var sw *openshell.SwitchRequest
-	if errors.Is(err, openshell.ErrDetached) || errors.As(err, &sw) {
+	if errors.Is(err, openshell.ErrHome) {
 		return 0, err //nolint:wrapcheck
 	}
 	if code < 0 && ctx.Err() == nil {

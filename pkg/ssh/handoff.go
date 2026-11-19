@@ -12,6 +12,7 @@ import (
 	"charm.land/ssh"
 	bm "charm.land/wish/v2/bubbletea"
 	"github.com/danielboothcloud/sundae/pkg/openshell"
+	"github.com/danielboothcloud/sundae/pkg/ssh/cmd"
 	"github.com/danielboothcloud/sundae/pkg/ui/pages/sessions"
 )
 
@@ -300,39 +301,55 @@ func (a *attachTerminal) Pty() (ssh.Pty, <-chan ssh.Window, bool) {
 // to next.
 func TUIMiddleware(next ssh.Handler) ssh.Handler {
 	return func(s ssh.Session) {
-		_, winch, ok := s.Pty()
-		if !ok {
-			next(s)
-			return
-		}
-		sw := newTerminalSwitch(s)
-		p := sessionProgram(s, sw)
-		if p == nil {
-			next(s)
-			return
-		}
-		sw.setSend(p.Send)
-		ctx, cancel := context.WithCancel(s.Context())
-		go func() {
-			defer recoverWindows(p)
-			sw.routeWindows(ctx, winch)
-		}()
-		go func() {
-			defer recoverWindows(p)
-			sw.sendWindows(ctx)
-		}()
-		go func() {
-			<-ctx.Done()
-			p.Quit()
-		}()
-		if _, err := p.Run(); err != nil {
-			log.Error("app exit with error", "error", err)
-		}
-		// Kill restores the terminal in case the TUI crashed.
-		p.Kill()
-		cancel()
-		sw.Close()
+		runTUI(s, nil)
 		next(s)
+	}
+}
+
+// runTUI runs the TUI on s until it quits, starting on the Sessions tab
+// when focus is set. It reports false when s gets no TUI.
+func runTUI(s ssh.Session, focus *sessions.Focus) bool {
+	_, winch, ok := s.Pty()
+	if !ok {
+		return false
+	}
+	sw := newTerminalSwitch(s)
+	p := sessionProgram(s, sw, focus)
+	if p == nil {
+		return false
+	}
+	sw.setSend(p.Send)
+	ctx, cancel := context.WithCancel(s.Context())
+	go func() {
+		defer recoverWindows(p)
+		sw.routeWindows(ctx, winch)
+	}()
+	go func() {
+		defer recoverWindows(p)
+		sw.sendWindows(ctx)
+	}()
+	go func() {
+		<-ctx.Done()
+		p.Quit()
+	}()
+	if _, err := p.Run(); err != nil {
+		log.Error("app exit with error", "error", err)
+	}
+	// Kill restores the terminal in case the TUI crashed.
+	p.Kill()
+	cancel()
+	sw.Close()
+	return true
+}
+
+// sessionsScreen is the `session` commands' way to the TUI's Sessions tab
+// on s, after leaving an attached session or to choose one.
+func sessionsScreen(s ssh.Session) cmd.SessionsScreen {
+	return func(sandbox, label string) bool {
+		if sessions.SourceFor(s.Context()) == nil {
+			return false
+		}
+		return runTUI(s, &sessions.Focus{Sandbox: sandbox, Left: label})
 	}
 }
 

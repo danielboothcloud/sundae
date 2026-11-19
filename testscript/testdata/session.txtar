@@ -45,7 +45,8 @@ stderr 'requires a terminal \(ssh -t\)'
 stderr 'accepts at most 1 arg'
 sundae session attach --help
 stdout 'attach \[SESSION\]'
-stdout 'Ctrl-\] d'
+stdout 'opens the Sundae Sessions screen \(Ctrl-\]'
+! stdout 'Ctrl-\] d'
 ! sundae session start repo1 --detach
 stderr 'Starting sandbox sd-[0-9a-f]{16}'
 
