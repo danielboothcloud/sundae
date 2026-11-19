@@ -30,7 +30,11 @@ stdout 'attach'
 stdout 'repos'
 stdout 'ls'
 stdout 'signals'
-stdout 'end'
+stdout 'suspend'
+stdout 'resume'
+stdout 'delete'
+! stdout 'park'
+! stdout 'snapshot'
 
 # start and attach need a terminal (ssh -t); start --detach does not
 ! sundae session start repo1
@@ -51,8 +55,20 @@ stdout 'No signals yet'
 ! sundae session signals --limit -1
 stderr 'must not be negative'
 
+# the removed commands are gone
+! sundae session park repo1
+stderr 'unknown command "park"'
+! sundae session end repo1
+stderr 'unknown command "end"'
+! sundae session stop repo1
+stderr 'unknown command "stop"'
+! sundae session rm repo1
+stderr 'unknown command "rm"'
+! sundae session snapshot ls
+stderr 'unknown command "snapshot"'
+
 # session names are checked
-! sundae session end repo1 --name Bad
+! sundae session delete repo1 --name Bad
 stderr 'invalid session name'
 
 # with a terminal, `session` bypasses the TUI and reaches the command;
@@ -81,7 +97,7 @@ stdout 'No signals yet'
 stderr 'unauthorized'
 ! ksundae session signals
 stderr 'unauthorized'
-! ksundae session end repo1
+! ksundae session delete repo1
 stderr 'unauthorized'
 
 # stop the server

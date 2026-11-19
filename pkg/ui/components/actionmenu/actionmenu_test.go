@@ -18,7 +18,7 @@ func actions() []key.Binding {
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
 		off,
 		key.NewBinding(key.WithKeys("A"), key.WithHelp("A", "add repos")),
-		key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "end")),
+		key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
 	}
 }
 
@@ -78,7 +78,7 @@ func TestOverlay(t *testing.T) {
 func TestListView(t *testing.T) {
 	m := newMenu()
 	got := ansi.Strip(ListView(m.common, m.Actions(), 1, 30))
-	want := "  enter  Open\n> A      Add repos\n  d      End"
+	want := "  enter  Open\n> A      Add repos\n  d      Delete"
 	if got != want {
 		t.Fatalf("got\n%q", got)
 	}

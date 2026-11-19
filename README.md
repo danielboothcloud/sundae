@@ -1,7 +1,7 @@
 # Sundae
 
 Sundae is a self-hostable Git server for the command line, with OpenShell agent
-sessions, forges, notifications and S3 snapshots.
+sessions, forges and notifications.
 
 Sundae is a fork of [Soft Serve](https://github.com/charmbracelet/soft-serve)
 by [Charm](https://charm.sh), released under the same MIT license. The Git
@@ -241,7 +241,7 @@ jobs:
 #      name: Jane Doe
 #      email: 12345+jane@users.noreply.github.com
 
-# Agent session status, parking, profiles and git identity. See "OpenShell
+# Agent session status, idle suspend, profiles and git identity. See "OpenShell
 # Agent Sessions".
 #sessions:
 #  status:
@@ -273,16 +273,6 @@ jobs:
 #      ref: main
 #      description: Go service with a Containerfile and CI
 #      profile: claude
-
-# Snapshots of a session's /sandbox in S3, off by default. See "S3 snapshots".
-#snapshots:
-#  s3:
-#    enabled: true
-#    endpoint: ""            # empty for AWS; e.g. http://rook-ceph-rgw-store.rook-ceph.svc:80
-#    region: eu-west-2
-#    bucket: agent-snapshots
-#    credentials_file: /etc/sundae/secrets/s3-credentials
-#    "on": [end]
 
 # Notifications about agent sessions, through ntfy. See "Notifications".
 #notifications:
@@ -387,7 +377,7 @@ ssh -t -p 23231 localhost session start icecream --name review      # a second s
 ssh -t -p 23231 localhost session start icecream --profile claude   # create from a profile (see below)
 ssh -t -p 23231 localhost session start icecream --image my/img     # image used only when the sandbox is first created
 ssh    -p 23231 localhost session start icecream -n bg --detach     # create or resume without attaching (no -t needed)
-ssh -t -p 23231 localhost session attach review                     # attach to an existing session (resuming it if parked)
+ssh -t -p 23231 localhost session attach review                     # attach to an existing session (resuming it if suspended)
 ssh    -p 23231 localhost session repos bundle                      # the session's repositories
 ssh    -p 23231 localhost session repos bundle add docs             # clone another repository into it
 ssh    -p 23231 localhost session repos bundle remove lib           # take one out (its checkout stays)
@@ -395,13 +385,9 @@ ssh    -p 23231 localhost session ls                                # your sessi
 ssh    -p 23231 localhost session ls --json                         # the same as JSON
 ssh    -p 23231 localhost session signals                           # what your sessions reported, newest first
 ssh    -p 23231 localhost session signals --attention --follow      # keep printing what needs you (Ctrl-C to stop)
-ssh    -p 23231 localhost session park review                       # suspend that session's sandbox now
-ssh    -p 23231 localhost session resume review                     # resume it without attaching
-ssh    -p 23231 localhost session end review                        # delete that session's sandbox and revoke its token
-ssh    -p 23231 localhost session end review --delete-snapshot      # ... and delete its S3 snapshot too
-ssh    -p 23231 localhost session snapshot ls                       # your S3 snapshots: live, parked or ended
-ssh    -p 23231 localhost session snapshot rm review                # delete one session's snapshot
-ssh    -p 23231 localhost session snapshot prune --older-than 720h  # delete ended sessions' snapshots older than 30 days
+ssh    -p 23231 localhost session suspend review                    # stop that session's sandbox now, keeping its storage
+ssh    -p 23231 localhost session resume review                     # start it again without attaching
+ssh    -p 23231 localhost session delete review                     # delete its sandbox and storage, and revoke its token
 ```
 
 **Sessions and repositories.** A session is named (1 to 32 lowercase
@@ -411,7 +397,7 @@ NAME --repo R...` creates one holding the repositories given, in order;
 after the repository's last path segment (or a numbered name such as `tool-2`
 when a session of that name holds other repositories), or `--name`. Starting
 an existing session resumes it and adds any repository it lacks. Commands
-that take `SESSION` (attach, park, resume, end, repos) accept the session's
+that take `SESSION` (attach, suspend, resume, delete, repos) accept the session's
 name, or a repository held by exactly one of your sessions.
 
 Each session is its own sandbox, named `sd-` and 16 hex digits of a hash of
@@ -419,14 +405,26 @@ the user and session name: OpenShell 0.1.8 refuses sandbox names over 19
 characters. The sandbox records the user, session name, profile and the
 repositories it was created with as annotations; OpenShell cannot change
 annotations, so after `session repos add|remove` the current list is kept in
-the sandbox (`~/.config/sundae/repos`, which snapshots keep too) and the
+the sandbox (`~/.config/sundae/repos`, on its storage) and the
 server remembers it. After a server restart a session shows the list it was
 created with until it is next started or attached. Removing a repository
 leaves its checkout in `/sandbox`. A new session's profile is `--profile`,
 else the first repository's own profile (`repo profile`), else the first
 `sessions.repos` match among its repositories, in order. Each repository
 gets the git identity of the forge it was imported from (see "Git
-identity"). `session end` deletes one session and leaves the others.
+identity"). `session delete` deletes one session and leaves the others.
+
+**Suspend and delete.** `session suspend` stops a session's sandbox and
+keeps its storage: the pod runtime deletes the Pod and keeps its
+PersistentVolumeClaim, the docker runtime stops the container and keeps its
+volume, and the OpenShell runtime suspends the sandbox where the gateway's
+compute driver supports it (otherwise it fails and the session keeps
+running). `session attach`, `session start` and `session resume` start a
+suspended session again on the kept storage. `session delete` deletes the
+sandbox and its storage (the Pod and the PVC, the container and the volume,
+or the OpenShell sandbox) and revokes the session's git credentials: work
+that was not pushed is gone. Earlier releases called these `park` and `end`;
+the old names are gone.
 
 **Detach and re-attach.** `session start` and `session attach` need a
 terminal, so pass `-t`. Detach with `~.` after a newline (osewa's escape), or
@@ -490,7 +488,7 @@ openshell:
   providers_sync: 1m       # at least 10s
   prune_providers: false   # delete undeclared providers Sundae created
   # The policy of new sandboxes: "sundae" (OpenShell's restrictive default
-  # plus egress to clone_url, the S3 snapshot endpoint and network_policies)
+  # plus egress to clone_url and network_policies)
   # or "image" (none sent; the image's /etc/openshell/policy.yaml applies).
   # See "Sandbox egress" below.
   sandbox_policy: sundae
@@ -509,7 +507,7 @@ sessions:
     # How often to read each running session's status (at least 1s).
     poll_interval: 10s
   suspend:
-    # Park idle sessions (see "Parking idle sessions").
+    # Suspend idle sessions (see "Suspending idle sessions").
     enabled: true
     # Nobody attached and not working for this long.
     after: 30m
@@ -579,7 +577,8 @@ keeps the runtime it was created in (recorded in its sandbox's
 - `openshell` (the default): sandboxes on the OpenShell gateway, configured
   by `openshell:`. Only this runtime has providers and credential
   injection, the L7 egress policy (`openshell.sandbox_policy`,
-  `openshell.network_policies`) and suspend.
+  `openshell.network_policies`) and suspend that keeps a program's memory
+  (where the compute driver supports it).
 - `pod`: a plain Kubernetes Pod per session, with a PersistentVolumeClaim
   mounted at `/sandbox`, configured by `pod:` (below).
 - `docker`: a container per session on a Docker-compatible engine, with a
@@ -590,7 +589,7 @@ Sessions are on when `sessions.runtime` is `pod` or `docker`, or when it is
 `openshell` needs `openshell.enabled`. In every runtime, sessions clone over
 `openshell.clone_url` (else `http.public_url`), get git tokens valid for
 `openshell.token_ttl`, and run `openshell.command` unless the profile sets
-a command; S3 snapshots, osewa, signals and the TUI work the same.
+a command; osewa, signals and the TUI work the same.
 
 **Pod runtime.** Sundae creates the Pod and the claim itself, through the
 Kubernetes API (in-cluster credentials, or `pod.kubeconfig`), in
@@ -598,17 +597,24 @@ Kubernetes API (in-cluster credentials, or `pod.kubeconfig`), in
 pods/exec and persistentvolumeclaims there; the Helm chart creates it. The
 terminal and every command run through `pods/exec`.
 
-- Parking deletes the Pod and keeps the claim: the session's program stops,
-  `/sandbox` stays. Start and attach create the Pod again, from the template
-  the claim recorded, and start the program again. Ending deletes both.
+- `session suspend` deletes the Pod and keeps the claim: the session's
+  program stops, `/sandbox` stays. Start, attach and resume create the Pod
+  again, from the template the claim recorded, and start the program again.
+  `session delete` deletes both.
+- Each session's claim is provisioned dynamically through `storage_class`
+  (empty: the cluster's default StorageClass), `storage_size` big, with
+  `storage_access_modes` (default `[ReadWriteOnce]`; `ReadWriteMany`, or
+  `ReadWriteOncePod` alone). The Helm chart can create the StorageClass
+  (`podRuntime.storageClass`). With a `Retain` reclaim policy the
+  PersistentVolume outlives `session delete`.
 - A new claim is seeded from the image's `/sandbox` by an init container.
 - The Pod runs the image with `/bin/sh` as its main process, `HOME=/sandbox`,
   no service account token and no service links.
 - Settings: `image` (empty: `openshell.image`), `runtime_class` (e.g.
   `kata`), `security_context`, `pod_security_context`, `resources`,
-  `storage_class`, `storage_size` (default `10Gi`), `node_selector`,
-  `tolerations`, `annotations`, `labels`, `volumes`, `volume_mounts`,
-  `ready_timeout` (default `15m`). The Kubernetes objects use Kubernetes
+  `storage_class`, `storage_size` (default `10Gi`), `storage_access_modes`,
+  `node_selector`, `tolerations`, `annotations`, `labels`, `volumes`,
+  `volume_mounts`, `shared_volumes`, `ready_timeout` (default `15m`). The Kubernetes objects use Kubernetes
   field names (`seccompProfile`, `runAsUser`, ...) and are checked against
   the API types.
 - Defaults: the container drops all capabilities, cannot escalate
@@ -617,8 +623,33 @@ terminal and every command run through `pods/exec`.
   means these defaults; `{}` means none.
 - `sessions.profiles.<name>.pod` overrides any of them except `namespace`,
   `kubeconfig` and `ready_timeout`: a string or object it sets replaces the
-  default, while `node_selector`, `annotations` and `labels` are merged. A
+  default, while `node_selector`, `annotations` and `labels` are merged,
+  and `shared_volumes` are merged by `name` (the profile's entry wins). A
   profile sets `image` or `pod.image`, not both.
+- The Pod template is recorded when a session is created: changed settings
+  reach a session once it is deleted and started again.
+
+**Shared volumes.** `pod.shared_volumes` mounts existing
+PersistentVolumeClaims, in `pod.namespace`, into every session's Pod; unlike
+`volumes`/`volume_mounts`, a profile adds to them rather than replacing them.
+Each entry has a `name` (the Pod volume's, a DNS label, not `sandbox`), a
+`claim_name`, an absolute `mount_path` outside `/sandbox`, and optionally
+`read_only` and `sub_path`. Names and mount paths must not clash with each
+other or with `volumes`/`volume_mounts`. Sundae only mounts these claims; it
+never creates or deletes them. A shared mise cache, a ReadWriteMany claim
+mounted at `/mise` so tools are installed once for every session:
+
+```yaml
+pod:
+  shared_volumes:
+    - name: mise
+      claim_name: mise-cache   # ReadWriteMany, e.g. CephFS or NFS
+      mount_path: /mise
+```
+
+The image then points mise at it (`ENV MISE_DATA_DIR=/mise`, and
+`MISE_CACHE_DIR=/mise/cache`). The Helm chart can create such a claim
+(`podRuntime.sharedVolumes`, see its README).
 
 Sundae sets no workload-specific settings: what a workload needs (another
 RuntimeClass, a relaxed seccomp profile, capabilities, a device volume) goes
@@ -635,10 +666,10 @@ Docker-compatible API works too.
   (`sundae.*`). `/sandbox` is a named volume of the same name as the
   container, which the engine fills from the image's `/sandbox` on first
   use. A missing image is pulled.
-- Parking stops the container: the session's program stops, the container
-  and `/sandbox` stay. Start and attach start it again and start the program
-  again. Ending removes the container and the volume. A container that
-  stopped by itself also shows as parked.
+- `session suspend` stops the container: the session's program stops, the
+  container and `/sandbox` stay. Start, attach and resume start it again and
+  start the program again. `session delete` removes the container and the
+  volume. A container that stopped by itself also shows as suspended.
 - Settings: `image` (empty: `openshell.image`), `user` (empty: the image's),
   `network` (empty: the engine's default), `runtime` (the engine's OCI
   runtime, e.g. `runsc`), `volume_driver`, `volume_options`, `memory` and
@@ -701,7 +732,7 @@ profile; duplicates are dropped.
   `SSL_CERT_FILE`-style CA variables of the sandbox proxy, `SANDBOX`),
   less `HOME`, `USER`, `LOGNAME`, `SHELL`, `PATH`, `TERM` and osewa's and
   Sundae's own settings, to `/tmp/sundae/session-env.<pid>` (mode 0600,
-  outside `/sandbox` and so outside snapshots); the session's login shell
+  outside `/sandbox` and so off the session's storage); the session's login shell
   exports it and deletes the file before it starts the program, which
   passes it on to everything it runs (`bash -l` included). The file holds
   placeholders, never credentials. Sessions without providers need it
@@ -743,8 +774,7 @@ runtime, also when `openshell.runtime_class` is set.
   runtime, where the pod's security settings are yours to choose.
 - A sandbox keeps the runtime it was created with, the same as its image.
   A change to `runtime_class` applies to new sessions only. Sundae records
-  the runtime in the sandbox's `sundae.runtime-class` annotation. A session
-  parked to an S3 snapshot is created again with the runtime it had.
+  the runtime in the sandbox's `sundae.runtime-class` annotation.
 - The TUI's new-session form shows each profile's runtime next to its
   image and command.
 
@@ -825,7 +855,7 @@ placeholder across value-only updates, so a running program uses the new
 value once the sandbox has installed it
 ([Profiles, Runtime Limitations](https://github.com/NVIDIA/OpenShell/blob/v0.1.8/docs/how-it-works/providers/profiles.mdx)).
 To be sure a session uses a rotated credential, exit its program and attach
-again (or `session end` and start it). Deleting and recreating a provider
+again (or `session delete` and start it). Deleting and recreating a provider
 (a type change) gives it new placeholders; Sundae never does that itself.
 
 A placeholder only resolves when the sandbox's network policy lets the
@@ -937,7 +967,7 @@ idle, then sessions that never reported:
 
 ```
 Repository  Name    Phase      State                           Message                   Attached  Changed
-infra       claude  Suspended  ▲ blocked · permission · parked  Apply 3 to add, 1 to cha…  0         4m
+infra       claude  Suspended  ▲ blocked · permission · suspended  Apply 3 to add, 1 to cha…  0         4m
 sundae  main    Ready      ● working 40%                   Running go test ./pkg/…   1         now
 dotfiles    main    Ready      · none                          -                         0         3h
 ```
@@ -945,19 +975,20 @@ dotfiles    main    Ready      · none                          -               
 (Profile and Sandbox columns left out.) The message is the agent's `msg`,
 else its title, else the program's name, with control and invisible
 formatting characters removed and cut to 60 characters. After the state come
-the blocked kind and progress, then `parked` or `starting` for the sandbox,
+the blocked kind and progress, then `suspended` or `starting` for the sandbox,
 `exited` when the program has ended, and `stale` when the last poll failed: a
 session that cannot be read keeps its last known status. Suspended,
-stopped and starting sandboxes are never exec'd; a parked session shows the
-status it had when it was parked. `session ls --json` prints the same as a
-list of objects (`state` is `none` when there is no report); text from the
-agent is sanitised there too, but not cut. Listing never resumes a parked
-session. osewa keeps only the root record, so child records (`id=...`) and
+stopped and starting sandboxes are never exec'd; a suspended session shows
+the status it had when it was suspended. `session ls --json` prints the same
+as a list of objects (`state` is `none` when there is no report, `suspended`
+is true for a suspended session); text from the agent is sanitised there
+too, but not cut. Listing never resumes a suspended session. osewa keeps
+only the root record, so child records (`id=...`) and
 changes between two polls are not seen.
 
 **Signals.** `session signals` shows the history behind `session ls`: every
-status change and lifecycle step (`created`, `resumed`, `ready`, `parked`,
-`exited`, `ended`, `failed`) of your sessions that went on the event bus,
+status change and lifecycle step (`created`, `resumed`, `ready`,
+`suspended`, `exited`, `deleted`, `failed`) of your sessions that went on the event bus,
 newest first. Forge results are not signals.
 
 ```
@@ -965,7 +996,7 @@ TIME      STATE                   SESSION                       MESSAGE
 14:02:11  ▲ blocked · permission  infra / claude-1              Apply 3 to add, 1 to change?
 14:02:03  ● working               infra / claude-1              Planning
 13:58:40  ✓ done                  sundae / forge-sync       Implemented GitHub discovery
-13:12:00  ○ idle · parked         dotfiles / main               parked while idle
+13:12:00  ○ idle · suspended      dotfiles / main               suspended while idle; storage kept
 12:50:19  + created               sundae / tui              sandbox created
 ```
 
@@ -974,7 +1005,7 @@ and the message as in `session ls` (sanitised; with a PTY, `ssh -t`, each row
 is cut to the terminal's width, otherwise not cut). A child record would show
 its id after the session name (`sundae / tui/lint`). A lifecycle row
 shows the session's last known state with the step after it (`○ idle ·
-parked`), except `+ created`, `- ended` and `✗ failed · start`, whose message
+suspended`), except `+ created`, `- deleted` and `✗ failed · start`, whose message
 is the reason. Times are the server's; rows older than today show the date.
 
 `--repo R` and `--name N` select sessions, `--attention` only what asks for
@@ -996,47 +1027,58 @@ behind the event bus, a `! missed` row (JSON `"type": "gap"`) marks where
 events were lost, rather than leaving a silent hole; so does a `--follow`
 reader that fell further behind than the feed keeps.
 
-**Parking idle sessions.** A session nobody uses is parked: its sandbox is
-suspended through OpenShell, keeping its memory where the compute driver can,
-so it uses no CPU until someone comes back. A session is parked once, for the
-whole of `sessions.suspend.after` (default 30m), nobody has been attached
-(osewa counts no attached client, and Sundae has no bridge open on it)
-and it has not reported `working`. Every other state counts as not working,
-so an agent waiting on you (`blocked`) is parked too and still reads
-`▲ blocked · parked`. A program that never reports a status must also have
-been quiet that long (osewa has seen no output from it), so a plain shell
-running a long build is not frozen. A program that has exited runs nothing,
-so its session is parked like an idle one; the next attach starts it again
+**Suspending idle sessions.** A session nobody uses is suspended: its
+sandbox is stopped and its storage kept (the pod runtime deletes the Pod, the
+docker runtime stops the container, OpenShell suspends the sandbox, keeping
+its memory where the compute driver can), so it uses no CPU until someone
+comes back. A session is suspended once, for the whole of
+`sessions.suspend.after` (default 30m), nobody has been attached (osewa
+counts no attached client, and Sundae has no bridge open on it) and it has
+not reported `working`. Every other state counts as not working, so an agent
+waiting on you (`blocked`) is suspended too and still reads `▲ blocked ·
+suspended`. A program that never reports a status must also have been quiet
+that long (osewa has seen no output from it), so a plain shell running a
+long build is not stopped. A program that has exited runs nothing, so its
+session is suspended like an idle one; the next attach starts it again
 either way. Sundae also counts its own bridges: from the moment `session
 start` or `session attach` begins preparing a session until its bridge
-closes, however it closes, the session is not parked. The idle window starts
-again whenever Sundae sees a client attached, a bridge open or close, a
-`working` report, or the sandbox come back up, and when Sundae starts.
-Each park is a `parked` lifecycle event (`op` `auto`, or `park` for `session
-park`).
+closes, however it closes, the session is not suspended. The idle window
+starts again whenever Sundae sees a client attached, a bridge open or close,
+a `working` report, or the sandbox come back up, and when Sundae starts.
+Each suspend is a `suspended` lifecycle event (`op` `auto`, or `suspend` for
+`session suspend`).
 
-`session start`, `session attach` and `session resume` resume a parked
+`session start`, `session attach` and `session resume` resume a suspended
 session (and say so), then carry on as usual; that is a `resumed` event. A
 resume asks OpenShell to boot the sandbox cleanly if its memory cannot be
 restored (`RestartIfRestoreFails`): the session stays usable with what the
-backend kept of `/sandbox`, rather than failing until it is ended. osewa's
-server and the program are gone after such a restart, so Sundae starts
-them again, as for an exited program, and tells you: `Started claude again:
-it was not running when the session resumed (it had exited, or the sandbox
-could not restore its memory and restarted cleanly)`. Whatever the program
-held in memory, such as an agent's conversation, is lost then.
+backend kept of `/sandbox`, rather than failing until it is deleted. osewa's
+server and the program are gone after such a restart, and after any pod or
+docker suspend, so Sundae starts them again, as for an exited program, and
+tells you: `Started claude again: it was not running when the session
+resumed (it had exited, or the sandbox could not restore its memory and
+restarted cleanly)`. Whatever the program held in memory, such as an
+agent's conversation, is lost then.
 
-`session park` parks a session at once (not while a bridge is open on it);
-`session resume` resumes one without attaching. Sundae only parks
+`session suspend` suspends a session at once (not while a bridge is open on
+it); `session resume` resumes one without attaching. Sundae only suspends
 sandboxes it created (labelled `sundae.managed=true`, with an owner and a
-repository). Parking needs a compute driver with OpenShell's suspend-resume
-capability; the OpenShell 0.1.8 Kubernetes driver has none. When the gateway
-refuses, Sundae logs it once, stops trying for that sandbox until it
-restarts, and `session ls --json` shows why under `unsuspendable`. Set
-`sessions.suspend.enabled: false` to not try at all, or
-`sessions.suspend.fallback: snapshot` to park such sessions to S3 instead (see
-"S3 snapshots"). After a Sundae restart a session that was parked before
-shows no status until it is resumed: the status is kept in memory only.
+repository). An OpenShell sandbox needs a compute driver with OpenShell's
+suspend-resume capability; the OpenShell 0.1.8 Kubernetes driver has none.
+When the gateway refuses, `session suspend` fails saying so (the session
+keeps running; `session delete` removes it), and the idle suspend logs it
+once, stops trying for that sandbox until Sundae restarts, and `session ls
+--json` shows why under `unsuspendable`. Set `sessions.suspend.enabled:
+false` to not suspend idle sessions at all. After a Sundae restart a session
+that was suspended before shows no status until it is resumed: the status is
+kept in memory only.
+
+**Removed: S3 snapshots.** Earlier releases could save `/sandbox` to S3 and
+restore it. That is gone, with `session snapshot`, `session start --restore`
+and `--fresh`, and `session end --force` and `--delete-snapshot`. A config
+that still has `snapshots`, `sessions.suspend.fallback` or a
+`SUNDAE_SNAPSHOTS_*`/`SUNDAE_SESSIONS_SUSPEND_FALLBACK` variable fails
+`sundae config check` and startup, naming the setting; delete it.
 
 **Client TLS secret.** In Kubernetes, mount the gateway's client certificate
 secret, typically `openshell-client-tls`, into the Sundae pod and point the
@@ -1064,10 +1106,10 @@ and adds that file to the sandbox user's `~/.gitconfig` as an
 `include.path`. So every git process in the sandbox, including agents in osewa
 sessions, which start with a clean environment, uses the newest token. The
 token is never in `.git/config`, `~/.gitconfig`, anything under `/sandbox`
-(so never in a snapshot of it), a command line Sundae builds, or the
+(so never on the session's storage), a command line Sundae builds, or the
 sandbox's spec; it reaches the sandbox in the environment of the exec that
 writes the file. It grants your read/write access, so agents can push.
-Processes inside the sandbox can read it. `session end` revokes it.
+Processes inside the sandbox can read it. `session delete` revokes it.
 
 A program left running longer than `token_ttl` after the last start or
 attach loses git access until the next one renews the file. Attach again, or
@@ -1084,10 +1126,6 @@ each allowing any program in the sandbox and inspecting nothing:
 
 - `sundae_git`: the host and port of `openshell.clone_url` (or
   `http.public_url`), 80 or 443 by scheme when the URL has no port;
-- `sundae_snapshots`, with S3 snapshots on: the host and port the presigned
-  snapshot URLs point at, `<bucket>.<endpoint host>` (for AWS,
-  `<bucket>.s3.<region>.amazonaws.com`), or the endpoint's host with
-  `path_style: true`;
 - the rules in `openshell.network_policies`.
 
 Providers attached to a sandbox add their profiles' rules on the gateway.
@@ -1137,8 +1175,8 @@ a sandbox.
 
 The policy is sent only when a sandbox is created, and takes precedence over
 the image's `/etc/openshell/policy.yaml`. An existing sandbox keeps the
-policy it was created with, through stops, parks and resumes; a change
-reaches a session when it gets a new sandbox (`session end`, then start it
+policy it was created with, through stops, suspends and resumes; a change
+reaches a session when it gets a new sandbox (`session delete`, then start it
 again). A gateway-global policy (`openshell policy set --global`) replaces
 every sandbox's policy, Sundae's included.
 
@@ -1158,9 +1196,6 @@ network_policies:
       - path: "/**"
 ```
 
-and, with S3 snapshots on, a rule like it for the snapshot host (see "S3
-snapshots").
-
 osewa needs no egress: the bridge reaches its server over loopback, and Sundae
 turns its update checks off.
 
@@ -1170,141 +1205,6 @@ either direction counts as activity. A connection that sits completely quiet
 for longer than the timeout is disconnected; the program keeps running, and
 `session attach` re-attaches. To avoid the disconnects, raise `idle_timeout`
 or set `0`, or set `ServerAliveInterval` in your SSH client.
-
-#### S3 snapshots
-
-Sundae can save a session's `/sandbox` (the checkouts and the sandbox
-user's home) to an S3 bucket and restore it, so `session end` loses nothing
-and an idle session can be parked without a sandbox. It is off by default:
-while `snapshots.s3.enabled` is false nothing runs and nothing in the section
-is checked.
-
-```yaml
-snapshots:
-  s3:
-    enabled: true
-    endpoint: ""                 # empty for AWS S3; the base URL of MinIO, Ceph RGW, ...
-    region: eu-west-2            # required for AWS; defaults to us-east-1 with an endpoint
-    bucket: agent-snapshots      # must exist
-    prefix: sundae/sessions  # the default
-    credentials_file: /etc/sundae/secrets/s3-credentials
-    sse: ""                      # AES256, aws:kms, or "" for the bucket's default
-    path_style: false            # true for most MinIO and RGW setups
-    "on": [end]                  # add park for a backup before every memory-retaining park
-sessions:
-  suspend:
-    fallback: snapshot           # default none; see "Parking to a snapshot" below
-```
-
-**Credentials.** `credentials_file` is an AWS shared-credentials file
-(`[default]` with `aws_access_key_id`, `aws_secret_access_key` and optionally
-`aws_session_token`; `AWS_ACCESS_KEY_ID=...` lines work too), or a directory
-holding the files `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, which is
-what a Kubernetes Secret with those keys mounts as (a Rook
-ObjectBucketClaim's, for example). It is read for every operation, so
-rotated keys need no restart, and `sundae config check` reads it. The keys need
-`s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` and `s3:ListBucket` on the
-prefix. They never enter a sandbox: Sundae signs a URL for one object
-(AWS Signature V4, valid for an hour) and the sandbox uses that.
-
-**How a snapshot moves.** The archive never passes through Sundae. To
-snapshot, Sundae runs `tar | gzip` in the sandbox into a file in
-`/tmp/sundae` (outside `/sandbox`), presigns a PUT that signs the
-archive's MD5 and the `sse` header, and the sandbox uploads the file with
-`curl`; then the file is deleted. To restore, the sandbox streams `curl |
-gzip -d | tar -x` into `/sandbox`. The sandbox therefore needs `sh`, `tar`
-(GNU tar for anchored exclusions), `gzip`, `md5sum` and `curl`, which the
-sandbox image in `deploy/sandbox` has, egress to the endpoint (the policy
-Sundae gives sandboxes allows it; see "Sandbox egress"), and free space in `/tmp` for the compressed archive. The archive is
-written to a file first, not streamed, because AWS S3 refuses an upload
-without a length, and so a `tar` that fails half-way never uploads a
-truncated archive.
-
-**One object per session.** A session's snapshot is
-`<prefix>/<user-id>/<sandbox>.tar.gz`, replaced by every snapshot. The upload
-goes straight to that key: S3 only replaces an object once the new upload is
-complete and its MD5 checks out, so a failed upload leaves the previous
-snapshot as it was. One upload carries at most 5 GiB (the AWS S3 and Ceph
-RGW limit for a single PUT): a larger compressed archive fails the snapshot
-with that message, before anything is uploaded. Interrupted uploads leave no
-partial objects. A snapshot outlives its session: nothing deletes it on its
-own (see "Deleting snapshots"), and starting a session of the same name
-restores it.
-
-**Deleting snapshots.** `session snapshot ls` lists your snapshots, newest
-first, with what became of each session: `live` (it has a sandbox),
-`parked` (parked to this snapshot, its only copy of `/sandbox`) or `ended`.
-`session snapshot rm SESSION` deletes one; the snapshot a session is parked
-to is refused, since deleting it would lose the session's work.
-`session snapshot prune` deletes the snapshots of ended sessions only,
-`--older-than 720h` keeps those stored in the last 30 days, and `--dry-run`
-lists what would go. `session end SESSION --delete-snapshot` ends a session
-and deletes its snapshot, taking none on end, so its work is gone for good.
-In the TUI, <kbd>S</kbd> on the Sessions tab opens the same list
-(<kbd>x</kbd> deletes the highlighted snapshot, <kbd>P</kbd> prunes those of
-ended sessions, both after a confirm) and <kbd>D</kbd> ends the highlighted
-session and deletes its snapshot. A bucket lifecycle rule on the prefix is
-another way to expire old snapshots.
-
-**What is left out.** Everything under `/sandbox` is saved except: osewa's
-runtime (`~/.config/osewa`, `~/.local/state/osewa`, the bridge's client key
-and session id under `~/.config/sundae`), which would point at a server
-that no longer exists, and is recreated; the osewa build Sundae uploads
-(`~/.local/lib/sundae`), uploaded and checksummed again; the XDG cache
-(`~/.cache`); and credentials: `~/.ssh`, `~/.gnupg`, `~/.netrc`,
-`~/.git-credentials`, `~/.aws`, `~/.kube`, `~/.docker/config.json`, and the
-logins of `gh`, `glab`, Claude Code (`~/.claude/.credentials.json`) and Codex
-(`~/.codex/auth.json`). Paths are relative to `/sandbox` only: a checkout's
-own `.cache` or `.ssh` is kept. Sundae's git token is never under
-`/sandbox`. Anything else secret you keep in `/sandbox` (an `.env` file in a
-checkout) is in the snapshot: protect the bucket accordingly.
-
-**`session end`.** With `end` in `on`, `/sandbox` is saved before the sandbox
-is deleted (a parked sandbox is resumed for that). If the snapshot fails, the
-session is not ended and the error says why; `session end --force` ends it
-anyway, without a snapshot. In the TUI, ending asks again: `The snapshot
-failed. End … without one?`.
-
-**`session start`.** When a start creates the sandbox and the session has a
-snapshot, `/sandbox` is restored before the clone check, so the restored
-checkout is used rather than cloned again: `Restoring /sandbox from the
-snapshot of 2026-11-12 10:41 UTC, 312 MiB...`. A sandbox that already exists
-is never restored into. `--fresh` starts from a fresh clone instead (the
-snapshot stays until the next one replaces it). If the restore fails, the new
-sandbox is deleted again and the start fails, so the next start tries again
-from scratch; no half-restored session is left. The snapshot wins over what
-the image put in the new `/sandbox` (shell start-up files) without asking. If
-the new sandbox already holds work, Sundae's own state or the checkout,
-which a new sandbox only does when a volume outlived its sandbox, the start
-asks first: `Restore the snapshot over them? [y/N]` (files the snapshot has
-replace those in the sandbox; files only in the sandbox are kept). Without a
-terminal it fails and says to run `session start --restore` (yes) or
-`--fresh` (keep them); the TUI asks the same in its confirm line.
-
-**Parking to a snapshot.** With `sessions.suspend.fallback: snapshot`, a
-session the gateway cannot suspend (the OpenShell 0.1.8 Kubernetes driver
-cannot) is parked by saving `/sandbox` and deleting the sandbox, automatically
-when idle or with `session park`. Its program is stopped: whatever it held
-in memory is lost. `session ls` shows it as `parked (snapshot)` (phase
-`Snapshot`, `"park": "snapshot"` in `--json`) with `program stopped by the
-snapshot park; attach restarts it`, distinct from a memory-retaining
-`parked`. The session's record while it has no sandbox is a small object next
-to its snapshot, `<prefix>/<user-id>/<sandbox>.parked.json` (repository,
-session, profile, image and its last status): Sundae keeps no session
-state of its own, and the sandbox that would carry it is gone. `session
-start`, `attach` and `resume` create the sandbox again from the same image,
-restore `/sandbox`, delete that object and start the program, with the usual
-notice: `Started claude again: it was not running when the session resumed
-(the session was parked to a snapshot of /sandbox, which keeps files but not
-running programs)`. `session end` of such a session deletes the object and
-keeps the snapshot. If the snapshot fails, the sandbox is left running and
-the park is not tried again for another `sessions.suspend.after`.
-
-**Events.** Snapshots and restores are lifecycle events in `session signals`,
-the TUI's signal history and notifications: `snapshotted` (`op` `end` or
-`park`, with the size), `restored`, `parked` with `snapshot: true`, and
-`failed` with `op` `snapshot` or `restore`, which the `session_failed`
-notification trigger covers.
 
 #### Notifications
 
@@ -1405,7 +1305,7 @@ example `SUNDAE_NOTIFICATIONS_ON=blocked,done` or
 
 **Event bus.** Notifications are one subscriber of an in-process event bus
 that carries session status changes, session lifecycle steps (created,
-resumed, ready, parked, exited, ended, failed, each naming the repository,
+resumed, ready, suspended, exited, deleted, failed, each naming the repository,
 session name and sandbox) and forge outcomes. Each subscriber
 has a bounded buffer; one that falls behind loses events rather than slowing
 anything down, counted in `sundae_events_dropped_total{subscriber}`.
@@ -2136,10 +2036,10 @@ or diff to its list, from the Signal history to the sessions, and into a
 directory, a commit or the history. The help line reads the same on every
 tab: move, the main action, the tab's keys, filter, tabs, `? more`. Keys
 are colour-coded: the main action's key (<kbd>enter</kbd>) in pink, keys
-that delete or end something, and their words, in red, the rest in blue.
+that delete something, and their words, in red, the rest in blue.
 Above the help, the **action bar** names the highlighted row and what you can
-do with it (`▸ infra / claude-1  z park • A add repos • u sync … • space
-more`). Results show as a notice under the list: `✓ Ended infra / claude-1.`
+do with it (`▸ infra / claude-1  z suspend • A add repos … • space
+more`). Results show as a notice under the list: `✓ Deleted infra / claude-1.`
 in green, `✗ …` in red.
 
 **Forms are modal.** The new-session, new-repository and import forms open in
@@ -2155,7 +2055,7 @@ opens from the Sessions tab; <kbd>s</kbd> on a repository picks it.
 
 The home page has tabs; while a form or filter is open, the keys stay with
 it. Keys mean the same on every tab: <kbd>n</kbd> new,
-<kbd>enter</kbd> open/attach, <kbd>d</kbd> delete/end (always confirmed),
+<kbd>enter</kbd> open/attach, <kbd>d</kbd> delete (always confirmed),
 <kbd>r</kbd> refresh/sync, <kbd>c</kbd> copy a command, <kbd>/</kbd> filter.
 On a Repositories, Sessions or Forges row, <kbd>space</kbd> or <kbd>.</kbd>
 opens a menu of what you can do with it, each with its key, showing only the
@@ -2165,7 +2065,7 @@ action's key runs it directly (exactly as pressing it on the row does,
 confirms included), and <kbd>esc</kbd>, <kbd>h</kbd>, <kbd>space</kbd> or
 <kbd>.</kbd> close it.
 <kbd>:</kbd> opens the command palette: every action of every tab in one
-list, e.g. `Sessions › End  d`, the tab switches (`Go to Forges`) and a sync
+list, e.g. `Sessions › Delete  d`, the tab switches (`Go to Forges`) and a sync
 of each listed forge (`Forges › Sync forge github`). Type to filter (every
 word must appear in the label), <kbd>↑</kbd>/<kbd>↓</kbd> move,
 <kbd>enter</kbd> switches to the action's tab and runs it as its key does
@@ -2177,11 +2077,9 @@ header counts the ones blocked, errored, done and working. In it:
 row), <kbd>n</kbd> starts a session (pick any number of repositories with
 <kbd>space</kbd>, a name and a profile), <kbd>A</kbd> and <kbd>R</kbd> add
 repositories to the highlighted session or remove some, <kbd>u</kbd> syncs it
-with its forges (see below), <kbd>d</kbd> ends it after a confirm,
-<kbd>z</kbd> parks or resumes it, <kbd>c</kbd> copies its `session attach`
-command, and <kbd>/</kbd> filters. With S3 snapshots, <kbd>D</kbd> ends it
-and deletes its snapshot, and <kbd>S</kbd> lists your snapshots (see
-"Deleting snapshots"). Below the list, **Signals · *session***
+with its forges (see below), <kbd>d</kbd> deletes it, its sandbox and its
+storage after a confirm, <kbd>z</kbd> suspends or resumes it, <kbd>c</kbd>
+copies its `session attach` command, and <kbd>/</kbd> filters. Below the list, **Signals · *session***
 shows the highlighted session's latest signals, newest first, and follows the
 cursor (on short or narrow terminals, just its latest signal on one line).
 <kbd>l</kbd> (or <kbd>e</kbd>) opens the full **Signal history**: the
@@ -2194,7 +2092,7 @@ retries; the other tabs keep working.
 <kbd>u</kbd> (**Sync with forge**, also in the action menu) brings a
 session's checkouts up to date without attaching. For a server admin, it
 first syncs each repository imported from a forge, as `forge sync` does.
-Then it resumes the session if it is parked, renews the sandbox's git
+Then it resumes the session if it is suspended, renews the sandbox's git
 credentials, and runs `jj git fetch` or `git fetch` in each checkout. A jj
 checkout whose working-copy change is empty and has no description moves to
 a new change on `trunk()`; a git checkout fast-forwards to its upstream.

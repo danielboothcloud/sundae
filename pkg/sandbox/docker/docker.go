@@ -1,7 +1,7 @@
 // Package docker is the docker session runtime: each session's sandbox is
 // a container on a Docker-compatible engine, with a named volume mounted
 // at /sandbox. The container carries the session's labels and
-// annotations, as labels. Parking stops the container; resuming starts it
+// annotations, as labels. Suspending stops the container; resuming starts it
 // again. Commands run through the engine's exec API.
 package docker
 
@@ -26,7 +26,7 @@ const (
 	LabelRuntime = "sundae.runtime"
 	// SandboxRoot is the workspace and the sandbox user's home.
 	SandboxRoot = "/sandbox"
-	// stopTimeout is how long a park lets the container stop.
+	// stopTimeout is how long a suspend lets the container stop.
 	stopTimeout = 10
 )
 
@@ -364,7 +364,7 @@ func (r *Runtime) DeleteSandbox(ctx context.Context, name string) error {
 	return nil
 }
 
-// SuspendSandbox parks the sandbox: it stops the container, which stops
+// SuspendSandbox suspends the sandbox: it stops the container, which stops
 // the session's program, and keeps it and /sandbox.
 func (r *Runtime) SuspendSandbox(ctx context.Context, name string) (*sbx.Sandbox, error) {
 	c, err := r.inspect(ctx, name)
@@ -437,7 +437,7 @@ func annotations(labels map[string]string) map[string]string {
 }
 
 // phase maps a container state to a sandbox phase. A stopped container is
-// parked: starting it resumes the session.
+// suspended: starting it resumes the session.
 func phase(state container.ContainerState, restarting bool) sbx.Phase {
 	if restarting {
 		return sbx.Starting

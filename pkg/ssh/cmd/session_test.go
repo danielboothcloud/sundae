@@ -40,7 +40,7 @@ type fakeOpenShell struct {
 	// status maps a sandbox to the `osewa local ls` session its status
 	// poll reports for the running osewa session.
 	status map[string]map[string]any
-	// suspends and resumes count parks and resumes of parked sandboxes.
+	// suspends and resumes count suspends and resumes of suspended sandboxes.
 	suspends, resumes int
 	suspendErr        error
 	// cleanRestart makes a resume lose the osewa session, as a sandbox
@@ -69,9 +69,9 @@ func newFakeOpenShell() *fakeOpenShell {
 
 func notFound() error { return &types.StatusError{Code: types.ErrorNotFound, Message: "not found"} }
 
-// unpark resumes a parked sandbox, as the SDK client does. Call with mu
+// unsuspend resumes a suspended sandbox, as the SDK client does. Call with mu
 // held.
-func (f *fakeOpenShell) unpark(sb *openshell.Sandbox) {
+func (f *fakeOpenShell) unsuspend(sb *openshell.Sandbox) {
 	if sb.Phase != sbx.Suspended {
 		return
 	}
@@ -89,7 +89,7 @@ func (f *fakeOpenShell) EnsureSandbox(_ context.Context, name string, req opensh
 		return nil, false, f.ensureErr
 	}
 	if sb, ok := f.sandboxes[name]; ok {
-		f.unpark(sb)
+		f.unsuspend(sb)
 		return sb, false, nil
 	}
 	sb := &openshell.Sandbox{Name: name, Labels: req.Labels, Annotations: req.Annotations}
@@ -118,7 +118,7 @@ func (f *fakeOpenShell) ResumeSandbox(_ context.Context, name string, labels map
 	if sb.Labels[openshell.LabelUserID] != labels[openshell.LabelUserID] {
 		return nil, openshell.ErrNotOwned
 	}
-	f.unpark(sb)
+	f.unsuspend(sb)
 	return sb, nil
 }
 
@@ -455,7 +455,7 @@ func TestSessionNewWithSeveralRepos(t *testing.T) {
 	is.True(err != nil && strings.Contains(err.Error(), "unknown action"))
 }
 
-func TestSessionListAndEnd(t *testing.T) {
+func TestSessionListAndDelete(t *testing.T) {
 	is := is.New(t)
 	ctx, be, user, fc := newSessionTestContext(t)
 	_, err := be.CreateRepository(ctx, "r", user, proto.RepositoryOptions{})
@@ -502,24 +502,24 @@ func TestSessionListAndEnd(t *testing.T) {
 	is.True(strings.HasPrefix(rows[2], "review r claude openshell "+openshell.SessionSandboxName("alice", "review")))
 
 	// r is held by two sessions now: naming it is ambiguous.
-	_, _, err = runSessionCmd(t, ctx, "end", "r", "-n", "")
+	_, _, err = runSessionCmd(t, ctx, "delete", "r", "-n", "")
 	is.NoErr(err) // "r" is also a session name
 	_, ok := fc.sandboxes[openshell.SessionSandboxName("alice", "r")]
 	is.True(!ok)
 	_, ok = fc.sandboxes[openshell.SessionSandboxName("alice", "review")]
 	is.True(ok)
 
-	// The deleted repository's session can still be ended, and ending
+	// The deleted repository's session can still be deleted, and deleting
 	// again is a no-op.
-	_, stderr, err := runSessionCmd(t, ctx, "end", "gone")
+	_, stderr, err := runSessionCmd(t, ctx, "delete", "gone")
 	is.NoErr(err)
-	is.True(strings.Contains(stderr, "Session ended"))
+	is.True(strings.Contains(stderr, "Session deleted"))
 	_, ok = fc.sandboxes[name]
 	is.True(!ok)
 
-	_, stderr, err = runSessionCmd(t, ctx, "end", "gone")
+	_, stderr, err = runSessionCmd(t, ctx, "delete", "gone")
 	is.NoErr(err)
-	is.True(strings.Contains(stderr, "No session to end"))
+	is.True(strings.Contains(stderr, "No session to delete"))
 }
 
 // The session commands publish the lifecycle on the bus in the context.
@@ -539,7 +539,7 @@ func TestSessionCommandsPublishLifecycle(t *testing.T) {
 	is.NoErr(err)
 	_, _, err = runSessionCmd(t, ctx, "attach", "two")
 	is.NoErr(err)
-	_, _, err = runSessionCmd(t, ctx, "end", "two")
+	_, _, err = runSessionCmd(t, ctx, "delete", "two")
 	is.NoErr(err)
 	sandbox := openshell.SessionSandboxName("alice", "two")
 	_, ok := fc.sandboxes[sandbox]
@@ -557,5 +557,5 @@ func TestSessionCommandsPublishLifecycle(t *testing.T) {
 			t.Fatalf("lifecycle events so far: %v", steps)
 		}
 	}
-	is.Equal(strings.Join(steps, ","), "created,ready,resumed,ready,ended")
+	is.Equal(strings.Join(steps, ","), "created,ready,resumed,ready,deleted")
 }

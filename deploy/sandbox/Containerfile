@@ -49,11 +49,8 @@
 #   and ~/.gitconfig includes that file; the token never lands in /sandbox.
 #   The bootstrap uses sh, git, grep, gzip, sha256sum, base64, env and sed,
 #   and flock when present; all are in this image.
-# - With S3 snapshots on (snapshots.s3), Sundae archives /sandbox with GNU
-#   tar and gzip into /tmp/sundae, checks it with md5sum and uploads it
-#   with curl to a presigned URL; a restore streams curl | gzip -d | tar -x.
-#   All are in this image; the policy Sundae sends allows curl to reach the
-#   S3 endpoint.
+# - The pod runtime's seed init container copies the image's /sandbox into
+#   a new session volume with tar (cp when tar is missing).
 # - The default filesystem policy grants read-only access to /usr, /bin, /lib
 #   and /etc but not /opt, so every tool is installed under /usr; /sandbox and
 #   /tmp are writable.
@@ -145,9 +142,9 @@ FROM ${BASE_IMAGE}
 #                  git-core is git without the Perl/Tcl extras (send-email,
 #                  svn, gitk); install `git` in a derived image for those.
 # ca-certificates: TLS for git, jj and curl.
-# gzip, tar, util-linux-core (flock), grep, findutils: the bootstrap and S3
-#                  snapshot scripts; base64, sha256sum and md5sum come with
-#                  the base image's coreutils.
+# gzip, tar, util-linux-core (flock), grep, findutils: the bootstrap
+#                  scripts and the pod runtime's /sandbox seed; base64 and
+#                  sha256sum come with the base image's coreutils.
 # shadow-utils:    useradd/groupadd below.
 # curl, openssh-clients, less, nano, vim-minimal: everyday tools. less is the
 #                  pager jj and git use; nano is jj's default editor and the

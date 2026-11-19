@@ -1,0 +1,57 @@
+{{- /*
+Storage for the pod session runtime: an optional StorageClass for the
+sessions' /sandbox PVCs, and the shared PVCs podRuntime.sharedVolumes
+creates. Sundae creates and deletes the per-session PVCs; Helm owns these.
+*/}}
+{{- $sc := .Values.podRuntime.storageClass }}
+{{- if $sc.create }}
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ include "sundae.podStorageClassName" . | quote }}
+  labels:
+    {{- include "sundae.labels" . | nindent 4 }}
+  {{- with $sc.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+provisioner: {{ required "podRuntime.storageClass.provisioner is required when podRuntime.storageClass.create is true" $sc.provisioner | quote }}
+{{- with $sc.parameters }}
+parameters:
+  {{- range $k, $v := . }}
+  {{ $k }}: {{ toString $v | quote }}
+  {{- end }}
+{{- end }}
+reclaimPolicy: {{ $sc.reclaimPolicy | default "Delete" }}
+volumeBindingMode: {{ $sc.volumeBindingMode | default "WaitForFirstConsumer" }}
+allowVolumeExpansion: {{ $sc.allowVolumeExpansion }}
+{{- with $sc.mountOptions }}
+mountOptions:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end }}
+{{- $ns := include "sundae.podNamespace" . }}
+{{- range $v := .Values.podRuntime.sharedVolumes }}
+{{- if $v.create }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "sundae.sharedVolumeClaim" (dict "root" $ "v" $v) | quote }}
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "sundae.labels" $ | nindent 4 }}
+  annotations:
+    # Shared data outlives the release: uninstalling leaves the PVC.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    {{- toYaml ($v.accessModes | default (list "ReadWriteMany")) | nindent 4 }}
+  {{- with $v.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ required (printf "podRuntime.sharedVolumes[%s].size is required when create is true" $v.name) $v.size | quote }}
+{{- end }}
+{{- end }}

@@ -338,7 +338,7 @@ func (h *History) observe(ev events.Event) {
 	switch {
 	case ev.Status != nil && ev.Status.Record.ID == "":
 		h.state[sessionKey{ev.UserID, ev.Status.Session.Sandbox}] = ev.Status.Record.State
-	case ev.Lifecycle != nil && ev.Lifecycle.Step == events.LifecycleEnded:
+	case ev.Lifecycle != nil && ev.Lifecycle.Step == events.LifecycleDeleted:
 		delete(h.state, sessionKey{ev.UserID, ev.Lifecycle.Session.Sandbox})
 	}
 	h.append(sig)

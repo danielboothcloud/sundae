@@ -258,8 +258,8 @@ func TestSessionSignalsFollow(t *testing.T) {
 	waitUntil(t, func() bool { return strings.Contains(stdout.String(), "second") })
 
 	bus.Publish(events.SessionStatusEvent(uid+1, events.SessionStatus{Session: review, Record: events.Record{State: events.StateDone, Msg: "not mine"}}))
-	bus.Publish(events.SessionLifecycleEvent(uid, events.SessionLifecycle{Session: review, Step: events.LifecycleParked, Op: "auto"}))
-	waitUntil(t, func() bool { return strings.Contains(stdout.String(), "parked while idle") })
+	bus.Publish(events.SessionLifecycleEvent(uid, events.SessionLifecycle{Session: review, Step: events.LifecycleSuspended, Op: "auto"}))
+	waitUntil(t, func() bool { return strings.Contains(stdout.String(), "suspended while idle; storage kept") })
 
 	// The client goes away.
 	cancel()
@@ -270,7 +270,7 @@ func TestSessionSignalsFollow(t *testing.T) {
 	// Oldest first, like tail -f; nothing twice, nobody else's.
 	is.True(strings.Contains(lines[1], "first"))
 	is.True(strings.Contains(lines[2], "second"))
-	is.Equal(fields(lines[3])[1:], []string{"○ idle · parked", "infra / review", "parked while idle"})
+	is.Equal(fields(lines[3])[1:], []string{"○ idle · suspended", "infra / review", "suspended while idle; storage kept"})
 	is.True(!strings.Contains(stdout.String(), "not mine"))
 }
 

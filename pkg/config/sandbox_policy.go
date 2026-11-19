@@ -15,8 +15,7 @@ import (
 const (
 	// SandboxPolicySundae makes Sundae send each sandbox it creates a
 	// policy: OpenShell's restrictive default with network rules for
-	// Sundae's git endpoint, the S3 snapshot endpoint when snapshots are
-	// on, and openshell.network_policies. The default.
+	// Sundae's git endpoint and openshell.network_policies. The default.
 	SandboxPolicySundae = "sundae"
 	// SandboxPolicyImage sends no policy: the image's
 	// /etc/openshell/policy.yaml applies, or OpenShell's default, which
@@ -37,9 +36,6 @@ const (
 	// NetworkPolicyGit is the rule that lets the sandbox reach Sundae's
 	// HTTP git endpoint (OpenShellCloneURL).
 	NetworkPolicyGit = NetworkPolicyReservedPrefix + "git"
-	// NetworkPolicySnapshots is the rule that lets the sandbox reach the
-	// S3 snapshot endpoint, when snapshots.s3 is enabled.
-	NetworkPolicySnapshots = NetworkPolicyReservedPrefix + "snapshots"
 )
 
 // Network endpoint protocols and access presets accepted in
@@ -162,7 +158,7 @@ func (c *Config) validateSandboxPolicy() error {
 		case !networkPolicyNameRe.MatchString(p.Name):
 			fail("name %q must be 1 to 63 letters, digits, '_', '-' and '.', starting with a letter or digit", p.Name)
 		case strings.HasPrefix(p.Name, NetworkPolicyReservedPrefix):
-			fail("name %q uses the %q prefix Sundae reserves for its own rules (%s, %s)", p.Name, NetworkPolicyReservedPrefix, NetworkPolicyGit, NetworkPolicySnapshots)
+			fail("name %q uses the %q prefix Sundae reserves for its own rules (%s)", p.Name, NetworkPolicyReservedPrefix, NetworkPolicyGit)
 		default:
 			if j, ok := names[p.Name]; ok {
 				fail("name %q is already used by openshell.network_policies[%d]", p.Name, j)

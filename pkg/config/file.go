@@ -259,8 +259,7 @@ openshell:
   # all network access its policy does not allow. "sundae": Sundae sends
   # OpenShell's restrictive default policy (filesystem and process limits)
   # with network rules that let any program in the sandbox reach the clone
-  # URL (rule sundae_git) and, with snapshots.s3 enabled, the S3 endpoint
-  # (sundae_snapshots), plus network_policies below. "image": Sundae sends
+  # URL (rule sundae_git), plus network_policies below. "image": Sundae sends
   # none; the image's /etc/openshell/policy.yaml applies, or OpenShell's
   # default, which allows no network access. Applies to sandboxes created
   # after a restart; existing ones keep their policy. A gateway-global
@@ -316,8 +315,8 @@ openshell:
 
 # The pod session runtime (sessions.runtime: pod): each session is a
 # Kubernetes Pod with a PersistentVolumeClaim at /sandbox, created with
-# Sundae's own Kubernetes credentials. Parking deletes the pod (its program
-# stops) and keeps the volume; ending deletes both. Profiles override these
+# Sundae's own Kubernetes credentials. "session suspend" deletes the pod (its
+# program stops) and keeps the claim; "session delete" deletes both. Profiles override these
 # settings in sessions.profiles.<name>.pod. The Kubernetes objects use
 # Kubernetes field names (seccompProfile, runAsUser, ...); null uses
 # Sundae's defaults, {} sets none.
@@ -337,9 +336,12 @@ pod:
   # Default: the sandbox image's user 10001, which owns /sandbox (fsGroup).
   pod_security_context: {{ json .Pod.PodSecurityContext }}
   resources: {{ json .Pod.Resources }}
-  # /sandbox's volume. Empty storage_class: the cluster's default.
+  # /sandbox's claim, deleted with the session. Empty storage_class: the
+  # cluster's default StorageClass. Access modes: ReadWriteOnce,
+  # ReadWriteMany or ReadWriteOncePod.
   storage_class: {{ printf "%q" .Pod.StorageClass }}
   storage_size: {{ printf "%q" .Pod.StorageSize }}
+  storage_access_modes: {{ json .Pod.StorageAccessModes }}
   node_selector: {{ json .Pod.NodeSelector }}
   tolerations: {{ json .Pod.Tolerations }}
   annotations: {{ json .Pod.Annotations }}
@@ -347,11 +349,20 @@ pod:
   # Extra volumes and their mounts in the sandbox container.
   volumes: {{ json .Pod.Volumes }}
   volume_mounts: {{ json .Pod.VolumeMounts }}
+  # Existing PersistentVolumeClaims mounted into every session's pod, e.g. a
+  # shared ReadWriteMany cache. A profile's entries are merged by name.
+  # Mount paths must be outside /sandbox.
+  #   - name: mise            # pod volume name (DNS label)
+  #     claim_name: mise-cache
+  #     mount_path: /mise
+  #     read_only: false
+  #     sub_path: ""
+  shared_volumes: {{ json .Pod.SharedVolumes }}
 
 # The docker session runtime (sessions.runtime: docker): each session is a
 # container with a named volume at /sandbox, on a Docker-compatible engine.
-# Parking stops the container (its program stops) and keeps it; ending
-# removes the container and the volume. Profiles override these settings in
+# "session suspend" stops the container (its program stops) and keeps it;
+# "session delete" removes the container and the volume. Profiles override these settings in
 # sessions.profiles.<name>.docker. Lists: null uses Sundae's defaults, []
 # sets none.
 docker:
@@ -407,20 +418,14 @@ sessions:
     # notifications). At least 1s.
     poll_interval: "{{ .Sessions.Status.PollInterval }}"
   suspend:
-    # Park (suspend) a session's sandbox once nobody has been attached to it
-    # and it has not reported "working" for "after". OpenShell needs a
-    # compute driver that supports suspend (else see fallback); the pod
-    # runtime parks by deleting the pod, which stops the program and keeps
-    # /sandbox.
-    # "session start" and "session attach" resume a parked session.
+    # Suspend a session's sandbox once nobody has been attached to it and it
+    # has not reported "working" for "after": its storage is kept. The pod
+    # runtime deletes the pod, the docker runtime stops the container;
+    # OpenShell needs a compute driver that supports suspend, else the
+    # sandbox is left running. "session start", "session attach" and
+    # "session resume" start a suspended session again.
     enabled: {{ .Sessions.Suspend.Enabled }}
     after: "{{ .Sessions.Suspend.After }}"
-    # What parking does where the gateway cannot suspend (the OpenShell 0.1.8
-    # Kubernetes driver): "none" leaves the sandbox running; "snapshot"
-    # saves /sandbox to S3 (snapshots.s3 must be enabled) and deletes the
-    # sandbox. That stops the session's program; start and attach recreate
-    # the sandbox, restore /sandbox and start the program again.
-    fallback: {{ printf "%q" .Sessions.Suspend.Fallback }}
   signals:
     # How many signals (every session status change and lifecycle event,
     # shown by "session signals" and the TUI) to keep, across all users.
@@ -467,6 +472,7 @@ sessions:
         runtime_class: {{ printf "%q" .RuntimeClass }}
         storage_class: {{ printf "%q" .StorageClass }}
         storage_size: {{ printf "%q" .StorageSize }}
+        storage_access_modes: {{ json .StorageAccessModes }}
         security_context: {{ json .SecurityContext }}
         pod_security_context: {{ json .PodSecurityContext }}
         resources: {{ json .Resources }}
@@ -476,6 +482,7 @@ sessions:
         labels: {{ json .Labels }}
         volumes: {{ json .Volumes }}
         volume_mounts: {{ json .VolumeMounts }}
+        shared_volumes: {{ json .SharedVolumes }}
 {{- end }}
 {{- if $p.Runtime }}
       runtime: {{ printf "%q" $p.Runtime }}
@@ -683,44 +690,6 @@ notifications:
     # replaced by URL-escaped values: {repo}, {session}, {sandbox}, {user}.
     # Left off a notification that has no value for a placeholder it uses.
     click_url: {{ printf "%q" .Notifications.Ntfy.ClickURL }}
-
-# Snapshots of a session's /sandbox (checkouts and the sandbox user's home) in
-# an S3 bucket: AWS S3 or an S3-compatible store (MinIO, Ceph RGW). Off by
-# default: while s3.enabled is false nothing in this section is checked.
-# Each session has one object, <prefix>/<user-id>/<sandbox>.tar.gz, replaced
-# by every snapshot. The sandbox uploads and downloads it itself through
-# presigned URLs Sundae signs, so the S3 keys never enter a sandbox; with
-# openshell.sandbox_policy: sundae, the sandbox policy allows the endpoint.
-# Changes take effect on restart.
-snapshots:
-  s3:
-    enabled: {{ .Snapshots.S3.Enabled }}
-    # Base URL of an S3-compatible store; empty for AWS S3.
-    endpoint: {{ printf "%q" .Snapshots.S3.Endpoint }}
-    # The region requests are signed for. Required for AWS; defaults to
-    # us-east-1 with an endpoint.
-    region: {{ printf "%q" .Snapshots.S3.Region }}
-    # The bucket, which must exist.
-    bucket: {{ printf "%q" .Snapshots.S3.Bucket }}
-    prefix: {{ printf "%q" .Snapshots.S3.Prefix }}
-    # File holding the access key, AWS shared-credentials format:
-    #   [default]
-    #   aws_access_key_id = ...
-    #   aws_secret_access_key = ...
-    # Read again for every operation. Never put the keys in this file.
-    credentials_file: {{ printf "%q" .Snapshots.S3.CredentialsFile }}
-    # Server-side encryption: "AES256", "aws:kms" (the bucket's default KMS
-    # key) or "" (none requested; the bucket's default applies).
-    sse: {{ printf "%q" .Snapshots.S3.SSE }}
-    # Address the bucket as <endpoint>/<bucket>; most MinIO and RGW setups
-    # need this.
-    path_style: {{ .Snapshots.S3.PathStyle }}
-    # When to snapshot: "end" (before "session end" deletes the sandbox; a
-    # failed snapshot stops the end unless --force) and "park" (before each
-    # memory-retaining park, as a backup). "session start" restores the
-    # snapshot into a newly created sandbox either way.
-    # Quote the key: YAML 1.1 tools such as Helm read a bare on: as true.
-    "on": [{{ range $i, $t := .Snapshots.S3.On }}{{ if $i }}, {{ end }}{{ printf "%q" $t }}{{ end }}]
 
 # Additional admin keys.
 #initial_admin_keys:

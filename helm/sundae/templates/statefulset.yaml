@@ -3,7 +3,6 @@
 {{- $openshellTLS := include "sundae.openshellTLSMounted" . }}
 {{- $openshellToken := include "sundae.openshellTokenMounted" . }}
 {{- $ntfyToken := include "sundae.ntfyTokenMounted" . }}
-{{- $s3Creds := include "sundae.s3CredentialsMounted" . }}
 {{- $httpScheme := ternary "HTTPS" "HTTP" (and (not (empty $cfg.http.tls_key_path)) (not (empty $cfg.http.tls_cert_path))) }}
 apiVersion: apps/v1
 kind: StatefulSet
@@ -158,12 +157,6 @@ spec:
               mountPath: {{ .Values.notifications.ntfyToken.mountPath | quote }}
               readOnly: true
             {{- end }}
-            {{- if $s3Creds }}
-            # A directory mount, not subPath, so a rotated Secret reaches the pod.
-            - name: s3-credentials
-              mountPath: {{ .Values.snapshots.s3Credentials.mountPath | quote }}
-              readOnly: true
-            {{- end }}
             {{- if .Values.initialAdminKeysSecret.name }}
             - name: admin-keys
               mountPath: {{ .Values.initialAdminKeysSecret.mountPath | quote }}
@@ -209,19 +202,6 @@ spec:
             items:
               - key: {{ .Values.notifications.ntfyToken.key | quote }}
                 path: {{ .Values.notifications.ntfyToken.key | quote }}
-            # Readable by the pod's fsGroup only.
-            defaultMode: 0440
-        {{- end }}
-        {{- if $s3Creds }}
-        - name: s3-credentials
-          secret:
-            secretName: {{ .Values.snapshots.s3Credentials.secretName | quote }}
-            {{- with .Values.snapshots.s3Credentials.key }}
-            # Only the credentials key, as the file config.snapshots.s3.credentials_file names.
-            items:
-              - key: {{ . | quote }}
-                path: {{ . | quote }}
-            {{- end }}
             # Readable by the pod's fsGroup only.
             defaultMode: 0440
         {{- end }}

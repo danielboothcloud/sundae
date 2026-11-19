@@ -35,7 +35,7 @@ func TestPaletteRunsCrossTab(t *testing.T) {
 	if s := screenText(ui); !strings.Contains(s, "type to search • ↑↓ move • enter run • esc close") {
 		t.Fatalf("footer:\n%s", s)
 	}
-	for _, want := range []string{"Go to Sessions  2", "Sessions › End  d"} {
+	for _, want := range []string{"Go to Sessions  2", "Sessions › Delete  d"} {
 		if !strings.Contains(paletteEntries(ui), want) {
 			t.Fatalf("no %q in\n%s", want, paletteEntries(ui))
 		}
@@ -46,15 +46,15 @@ func TestPaletteRunsCrossTab(t *testing.T) {
 	if ui.capturing() {
 		t.Fatal("esc did not close")
 	}
-	// From Repositories, End runs on the Sessions tab, after its confirm.
+	// From Repositories, Delete runs on the Sessions tab, after its confirm.
 	uiKey(ui, ":")
-	paletteType(ui, "sessions end")
-	if got := paletteEntries(ui); got != "Sessions › End  d" {
+	paletteType(ui, "sessions delete")
+	if got := paletteEntries(ui); got != "Sessions › Delete  d" {
 		t.Fatalf("filtered:\n%s", got)
 	}
 	uiKey(ui, "enter")
-	if s := screenText(ui); !strings.Contains(s, "End infra / claude-1?") {
-		t.Fatalf("End did not ask:\n%s", s)
+	if s := screenText(ui); !strings.Contains(s, "Delete infra / claude-1?") {
+		t.Fatalf("Delete did not ask:\n%s", s)
 	}
 	uiKey(ui, "esc")
 	// A tab switch.

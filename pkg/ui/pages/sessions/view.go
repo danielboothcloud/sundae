@@ -79,8 +79,6 @@ func (m *Sessions) View() string {
 		lines = append([]string{""}, indent(strings.Split(m.form.View(w-1), "\n"), " ")...)
 	case m.op != nil:
 		lines = append([]string{""}, m.opView(w)...)
-	case m.snaps != nil:
-		lines = m.snapView(w, h-2)
 	default:
 		if m.collapsed() && m.pane == sessionsPane && !m.typing {
 			// The collapsed tabs name the pane; keep the lines for rows.
@@ -536,8 +534,6 @@ func (m *Sessions) ShortHelp() []key.Binding {
 		return []key.Binding{m.keys.Cancel}
 	case m.typing:
 		return []key.Binding{m.keys.Apply, m.keys.Cancel}
-	case m.snaps != nil:
-		return m.snapHelp()
 	}
 	if m.pane == signalsPane {
 		back := m.keys.Left
@@ -564,7 +560,7 @@ func (m *Sessions) backKey() key.Binding {
 
 // FullHelp implements help.KeyMap.
 func (m *Sessions) FullHelp() [][]key.Binding {
-	if m.form != nil || m.confirm != nil || m.op != nil || m.typing || m.snaps != nil {
+	if m.form != nil || m.confirm != nil || m.op != nil || m.typing {
 		return [][]key.Binding{m.ShortHelp()}
 	}
 	km := m.common.KeyMap
@@ -578,16 +574,12 @@ func (m *Sessions) FullHelp() [][]key.Binding {
 			{m.keys.Filter, m.keys.Clear, m.keys.Retry},
 		}
 	}
-	b := [][]key.Binding{
+	return [][]key.Binding{
 		nav,
-		{m.keys.Attach, m.keys.New, m.keys.End, m.keys.Park},
+		{m.keys.Attach, m.keys.New, m.keys.Delete, m.keys.Suspend},
 		{m.keys.AddRepo, m.keys.DropRepo, m.keys.Sync},
 		{m.keys.Copy, m.keys.Filter, m.keys.Clear, pane, m.keys.Retry},
 	}
-	if m.src != nil && m.src.SnapshotsEnabled() {
-		b = append(b, []key.Binding{m.keys.EndDelete, m.keys.Snapshots})
-	}
-	return b
 }
 
 // Actions are the keys that act on the selected row, for the home page's
@@ -611,25 +603,21 @@ func (m *Sessions) Actions() []key.Binding {
 	}
 	busy := m.busy[r.Info.Sandbox] != ""
 	attach := m.keys.Attach
-	park := m.keys.Park
-	park.SetHelp("z", "park")
-	if r.Parked() {
+	suspend := m.keys.Suspend
+	suspend.SetHelp("z", "suspend")
+	if r.Suspended() {
 		attach.SetHelp("enter", "resume & attach")
-		park.SetHelp("z", "resume")
+		suspend.SetHelp("z", "resume")
 	}
 	as := []key.Binding{attach}
 	if !busy {
-		as = append(as, park, m.keys.AddRepo)
+		as = append(as, suspend, m.keys.AddRepo)
 		if len(rowRepos(r)) >= 2 {
 			as = append(as, m.keys.DropRepo)
 		}
 		as = append(as, m.keys.Sync)
 	}
-	as = append(as, m.keys.Copy, m.keys.End)
-	if m.src.SnapshotsEnabled() && !busy {
-		as = append(as, m.keys.EndDelete, m.keys.Snapshots)
-	}
-	return as
+	return append(as, m.keys.Copy, m.keys.Delete)
 }
 
 // ActionsTitle names the selected row for the action menu.

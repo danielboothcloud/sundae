@@ -1,7 +1,7 @@
 // Package sessions is the home page's Sessions tab: the user's OpenShell
 // agent sessions, with what their agents last reported, the selected
-// session's latest signals below them, and, on e, the full signal history. It starts, attaches to, parks, resumes and ends
-// sessions, as the `session` commands do, and follows the signals History
+// session's latest signals below them, and, on e, the full signal history.
+// It starts, attaches to, suspends, resumes and deletes sessions, as the `session` commands do, and follows the signals History
 // for live updates. See _bmad-output/planning-artifacts/tui-screens.md,
 // sections 5 and 7.
 package sessions
@@ -54,10 +54,8 @@ type KeyMap struct {
 	AddRepo   key.Binding
 	DropRepo  key.Binding
 	Sync      key.Binding
-	End       key.Binding
-	EndDelete key.Binding
-	Snapshots key.Binding
-	Park      key.Binding
+	Delete    key.Binding
+	Suspend   key.Binding
 	Copy      key.Binding
 	Filter    key.Binding
 	Clear     key.Binding
@@ -82,10 +80,8 @@ func DefaultKeyMap() KeyMap {
 		AddRepo:   key.NewBinding(key.WithKeys("A"), key.WithHelp("A", "add repos")),
 		DropRepo:  key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "remove repos")),
 		Sync:      key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "sync with forge")),
-		End:       key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "end")),
-		EndDelete: key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "end & delete snapshot")),
-		Snapshots: key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "snapshots")),
-		Park:      key.NewBinding(key.WithKeys("z"), key.WithHelp("z", "park/resume")),
+		Delete:    key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
+		Suspend:   key.NewBinding(key.WithKeys("z"), key.WithHelp("z", "suspend/resume")),
 		Copy:      key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "copy attach command")),
 		Filter:    key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
 		Clear:     key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear filter")),
@@ -146,7 +142,7 @@ type (
 // even while another page is shown, so its live updates do not stop.
 func IsMsg(msg tea.Msg) bool {
 	switch msg.(type) {
-	case listMsg, followMsg, signalsMsg, feedEndMsg, tickMsg, reposMsg, actionMsg, opMsg, attachDoneMsg, snapListMsg, snapDoneMsg:
+	case listMsg, followMsg, signalsMsg, feedEndMsg, tickMsg, reposMsg, actionMsg, opMsg, attachDoneMsg:
 		return true
 	}
 	return false
@@ -170,9 +166,6 @@ type Sessions struct {
 	handoff Handoff
 	keys    KeyMap
 	now     func() time.Time
-	// snaps is the open Snapshots view (S); nil when closed.
-	snaps    *snapList
-	snapKeys snapKeys
 
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -193,11 +186,11 @@ type Sessions struct {
 	typing   bool
 	rowQuery string
 	// busy maps a sandbox to the lifecycle word of what the tab is doing
-	// to it: resuming, parking, ending.
+	// to it: resuming, suspending, deleting.
 	busy   map[string]string
 	copied string
-	// profiles remembers each session's profile, for re-creating an
-	// ended session from the Signals pane.
+	// profiles remembers each session's profile, for re-creating a
+	// deleted session from the Signals pane.
 	profiles map[string]string
 
 	// The Signals pane: the user's signals, newest first.
@@ -254,7 +247,6 @@ func New(c common.Common, src Source) *Sessions {
 		common:   c,
 		src:      src,
 		keys:     DefaultKeyMap(),
-		snapKeys: defaultSnapKeys(),
 		now:      time.Now,
 		ctx:      ctx,
 		cancel:   cancel,
@@ -284,10 +276,9 @@ func (m *Sessions) Close() {
 }
 
 // Capturing reports whether the tab takes every key: a form, a confirm or
-// a filter or the Snapshots view is open. The frame then leaves q, tab
-// and the digits to it.
+// a filter is open. The frame then leaves q, tab and the digits to it.
 func (m *Sessions) Capturing() bool {
-	return m.form != nil || m.confirm != nil || m.typing || m.snaps != nil
+	return m.form != nil || m.confirm != nil || m.typing
 }
 
 // SetSize implements common.Component.
@@ -472,11 +463,6 @@ func (m *Sessions) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 		return m, m.onAttachDone(msg)
 	case actionMsg:
 		return m, m.onAction(msg)
-	case snapListMsg:
-		m.onSnapList(msg)
-		return m, nil
-	case snapDoneMsg:
-		return m, m.onSnapDone(msg)
 	case tea.KeyPressMsg:
 		return m, m.onKey(msg)
 	}
@@ -710,12 +696,6 @@ func (m *Sessions) selected() (sessionctl.Row, bool) {
 // program's name, else the command it runs.
 func (m *Sessions) message(r sessionctl.Row) string {
 	msg := signals.RecordMessage(r.Record(), 0)
-	if note := r.Note(); note != "" {
-		if msg != "" {
-			return note + " · " + msg
-		}
-		return note
-	}
 	if msg != "" {
 		return msg
 	}
@@ -765,8 +745,6 @@ func (m *Sessions) onKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case m.typing:
 		return m.onFilterKey(msg)
-	case m.snaps != nil:
-		return m.onSnapKey(msg)
 	}
 	m.notice = notice{}
 	if m.src == nil {
@@ -798,8 +776,6 @@ func (m *Sessions) onKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case key.Matches(msg, m.keys.Retry):
 		return m.listCmd()
-	case key.Matches(msg, m.keys.Snapshots) && m.src.SnapshotsEnabled():
-		return m.openSnapshots()
 	case key.Matches(msg, m.keys.New):
 		if m.scope != "" {
 			return m.reposCmd(prefill{repos: []string{m.scope}})
@@ -815,8 +791,8 @@ func (m *Sessions) onKey(msg tea.KeyPressMsg) tea.Cmd {
 		// u syncs a session here, so it does not page (pgup and b do).
 		m.move(-m.perPage())
 		return nil
-	case key.Matches(msg, km.NextPage) && !key.Matches(msg, m.keys.End):
-		// d ends a session here, so it does not page.
+	case key.Matches(msg, km.NextPage) && !key.Matches(msg, m.keys.Delete):
+		// d deletes a session here, so it does not page.
 		m.move(m.perPage())
 		return nil
 	case key.Matches(msg, m.keys.Follow):
@@ -897,7 +873,7 @@ func (m *Sessions) onSessionsKey(msg tea.KeyPressMsg) tea.Cmd {
 	label := sessionLabel(r.Info.Name, rowRepos(r))
 	switch {
 	case key.Matches(msg, m.keys.Attach):
-		return m.attachCmd(rowRepos(r), r.Info.Name, r.Info.Sandbox, r.Parked())
+		return m.attachCmd(rowRepos(r), r.Info.Name, r.Info.Sandbox, r.Suspended())
 	case key.Matches(msg, m.keys.AddRepo):
 		if m.busy[r.Info.Sandbox] != "" {
 			return nil
@@ -908,7 +884,7 @@ func (m *Sessions) onSessionsKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		if len(rowRepos(r)) < 2 {
-			m.notice = notice{text: label + " has one repository; a session keeps at least one (d ends it)."}
+			m.notice = notice{text: label + " has one repository; a session keeps at least one (d deletes it)."}
 			return nil
 		}
 		m.form = m.editReposForm(nil, prefill{edit: "remove", target: r})
@@ -918,30 +894,19 @@ func (m *Sessions) onSessionsKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		return m.syncCmd(r)
-	case key.Matches(msg, m.keys.End):
+	case key.Matches(msg, m.keys.Delete):
 		m.target = r
-		question := "End " + label + "?  The sandbox and any unpushed work are deleted."
-		switch {
-		case r.ParkedToSnapshot():
-			question = "End " + label + "?  It is parked to an S3 snapshot, which is kept."
-		case m.src.SnapshotsOnEnd():
-			question = "End " + label + "?  /sandbox is saved to S3, then the sandbox is deleted."
-		}
-		m.ask(question, func() tea.Cmd { return m.endCmd(r, false) })
+		m.ask("Delete "+label+"?  Sandbox, storage and unpushed work are lost.",
+			func() tea.Cmd { return m.deleteCmd(r) })
 		return nil
-	case key.Matches(msg, m.keys.EndDelete) && m.src.SnapshotsEnabled():
-		m.target = r
-		m.ask("End "+label+" and delete its S3 snapshot?  The sandbox, the snapshot and any unpushed work are gone for good.",
-			func() tea.Cmd { return m.endDeleteCmd(r) })
-		return nil
-	case key.Matches(msg, m.keys.Park):
+	case key.Matches(msg, m.keys.Suspend):
 		if m.busy[r.Info.Sandbox] != "" {
 			return nil
 		}
-		if r.Parked() {
-			return m.resumeCmd(r, openshell.RestoreAuto)
+		if r.Suspended() {
+			return m.resumeCmd(r)
 		}
-		return m.parkCmd(r)
+		return m.suspendCmd(r)
 	case key.Matches(msg, m.keys.Copy):
 		m.copied = r.Info.Sandbox
 		return tea.SetClipboard(m.src.AttachCommand(r.Info.Name))
@@ -965,8 +930,8 @@ func (m *Sessions) onSignalsKey(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
-// launch opens a signal's session: attach (resuming it if parked), or,
-// when it has ended, the new-session form for it.
+// launch opens a signal's session: attach (resuming it if suspended), or,
+// when it was deleted, the new-session form for it.
 func (m *Sessions) launch(s signals.Signal) tea.Cmd {
 	var sess events.Session
 	switch {
@@ -979,7 +944,7 @@ func (m *Sessions) launch(s signals.Signal) tea.Cmd {
 	}
 	if i := m.rowIndex(sess.Sandbox); i >= 0 {
 		r := m.rows[i]
-		return m.attachCmd(rowRepos(r), r.Info.Name, r.Info.Sandbox, r.Parked())
+		return m.attachCmd(rowRepos(r), r.Info.Name, r.Info.Sandbox, r.Suspended())
 	}
 	if m.listErr != nil || !m.loaded {
 		m.notice = notice{text: "Cannot tell whether " + sessionLabel(sess.Name, sess.AllRepos()) + " is running: the session list is not loaded.", err: true}
@@ -988,9 +953,9 @@ func (m *Sessions) launch(s signals.Signal) tea.Cmd {
 	return m.reposCmd(prefill{repos: sess.AllRepos(), profile: m.profiles[sess.Sandbox]})
 }
 
-// attachCmd prepares the session (resuming it when parked) and then
+// attachCmd prepares the session (resuming it when suspended) and then
 // attaches to it.
-func (m *Sessions) attachCmd(repos []string, name, key string, parked bool) tea.Cmd {
+func (m *Sessions) attachCmd(repos []string, name, key string, suspended bool) tea.Cmd {
 	if m.handoff == nil {
 		m.notice = notice{text: errNoTerminal.Error(), err: true}
 		return nil
@@ -999,7 +964,7 @@ func (m *Sessions) attachCmd(repos []string, name, key string, parked bool) tea.
 	op, ctx := newOperation(m.ctx, title, repos, name, true)
 	op.key = key
 	m.op, m.opLines = op, nil
-	if parked {
+	if suspended {
 		m.opLines = []string{"Resuming…"}
 	}
 	return op.run(ctx, m.src, sessionctl.Request{Name: name, Term: m.term()})
@@ -1075,14 +1040,6 @@ func (m *Sessions) onOp(op *operation) tea.Cmd {
 	label := sessionLabel(op.name, op.repos)
 	if err != nil {
 		op.cancel()
-		var conflict *openshell.RestoreConflictError
-		if errors.As(err, &conflict) {
-			// Nothing was started: ask, and start it again with the
-			// answer.
-			m.notice = conflictNotice(label, conflict)
-			m.ask(restoreQuestion(conflict), func() tea.Cmd { return m.rerun(op, openshell.RestoreOver) })
-			return nil
-		}
 		m.notice = notice{text: "✗ " + label + ": " + err.Error(), err: true}
 		return m.listCmd()
 	}
@@ -1120,62 +1077,29 @@ func (m *Sessions) ask(question string, onYes func() tea.Cmd) {
 	m.onYes = onYes
 }
 
-// restoreQuestion is the one-line question for a restore conflict; the
-// error has the long form.
-func restoreQuestion(e *openshell.RestoreConflictError) string {
-	return fmt.Sprintf("Restore its snapshot (%s) over files already in the new sandbox?", e.Snapshot.Describe())
-}
-
-// conflictNotice says what the new sandbox holds and what no means.
-func conflictNotice(label string, e *openshell.RestoreConflictError) notice {
-	return notice{text: label + ": the new sandbox already holds " + strings.Join(e.Paths, ", ") +
-		". y restores the snapshot over them (files only in the sandbox are kept); n starts nothing (session start --fresh keeps them)."}
-}
-
-// rerun starts op's preparation again, restoring as restore says.
-func (m *Sessions) rerun(op *operation, restore openshell.RestoreMode) tea.Cmd {
-	again, ctx := newOperation(m.ctx, op.title, op.repos, op.name, op.attach)
-	again.key = op.key
-	m.op, m.opLines = again, nil
-	m.notice = notice{}
-	req := op.req
-	req.Restore = restore
-	return again.run(ctx, m.src, req)
-}
-
-func (m *Sessions) endCmd(r sessionctl.Row, force bool) tea.Cmd {
-	m.busy[r.Info.Sandbox] = "ending"
+func (m *Sessions) deleteCmd(r sessionctl.Row) tea.Cmd {
+	m.busy[r.Info.Sandbox] = "deleting"
 	ctx, src := m.ctx, m.src
 	return func() tea.Msg {
-		existed, err := src.End(ctx, r.Info.Name, force)
-		return actionMsg{key: r.Info.Sandbox, verb: "end", repos: rowRepos(r), name: r.Info.Name, done: existed, err: err, row: r}
+		existed, err := src.Delete(ctx, r.Info.Name)
+		return actionMsg{key: r.Info.Sandbox, verb: "delete", repos: rowRepos(r), name: r.Info.Name, done: existed, err: err, row: r}
 	}
 }
 
-// endDeleteCmd ends the session and deletes its S3 snapshot, taking none.
-func (m *Sessions) endDeleteCmd(r sessionctl.Row) tea.Cmd {
-	m.busy[r.Info.Sandbox] = "ending"
+func (m *Sessions) suspendCmd(r sessionctl.Row) tea.Cmd {
+	m.busy[r.Info.Sandbox] = "suspending"
 	ctx, src := m.ctx, m.src
 	return func() tea.Msg {
-		existed, err := src.EndDeletingSnapshot(ctx, r.Info.Name)
-		return actionMsg{key: r.Info.Sandbox, verb: "end-delete", repos: rowRepos(r), name: r.Info.Name, done: existed, err: err, row: r}
+		suspended, err := src.Suspend(ctx, r.Info.Name)
+		return actionMsg{key: r.Info.Sandbox, verb: "suspend", repos: rowRepos(r), name: r.Info.Name, done: suspended, err: err}
 	}
 }
 
-func (m *Sessions) parkCmd(r sessionctl.Row) tea.Cmd {
-	m.busy[r.Info.Sandbox] = "parking"
-	ctx, src := m.ctx, m.src
-	return func() tea.Msg {
-		parked, err := src.Park(ctx, r.Info.Name)
-		return actionMsg{key: r.Info.Sandbox, verb: "park", repos: rowRepos(r), name: r.Info.Name, done: parked, err: err}
-	}
-}
-
-func (m *Sessions) resumeCmd(r sessionctl.Row, restore openshell.RestoreMode) tea.Cmd {
+func (m *Sessions) resumeCmd(r sessionctl.Row) tea.Cmd {
 	m.busy[r.Info.Sandbox] = "resuming"
 	ctx, src := m.ctx, m.src
 	return func() tea.Msg {
-		att, err := src.Prepare(ctx, sessionctl.Request{Name: r.Info.Name, Restore: restore})
+		att, err := src.Prepare(ctx, sessionctl.Request{Name: r.Info.Name})
 		if att != nil {
 			att.Close()
 		}
@@ -1184,7 +1108,7 @@ func (m *Sessions) resumeCmd(r sessionctl.Row, restore openshell.RestoreMode) te
 }
 
 // syncCmd brings the session's checkouts up to date with their forges
-// (Source.SyncRepos), resuming it if parked, without attaching.
+// (Source.SyncRepos), resuming it if suspended, without attaching.
 func (m *Sessions) syncCmd(r sessionctl.Row) tea.Cmd {
 	m.busy[r.Info.Sandbox] = "syncing"
 	ctx, src := m.ctx, m.src
@@ -1232,7 +1156,7 @@ func syncNotice(label string, res []RepoSync) notice {
 }
 
 // editReposCmd adds repositories to the session (verb "add") or removes
-// them ("remove"), resuming it if parked, without attaching.
+// them ("remove"), resuming it if suspended, without attaching.
 func (m *Sessions) editReposCmd(r sessionctl.Row, verb string, repos []string) tea.Cmd {
 	m.busy[r.Info.Sandbox] = map[string]string{"add": "adding", "remove": "removing"}[verb]
 	ctx, src := m.ctx, m.src
@@ -1258,31 +1182,17 @@ func (m *Sessions) editReposCmd(r sessionctl.Row, verb string, repos []string) t
 func (m *Sessions) onAction(msg actionMsg) tea.Cmd {
 	delete(m.busy, msg.key)
 	label := sessionLabel(msg.name, msg.repos)
-	var conflict *openshell.RestoreConflictError
 	switch {
-	case msg.verb == "end" && errors.Is(msg.err, openshell.ErrSnapshotFailed):
-		// Not ended: say why, and offer to end it without a snapshot.
-		m.notice = notice{text: "✗ " + label + ": " + msg.err.Error(), err: true}
-		r := msg.row
-		m.ask("The snapshot failed. End "+label+" without one?  Unpushed work is lost.", func() tea.Cmd { return m.endCmd(r, true) })
-		return m.listCmd()
-	case msg.verb == "resume" && errors.As(msg.err, &conflict):
-		m.notice = conflictNotice(label, conflict)
-		r := msg.row
-		m.ask(restoreQuestion(conflict), func() tea.Cmd { return m.resumeCmd(r, openshell.RestoreOver) })
-		return m.listCmd()
 	case msg.err != nil:
 		m.notice = notice{text: "✗ " + label + ": " + msg.err.Error(), err: true}
-	case msg.verb == "end-delete":
-		m.notice = notice{text: "Ended " + label + " and deleted its snapshot."}
-	case msg.verb == "end" && msg.done:
-		m.notice = notice{text: "Ended " + label + "."}
-	case msg.verb == "end":
-		m.notice = notice{text: label + " had already ended."}
-	case msg.verb == "park" && msg.done:
-		m.notice = notice{text: "Parked " + label + "."}
-	case msg.verb == "park":
-		m.notice = notice{text: label + " is already parked."}
+	case msg.verb == "delete" && msg.done:
+		m.notice = notice{text: "Deleted " + label + "."}
+	case msg.verb == "delete":
+		m.notice = notice{text: label + " was already deleted."}
+	case msg.verb == "suspend" && msg.done:
+		m.notice = notice{text: "Suspended " + label + "; its storage is kept."}
+	case msg.verb == "suspend":
+		m.notice = notice{text: label + " is already suspended."}
 	case msg.verb == "resume":
 		m.notice = notice{text: "Resumed " + label + "."}
 	case msg.verb == "add":
@@ -1403,7 +1313,7 @@ func (m *Sessions) editReposForm(repos []string, pre prefill) *prompt.Form {
 	if pre.edit == "remove" {
 		f.Validate = func(f *prompt.Form) error {
 			if len(f.Field("repos").Values()) >= len(have) {
-				return errors.New("a session keeps at least one repository; end it with x instead")
+				return errors.New("a session keeps at least one repository; delete it with d instead")
 			}
 			return nil
 		}

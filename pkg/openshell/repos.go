@@ -14,7 +14,7 @@ import (
 // /sandbox/<repo>. Its sandbox records the repositories it was created
 // with (AnnotationRepos); OpenShell cannot change a sandbox's annotations,
 // so the current list, after `session repos add|remove`, is kept in the
-// sandbox in reposFile, which snapshots keep too. The server's Monitor
+// sandbox in reposFile, on the sandbox's storage. The server's Monitor
 // remembers the lists Sundae has read or written, so listing sessions
 // needs no exec; after a restart a session shows its create-time list
 // until it is next started or attached.
@@ -22,6 +22,9 @@ import (
 // AnnotationRepos holds the repositories the session was created with,
 // comma-separated, in order. Repository names cannot hold commas.
 const AnnotationRepos = "sundae.repos"
+
+// sundaeStateDir is Sundae's state in /sandbox.
+var sundaeStateDir = path.Join(SandboxRoot, ".config/sundae")
 
 // reposFile is the session's current repository list, one per line.
 var reposFile = path.Join(sundaeStateDir, "repos")

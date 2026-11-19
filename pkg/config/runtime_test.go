@@ -312,3 +312,175 @@ func TestDockerConfigFileRoundTrip(t *testing.T) {
 	is.Equal(got.Sessions.Profiles["x"].Docker.CapDrop, []string{}) // [] stays none
 	is.Equal(got.Sessions.Profiles["x"].Docker.CapAdd, nil)         // null inherits
 }
+
+func TestRemovedSnapshotKeys(t *testing.T) {
+	for name, body := range map[string]string{
+		"snapshots":                 "snapshots:\n  s3:\n    enabled: false\n",
+		"sessions.suspend.fallback": "sessions:\n  suspend:\n    fallback: none\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			is := is.New(t)
+			td := t.TempDir()
+			p := filepath.Join(td, "config.yaml")
+			is.NoErr(os.WriteFile(p, []byte(body), 0o600))
+			cfg := DefaultConfig()
+			cfg.DataPath = td
+			err := cfg.Load(p)
+			is.True(err != nil)
+			want := name + " was removed: S3 snapshots were removed"
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%q missing from %v", want, err)
+			}
+		})
+	}
+}
+
+func TestRemovedSnapshotEnv(t *testing.T) {
+	for _, name := range []string{"SUNDAE_SNAPSHOTS_S3_ENABLED", "SUNDAE_SNAPSHOTS_S3_BUCKET", "SUNDAE_SESSIONS_SUSPEND_FALLBACK"} {
+		t.Run(name, func(t *testing.T) {
+			is := is.New(t)
+			t.Setenv(name, "x")
+			cfg := DefaultConfig()
+			cfg.DataPath = t.TempDir()
+			err := cfg.ParseEnv()
+			is.True(err != nil)
+			want := "environment variable " + name + " was removed"
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%q missing from %v", want, err)
+			}
+		})
+	}
+	// Unrelated variables sharing a prefix are fine.
+	is := is.New(t)
+	is.NoErr(checkRemovedEnv([]string{"SUNDAE_SESSIONS_SUSPEND_AFTER=1h", "SUNDAE_SNAPSHOT=1"}))
+}
+
+func TestPodStorageAccessModes(t *testing.T) {
+	is := is.New(t)
+	cfg := DefaultConfig()
+	cfg.DataPath = t.TempDir()
+	cfg.Sessions.Runtime = RuntimePod
+	cfg.Pod.Image = "img"
+	cfg.Pod.StorageAccessModes = nil
+	cfg.Sessions.Profiles = map[string]SessionProfile{
+		"rwx": {Pod: &PodSettings{StorageAccessModes: []string{" ReadWriteMany ", "ReadWriteMany"}}},
+	}
+	is.NoErr(cfg.Validate())
+	is.Equal(cfg.Pod.StorageAccessModes, []string{"ReadWriteOnce"}) // default
+	is.Equal(cfg.PodSettingsFor("rwx").StorageAccessModes, []string{"ReadWriteMany"})
+	d, err := cfg.PodSettingsFor("").Decode()
+	is.NoErr(err)
+	is.Equal(len(d.StorageAccessModes), 1)
+	is.Equal(string(d.StorageAccessModes[0]), "ReadWriteOnce")
+
+	for modes, want := range map[string]string{
+		"ReadOnlyMany":                   `"ReadOnlyMany" must be one of`,
+		"ReadWriteOncePod,ReadWriteOnce": "ReadWriteOncePod cannot be combined",
+		"Bogus":                          `"Bogus" must be one of`,
+	} {
+		bad := DefaultConfig()
+		bad.DataPath = t.TempDir()
+		bad.Pod.StorageAccessModes = strings.Split(modes, ",")
+		err := bad.Validate()
+		if err == nil || !strings.Contains(err.Error(), "pod.storage_access_modes: "+want) {
+			t.Errorf("%s: %v, want %q", modes, err, want)
+		}
+	}
+}
+
+func TestPodSharedVolumes(t *testing.T) {
+	is := is.New(t)
+	cfg := DefaultConfig()
+	cfg.DataPath = t.TempDir()
+	cfg.Sessions.Runtime = RuntimePod
+	cfg.Pod.Image = "img"
+	cfg.Pod.SharedVolumes = []SharedVolume{
+		{Name: "mise", ClaimName: "mise-cache", MountPath: "/mise/"},
+		{Name: "tools", ClaimName: "tools", MountPath: "/opt/tools", ReadOnly: true},
+	}
+	cfg.Sessions.Profiles = map[string]SessionProfile{
+		"big": {Pod: &PodSettings{SharedVolumes: []SharedVolume{
+			{Name: "mise", ClaimName: "mise-big", MountPath: "/mise", SubPath: "big"},
+			{Name: "data", ClaimName: "data", MountPath: "/data"},
+		}}},
+	}
+	is.NoErr(cfg.Validate())
+	is.Equal(cfg.Pod.SharedVolumes[0].MountPath, "/mise") // cleaned
+
+	// The profile's entries are merged by name, its own winning.
+	got := cfg.PodSettingsFor("big").SharedVolumes
+	is.Equal(got, []SharedVolume{
+		{Name: "mise", ClaimName: "mise-big", MountPath: "/mise", SubPath: "big"},
+		{Name: "tools", ClaimName: "tools", MountPath: "/opt/tools", ReadOnly: true},
+		{Name: "data", ClaimName: "data", MountPath: "/data"},
+	})
+	is.Equal(len(cfg.Pod.SharedVolumes), 2) // untouched
+
+	d, err := cfg.PodSettingsFor("").Decode()
+	is.NoErr(err)
+	is.Equal(len(d.Volumes), 2)
+	is.Equal(d.Volumes[1].PersistentVolumeClaim.ClaimName, "tools")
+	is.True(d.Volumes[1].PersistentVolumeClaim.ReadOnly)
+	is.Equal(d.VolumeMounts[0].MountPath, "/mise")
+	is.True(d.VolumeMounts[1].ReadOnly)
+
+	for name, tc := range map[string]struct {
+		v    SharedVolume
+		pod  func(*PodSettings)
+		want string
+	}{
+		"no name":        {SharedVolume{ClaimName: "c", MountPath: "/m"}, nil, "shared_volumes[0].name is required"},
+		"bad name":       {SharedVolume{Name: "Mise", ClaimName: "c", MountPath: "/m"}, nil, `shared_volumes[0].name "Mise"`},
+		"sandbox name":   {SharedVolume{Name: "sandbox", ClaimName: "c", MountPath: "/m"}, nil, "is the /sandbox volume's"},
+		"no claim":       {SharedVolume{Name: "m", MountPath: "/m"}, nil, "claim_name is required"},
+		"relative path":  {SharedVolume{Name: "m", ClaimName: "c", MountPath: "mise"}, nil, "must be absolute"},
+		"sandbox path":   {SharedVolume{Name: "m", ClaimName: "c", MountPath: "/sandbox"}, nil, "clashes with /sandbox"},
+		"inside sandbox": {SharedVolume{Name: "m", ClaimName: "c", MountPath: "/sandbox/.cache"}, nil, "clashes with /sandbox"},
+		"root":           {SharedVolume{Name: "m", ClaimName: "c", MountPath: "/"}, nil, "clashes with /sandbox"},
+		"bad sub_path":   {SharedVolume{Name: "m", ClaimName: "c", MountPath: "/m", SubPath: "../x"}, nil, "sub_path"},
+		"volume name":    {SharedVolume{Name: "extra", ClaimName: "c", MountPath: "/m"}, func(p *PodSettings) { p.Volumes = []map[string]any{{"name": "extra", "emptyDir": map[string]any{}}} }, `name "extra" is also the name of volumes[0]`},
+		"volume mount":   {SharedVolume{Name: "m", ClaimName: "c", MountPath: "/x"}, func(p *PodSettings) { p.VolumeMounts = []map[string]any{{"name": "e", "mountPath": "/x"}} }, `mount_path "/x" is also the mount path of volume_mounts[0]`},
+	} {
+		bad := DefaultConfig()
+		bad.DataPath = t.TempDir()
+		bad.Pod.SharedVolumes = []SharedVolume{tc.v}
+		if tc.pod != nil {
+			tc.pod(&bad.Pod.PodSettings)
+		}
+		err := bad.Validate()
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v, want %q", name, err, tc.want)
+		}
+	}
+
+	// A profile's entry clashing with the global ones is reported under it.
+	bad := DefaultConfig()
+	bad.DataPath = t.TempDir()
+	bad.Sessions.Runtime = RuntimePod
+	bad.Pod.Image = "img"
+	bad.Pod.SharedVolumes = []SharedVolume{{Name: "a", ClaimName: "c", MountPath: "/m"}}
+	bad.Sessions.Profiles = map[string]SessionProfile{"p": {Pod: &PodSettings{SharedVolumes: []SharedVolume{{Name: "b", ClaimName: "c", MountPath: "/m"}}}}}
+	err = bad.Validate()
+	if err == nil || !strings.Contains(err.Error(), `sessions.profiles.p.pod.shared_volumes[1].mount_path "/m" is also the mount path of shared_volumes[0]`) {
+		t.Errorf("profile clash: %v", err)
+	}
+}
+
+func TestPodSharedVolumesFileRoundTrip(t *testing.T) {
+	is := is.New(t)
+	cfg := DefaultConfig()
+	cfg.DataPath = t.TempDir()
+	cfg.Sessions.Runtime = RuntimePod
+	cfg.Pod.Image = "img"
+	cfg.Pod.StorageAccessModes = []string{"ReadWriteMany"}
+	cfg.Pod.SharedVolumes = []SharedVolume{{Name: "mise", ClaimName: "mise-cache", MountPath: "/mise", ReadOnly: true, SubPath: "v1"}}
+	cfg.Sessions.Profiles = map[string]SessionProfile{"p": {Pod: &PodSettings{SharedVolumes: []SharedVolume{{Name: "x", ClaimName: "x", MountPath: "/x"}}}}}
+	is.NoErr(cfg.Validate())
+	is.NoErr(cfg.WriteConfig())
+
+	got := &Config{DataPath: cfg.DataPath}
+	is.NoErr(parseFile(got, cfg.ConfigPath()))
+	is.Equal(got.Pod.StorageAccessModes, []string{"ReadWriteMany"})
+	is.Equal(got.Pod.SharedVolumes, cfg.Pod.SharedVolumes)
+	is.Equal(got.Sessions.Profiles["p"].Pod.SharedVolumes, []SharedVolume{{Name: "x", ClaimName: "x", MountPath: "/x"}})
+}

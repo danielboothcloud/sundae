@@ -347,9 +347,9 @@ func TestRepoSessionsKeys(t *testing.T) {
 	if ui.activePage != repoPage {
 		t.Fatal("esc left the repository while the filter was open")
 	}
-	// The end confirm shows in the tab.
+	// The delete confirm shows in the tab.
 	uiKey(ui, "d")
-	if s := screenText(ui); !strings.Contains(s, "End sundae / forge-sync?") {
+	if s := screenText(ui); !strings.Contains(s, "Delete sundae / forge-sync?") {
 		t.Fatalf("confirm:\n%s", s)
 	}
 	uiKey(ui, "esc")

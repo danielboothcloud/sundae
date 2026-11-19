@@ -36,7 +36,7 @@ func TestActionMenuSessions(t *testing.T) {
 			}
 			goldenFile(t, fmt.Sprintf("home-sessions-menu-%d", w), screenText(ui))
 			got := strings.Join(menuActions(ui), ", ")
-			for _, want := range []string{"enter: attach", "z: park", "A: add repos", "c: copy attach command", "d: end"} {
+			for _, want := range []string{"enter: attach", "z: suspend", "A: add repos", "c: copy attach command", "d: delete"} {
 				if !strings.Contains(got, want) {
 					t.Fatalf("no %q in %s", want, got)
 				}
@@ -51,18 +51,18 @@ func TestActionMenuSessions(t *testing.T) {
 			}
 			// The action's key runs it, as pressing d does: the confirm.
 			uiKey(ui, ".", "d")
-			if s := screenText(ui); !strings.Contains(s, "End infra / claude-1?") {
+			if s := screenText(ui); !strings.Contains(s, "Delete infra / claude-1?") {
 				t.Fatalf("d in the menu did not ask:\n%s", s)
 			}
 			uiKey(ui, "esc")
-			// enter runs the highlighted one: move to End, the last.
+			// enter runs the highlighted one: move to Delete, the last.
 			uiKey(ui, ".")
 			for range menuActions(ui) {
 				uiKey(ui, "j")
 			}
 			uiKey(ui, "enter")
-			if s := screenText(ui); !strings.Contains(s, "End infra / claude-1?") {
-				t.Fatalf("enter on End did not ask:\n%s", s)
+			if s := screenText(ui); !strings.Contains(s, "Delete infra / claude-1?") {
+				t.Fatalf("enter on Delete did not ask:\n%s", s)
 			}
 			uiKey(ui, "esc")
 			// . and space close it too.

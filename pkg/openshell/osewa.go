@@ -61,7 +61,7 @@ var (
 	osewaSessionFile = path.Join(SandboxRoot, ".config/sundae/osewa-session")
 	// osewaSessionEnvFile is where the environment a new osewa session's
 	// program is given is staged, with the creating shell's PID appended:
-	// in /tmp/sundae, outside /sandbox and so outside snapshots, and
+	// in /tmp/sundae, outside /sandbox and so off the session's storage, and
 	// removed by the session as soon as it has read it.
 	osewaSessionEnvFile = path.Join(gitCredentialDir, "session-env")
 )

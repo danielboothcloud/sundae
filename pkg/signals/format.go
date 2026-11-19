@@ -7,7 +7,6 @@ import (
 	"unicode"
 
 	"github.com/danielboothcloud/sundae/pkg/events"
-	"github.com/dustin/go-humanize"
 )
 
 // The status vocabulary shared by `session ls`, `session signals` and the
@@ -18,7 +17,7 @@ import (
 // They mark feed rows only; they are not session states.
 const (
 	GlyphCreated = "+"
-	GlyphEnded   = "-"
+	GlyphDeleted = "-"
 	GlyphGap     = "!"
 )
 
@@ -90,7 +89,7 @@ func RecordMessage(rec events.Record, max int) string {
 
 // State is the state a signal's row shows: a status signal's record state;
 // error for a failed lifecycle step; none for a gap marker and for created
-// and ended; for any other lifecycle step, the session's last known state
+// and deleted; for any other lifecycle step, the session's last known state
 // (Last).
 func (s Signal) State() events.State {
 	switch {
@@ -100,7 +99,7 @@ func (s Signal) State() events.State {
 		switch s.Lifecycle.Step {
 		case events.LifecycleFailed:
 			return events.StateError
-		case events.LifecycleCreated, events.LifecycleEnded:
+		case events.LifecycleCreated, events.LifecycleDeleted:
 			return events.StateNone
 		}
 		return s.Last
@@ -125,7 +124,7 @@ func (s Signal) NeedsAttention() bool {
 
 // Label renders the signal's state column: glyph and word, then kind and
 // progress for a status report, the lifecycle step for a lifecycle event,
-// e.g. "▲ blocked · permission", "● working 40%", "○ idle · parked",
+// e.g. "▲ blocked · permission", "● working 40%", "○ idle · suspended",
 // "+ created", "✗ failed · start", "! missed".
 func (s Signal) Label() string {
 	switch {
@@ -138,8 +137,8 @@ func (s Signal) Label() string {
 		switch l.Step {
 		case events.LifecycleCreated:
 			return GlyphCreated + " created"
-		case events.LifecycleEnded:
-			return GlyphEnded + " ended"
+		case events.LifecycleDeleted:
+			return GlyphDeleted + " deleted"
 		case events.LifecycleFailed:
 			label := events.StateError.Glyph() + " failed"
 			if op := Sanitize(l.Op, 16); op != "" {
@@ -148,9 +147,6 @@ func (s Signal) Label() string {
 			return label
 		}
 		step := Sanitize(string(l.Step), 16)
-		if l.Step == events.LifecycleParked && l.Snapshot {
-			step += " (snapshot)"
-		}
 		return s.Last.Glyph() + " " + s.Last.Word() + " · " + step
 	}
 	return events.StateNone.Glyph() + " " + events.StateNone.Word()
@@ -212,46 +208,22 @@ func lifecycleMessage(l events.SessionLifecycle) string {
 		return "sandbox reused"
 	case events.LifecycleReady:
 		return "ready to attach"
-	case events.LifecycleParked:
-		// openshell.ParkAuto and openshell.ParkManual.
-		var m string
+	case events.LifecycleSuspended:
+		// openshell.SuspendAuto and openshell.SuspendManual.
 		switch l.Op {
 		case "auto":
-			m = "parked while idle"
-		case "park":
-			m = "parked by session park"
-		default:
-			m = "parked"
+			return "suspended while idle; storage kept"
+		case "suspend":
+			return "suspended by session suspend; storage kept"
 		}
-		if l.Snapshot {
-			m += " to an S3 snapshot: the sandbox was deleted and the program stopped; attach restarts it"
-		}
-		return m
-	case events.LifecycleSnapshotted:
-		m := "/sandbox saved to S3"
-		switch l.Op {
-		case "end":
-			m += " before the session ended"
-		case "park":
-			m += " before the session was parked"
-		}
-		if l.Bytes > 0 {
-			m += " (" + humanize.IBytes(uint64(l.Bytes)) + ")"
-		}
-		return m
-	case events.LifecycleRestored:
-		m := "/sandbox restored from its S3 snapshot"
-		if l.Bytes > 0 {
-			m += " (" + humanize.IBytes(uint64(l.Bytes)) + ")"
-		}
-		return m
+		return "suspended; storage kept"
 	case events.LifecycleExited:
 		if l.ExitCode != nil {
 			return "program exited with status " + strconv.Itoa(*l.ExitCode)
 		}
 		return "program exited"
-	case events.LifecycleEnded:
-		return "sandbox deleted"
+	case events.LifecycleDeleted:
+		return "sandbox and storage deleted"
 	case events.LifecycleFailed:
 		m := "could not " + orWord(l.Op, "run") + " the session"
 		if l.Reason != "" {

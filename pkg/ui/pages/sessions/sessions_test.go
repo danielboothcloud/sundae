@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -30,26 +29,23 @@ var now = time.Date(2026, 11, 12, 14, 2, 30, 0, time.Local)
 
 // fakeSource is an in-memory Source.
 type fakeSource struct {
-	mu       sync.Mutex
-	rows     []sessionctl.Row
-	listErr  error
-	lists    int
-	statuses map[string]openshell.SessionStatus
-	snap     []signals.Signal
-	feed     *fakeFeed
-	repos    []string
-	profiles []Profile
-	repoProf map[string]string
-	prepared []sessionctl.Request
-	ended    []string
-	parked   []string
-	closed   int
-	prepErr  error
+	mu        sync.Mutex
+	rows      []sessionctl.Row
+	listErr   error
+	lists     int
+	statuses  map[string]openshell.SessionStatus
+	snap      []signals.Signal
+	feed      *fakeFeed
+	repos     []string
+	profiles  []Profile
+	repoProf  map[string]string
+	prepared  []sessionctl.Request
+	deleted   []string
+	suspended []string
+	closed    int
+	prepErr   error
 	// prepErrs, when set, are returned by successive Prepares first.
 	prepErrs []error
-	// endErr is returned by End without force.
-	endErr    error
-	snapshots bool
 	// synced are the sessions SyncRepos was called for; syncRes and
 	// syncErr are what it returns (by default every checkout updated).
 	synced  []string
@@ -57,57 +53,6 @@ type fakeSource struct {
 	syncErr error
 	// gate, when set, holds Prepare after its progress lines.
 	gate chan struct{}
-	// stored are the snapshots Snapshots lists; deletedSnaps and pruned
-	// record DeleteSnapshot and PruneSnapshots; endDeleted the sessions
-	// EndDeletingSnapshot ended.
-	stored       []openshell.StoredSnapshot
-	deletedSnaps []string
-	pruned       int
-	endDeleted   []string
-}
-
-func (f *fakeSource) SnapshotsEnabled() bool { return f.snapshots }
-
-func (f *fakeSource) EndDeletingSnapshot(_ context.Context, name string) (bool, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.endDeleted = append(f.endDeleted, name)
-	return true, nil
-}
-
-func (f *fakeSource) Snapshots(context.Context) ([]openshell.StoredSnapshot, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return slices.Clone(f.stored), nil
-}
-
-func (f *fakeSource) DeleteSnapshot(_ context.Context, name string) (openshell.StoredSnapshot, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for i, s := range f.stored {
-		if s.Session == name {
-			f.stored = slices.Delete(f.stored, i, i+1)
-			f.deletedSnaps = append(f.deletedSnaps, name)
-			return s, nil
-		}
-	}
-	return openshell.StoredSnapshot{}, openshell.ErrNoSnapshot
-}
-
-func (f *fakeSource) PruneSnapshots(context.Context, time.Duration) ([]openshell.StoredSnapshot, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	var out, keep []openshell.StoredSnapshot
-	for _, s := range f.stored {
-		if s.State == openshell.SnapshotEnded {
-			out = append(out, s)
-		} else {
-			keep = append(keep, s)
-		}
-	}
-	f.stored = keep
-	f.pruned += len(out)
-	return out, nil
 }
 
 func (f *fakeSource) List(context.Context) ([]sessionctl.Row, error) {
@@ -169,26 +114,17 @@ func (f *fakeSource) Prepare(_ context.Context, req sessionctl.Request) (Attache
 	return &fakeAttacher{src: f, s: s}, nil
 }
 
-func (f *fakeSource) End(_ context.Context, name string, force bool) (bool, error) {
+func (f *fakeSource) Delete(_ context.Context, name string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.endErr != nil && !force {
-		return false, f.endErr
-	}
-	if force {
-		f.ended = append(f.ended, name+" (force)")
-	} else {
-		f.ended = append(f.ended, name)
-	}
+	f.deleted = append(f.deleted, name)
 	return true, nil
 }
 
-func (f *fakeSource) SnapshotsOnEnd() bool { return f.snapshots }
-
-func (f *fakeSource) Park(_ context.Context, name string) (bool, error) {
+func (f *fakeSource) Suspend(_ context.Context, name string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.parked = append(f.parked, name)
+	f.suspended = append(f.suspended, name)
 	return true, nil
 }
 
@@ -263,8 +199,8 @@ func row(repo, name string, state events.State, changed time.Duration, msg strin
 	return r
 }
 
-func parked(r *sessionctl.Row)   { r.Info.Phase = "Suspended" }
-func noStatus(r *sessionctl.Row) { r.Status = nil }
+func suspended(r *sessionctl.Row) { r.Info.Phase = "Suspended" }
+func noStatus(r *sessionctl.Row)  { r.Status = nil }
 func kind(k events.BlockKind) func(*sessionctl.Row) {
 	return func(r *sessionctl.Row) { r.Status.Record.Kind = k }
 }
@@ -281,7 +217,7 @@ func profile(p string) func(*sessionctl.Row) {
 // status.
 func mockRows() []sessionctl.Row {
 	return []sessionctl.Row{
-		row("dotfiles", "main", events.StateIdle, 3*time.Hour, "", parked),
+		row("dotfiles", "main", events.StateIdle, 3*time.Hour, "", suspended),
 		row("gateway", "main", events.StateWorking, 2*time.Minute, "", profile("claude")),
 		row("infra", "claude-1", events.StateBlocked, 4*time.Minute, "Apply 3 to add, 1 to change, 0 to destroy?", kind(events.BlockPermission)),
 		row("scratch", "shell", "", 0, "", noStatus),
@@ -577,9 +513,9 @@ func mockSignals() []signals.Signal {
 		status(7, 4*time.Minute, "sundae", "forge-sync", events.StateDone, "Implemented GitHub discovery"),
 		status(6, 21*time.Minute, "sundae", "tui", events.StateWorking, "Running go test ./pkg/ui/..."),
 		gap,
-		life(4, 50*time.Minute, "dotfiles", "main", events.LifecycleParked),
+		life(4, 50*time.Minute, "dotfiles", "main", events.LifecycleSuspended),
 		life(3, 72*time.Minute, "sundae", "tui", events.LifecycleCreated),
-		life(2, 80*time.Minute, "old", "gone", events.LifecycleEnded),
+		life(2, 80*time.Minute, "old", "gone", events.LifecycleDeleted),
 	}
 }
 
@@ -721,7 +657,7 @@ func TestLiveFeedEndsOnClose(t *testing.T) {
 	}
 }
 
-func TestEndConfirm(t *testing.T) {
+func TestDeleteConfirm(t *testing.T) {
 	src := newFakeSource()
 	m := loaded(t, 76, 30, src)
 	keys(m, "d")
@@ -729,39 +665,42 @@ func TestEndConfirm(t *testing.T) {
 		t.Fatal("the confirm does not capture keys")
 	}
 	line := ansi.Strip(m.FooterLine(76))
-	if !strings.HasPrefix(line, "End infra / claude-1?  The sandbox and any unpushed work are") || !strings.HasSuffix(line, "y yes • N no") {
+	if !strings.HasPrefix(line, "Delete infra / claude-1?  Sandbox, storage and unpushed work") || !strings.HasSuffix(line, "y yes • N no") {
 		t.Fatalf("confirm line %q", line)
 	}
 	keys(m, "n")
-	if m.confirm != nil || len(src.ended) != 0 {
+	if m.confirm != nil || len(src.deleted) != 0 {
 		t.Fatal("n did not cancel")
 	}
 	cmd := keys(m, "d", "y")
-	if m.words(m.rows[0]) != "blocked · permission · ending" {
+	if m.words(m.rows[0]) != "blocked · permission · deleting" {
 		t.Fatalf("busy words %q", m.words(m.rows[0]))
 	}
 	run(m, cmd, 2)
-	if fmt.Sprint(src.ended) != "[claude-1]" {
-		t.Fatalf("ended %v", src.ended)
+	if fmt.Sprint(src.deleted) != "[claude-1]" {
+		t.Fatalf("deleted %v", src.deleted)
 	}
-	if !strings.Contains(view(m), "Ended infra / claude-1.") {
+	if !strings.Contains(view(m), "Deleted infra / claude-1.") {
 		t.Fatalf("notice:\n%s", view(m))
 	}
-	if want := m.common.Styles.Prompt.Success.Render("✓ Ended infra / claude-1."); !strings.Contains(m.View(), want) {
+	if want := m.common.Styles.Prompt.Success.Render("✓ Deleted infra / claude-1."); !strings.Contains(m.View(), want) {
 		t.Fatalf("the notice is not in the prompt's success style:\n%q", m.View())
 	}
 }
 
-func TestParkAndResume(t *testing.T) {
+func TestSuspendAndResume(t *testing.T) {
 	src := newFakeSource()
 	m := loaded(t, 76, 30, src)
-	run(m, keys(m, "z"), 1) // infra / claude-1 is running: park it
-	if fmt.Sprint(src.parked) != "[claude-1]" {
-		t.Fatalf("parked %v", src.parked)
+	run(m, keys(m, "z"), 1) // infra / claude-1 is running: suspend it
+	if fmt.Sprint(src.suspended) != "[claude-1]" {
+		t.Fatalf("suspended %v", src.suspended)
 	}
-	keys(m, "G") // dotfiles / main is parked: resume it, without attaching
+	if !strings.Contains(view(m), "Suspended infra / claude-1; its storage is kept.") {
+		t.Fatalf("notice:\n%s", view(m))
+	}
+	keys(m, "G") // dotfiles / main is suspended: resume it, without attaching
 	keys(m, "k")
-	if r, _ := m.selected(); !r.Parked() {
+	if r, _ := m.selected(); !r.Suspended() {
 		t.Fatalf("selected %s", r.Info.Repo)
 	}
 	run(m, keys(m, "z"), 1)
@@ -1051,7 +990,7 @@ func TestEnterAttachesFromBothPanes(t *testing.T) {
 	keys(m, "G")
 	cmd := keys(m, "k", "enter")
 	if m.op == nil || !strings.Contains(view(m), "Attaching to dotfiles / main …  detach with ~.") || !strings.Contains(view(m), "Resuming…") {
-		t.Fatalf("attach of a parked session:\n%s", view(m))
+		t.Fatalf("attach of a suspended session:\n%s", view(m))
 	}
 	run(m, cmd, 1)
 	if len(src.prepared) != 1 || src.prepared[0].Create || src.prepared[0].Name != "main" {
@@ -1182,12 +1121,12 @@ func TestScopeKeys(t *testing.T) {
 	keys(m, "esc")
 	// d asks in the tab: the repository page's footer is the help.
 	keys(m, "j", "d")
-	if m.FooterLine(80) != "" || !strings.Contains(view(m), "End sundae / tui?") || !strings.Contains(view(m), "y yes • N no") {
+	if m.FooterLine(80) != "" || !strings.Contains(view(m), "Delete sundae / tui?") || !strings.Contains(view(m), "y yes • N no") {
 		t.Fatalf("confirm:\n%s", view(m))
 	}
 	run(m, keys(m, "y"), 2)
-	if fmt.Sprint(src.ended) != "[tui]" {
-		t.Fatalf("ended %v", src.ended)
+	if fmt.Sprint(src.deleted) != "[tui]" {
+		t.Fatalf("deleted %v", src.deleted)
 	}
 	// A filter in the repository is its own; esc clears it.
 	keys(m, "/")

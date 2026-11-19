@@ -64,13 +64,11 @@ type Manager struct {
 	osewaSHA256 map[string]string
 	// bus receives lifecycle events. nil drops them.
 	bus *events.Bus
-	// monitor tracks bridges and parks sessions; nil when there is none.
+	// monitor tracks bridges and suspends sessions; nil when there is none.
 	monitor *Monitor
 	// providerSync syncs the providers declared in openshell.providers;
 	// nil when there is none.
 	providerSync *ProviderReconciler
-	// snaps is the S3 snapshot store; nil when snapshots are off.
-	snaps *snapshotStore
 	// logger reports what does not fail a command.
 	logger *log.Logger
 }
@@ -79,14 +77,15 @@ type Manager struct {
 type ManagerOption func(*Manager)
 
 // WithEvents publishes the session lifecycle (created, resumed, ready,
-// ended, failed) on bus. Without it, or with a nil bus, nothing is
+// suspended, deleted, failed) on bus. Without it, or with a nil bus, nothing is
 // published.
 func WithEvents(bus *events.Bus) ManagerOption {
 	return func(m *Manager) { m.bus = bus }
 }
 
 // WithMonitor makes the Manager coordinate with the server's Monitor:
-// parking goes through it (so a session with an open bridge is not parked),
+// suspending goes through it (so a session with an open bridge is not
+// suspended),
 // and starting a session tells it. nil is allowed.
 func WithMonitor(mon *Monitor) ManagerOption {
 	return func(m *Manager) { m.monitor = mon }
@@ -115,7 +114,6 @@ func NewManager(client Client, tokens TokenStore, cfg *config.Config, opts ...Ma
 		osewaBinaryDir: cfg.Sessions.Osewa.BinaryDir,
 		osewaPort:      cfg.Sessions.Osewa.Port,
 		osewaSHA256:    osewaSHA256,
-		snaps:          newSnapshotStore(cfg),
 		logger:         log.Default().WithPrefix("sessions"),
 	}
 	if m.osewaBinaryDir == "" {
@@ -182,10 +180,6 @@ type StartOptions struct {
 	Image string
 	// Term is the client's TERM, given to the attach client.
 	Term string
-	// Restore says whether a snapshot of the session is restored into a
-	// newly created sandbox (snapshots.s3). The zero value restores it
-	// unless the new sandbox already holds earlier work.
-	Restore RestoreMode
 	// GitIdentity is Repo's; see RepoSpec.
 	GitIdentity config.GitIdentity
 	// Progress receives human-readable progress messages. May be nil.
@@ -236,11 +230,8 @@ type Session struct {
 	// Started reports whether this call started the program, rather than
 	// finding it running.
 	Started bool
-	// Unparked reports whether this call resumed the session from parked.
-	Unparked bool
-	// Restored is the snapshot this call restored /sandbox from; nil when
-	// it restored none.
-	Restored *SnapshotInfo
+	// WasSuspended reports whether this call resumed a suspended session.
+	WasSuspended bool
 	// Osewa is the path of the osewa binary in the sandbox.
 	Osewa string
 	// OsewaID is the id of the osewa session holding the program.
@@ -268,15 +259,12 @@ type Info struct {
 	// Runtime is the runtime the session's sandbox runs in.
 	Runtime string
 	// Providers are the OpenShell providers attached to the sandbox, as
-	// the gateway lists them; nil for a session parked to its snapshot.
+	// the gateway lists them.
 	Providers []string
 	// Sandbox is the sandbox name.
 	Sandbox string
-	// Phase is the sandbox phase; PhaseSnapshot for a session parked to
-	// its snapshot, which has no sandbox.
+	// Phase is the sandbox phase.
 	Phase string
-	// Snapshot is set when the session is parked to its S3 snapshot.
-	Snapshot *ParkedSnapshot
 }
 
 // TokenName returns the access token name used for a sandbox.
@@ -364,25 +352,14 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 	}
 	defer func() {
 		// Attaching to a session that does not exist is not a failure of
-		// the session, nor is a restore that needs the user's answer.
-		if err != nil && !errors.Is(err, ErrNoSession) && !errors.Is(err, ErrRestoreConflict) {
+		// the session.
+		if err != nil && !errors.Is(err, ErrNoSession) {
 			m.lifecycle(opts.User, events.NewSession(opts.User.Username(), name, sandbox, repos), events.LifecycleFailed, op, err)
 		}
 	}()
 
-	if m.snaps != nil {
-		// A snapshot park or end of the session waits for this start,
-		// and the other way round.
-		unlock, err := sandboxLocks.Lock(ctx, sandbox)
-		if err != nil {
-			return nil, err
-		}
-		defer unlock()
-	}
-
-	// A parked session is resumed by EnsureSandbox and ResumeSandbox; look
-	// first, to say so. A session parked to its snapshot has no sandbox,
-	// only its marker.
+	// A suspended session is resumed by EnsureSandbox and ResumeSandbox;
+	// look first, to say so.
 	existing, getErr := m.client.GetSandbox(ctx, sandbox)
 	if getErr != nil {
 		existing = nil
@@ -390,30 +367,9 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 	if existing != nil {
 		repos = mergeRepos(m.monitor.SessionRepos(existing), wanted, opts.RemoveRepos)
 	}
-	unparked := existing != nil && isParkedPhase(existing.Phase)
-	var parked *ParkedSnapshot
-	if m.snaps != nil && IsNotFound(getErr) {
-		parked, err = m.snaps.readMarker(ctx, opts.User.ID(), sandbox)
-		if err != nil {
-			return nil, fmt.Errorf("openshell: look up whether session %s is parked to a snapshot: %w", name, err)
-		}
-	}
-	switch {
-	case unparked:
-		fmt.Fprintf(progress, "Session %s was parked; resuming it...\n", name) //nolint:errcheck
-	case parked != nil:
-		fmt.Fprintf(progress, "Session %s was parked to a snapshot of /sandbox at %s, which stopped its program; recreating its sandbox...\n", name, parked.Parked.UTC().Format("2006-01-02 15:04 MST")) //nolint:errcheck
-		if opts.Image != "" {
-			fmt.Fprintf(progress, "Warning: --image ignored, session %s already exists\n", name) //nolint:errcheck
-		}
-		if opts.Profile != "" && opts.Profile != parked.Profile {
-			fmt.Fprintf(progress, "Warning: --profile ignored, session %s already exists\n", name) //nolint:errcheck
-		}
-		// The session is created again as it was.
-		create, unparked = true, true
-		profile = parked.Profile
-		p = m.sessions.Profiles[profile]
-		repos = mergeRepos(parked.AllRepos(), wanted, opts.RemoveRepos)
+	wasSuspended := existing != nil && isSuspendedPhase(existing.Phase)
+	if wasSuspended {
+		fmt.Fprintf(progress, "Session %s was suspended; resuming it...\n", name) //nolint:errcheck
 	}
 	if len(repos) == 0 {
 		if create {
@@ -439,7 +395,7 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 
 	// An existing sandbox's providers are made to match its profile
 	// before it is resumed, so a program that starts with the sandbox
-	// (after a park whose memory could not be restored) gets them. A
+	// (after a suspend whose memory could not be restored) gets them. A
 	// sandbox of someone else's is left to EnsureSandbox and
 	// ResumeSandbox to refuse.
 	var (
@@ -460,17 +416,8 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 		created bool
 	)
 	if create {
-		// The runtime follows the image: a session parked to its snapshot
-		// is created again in the runtime, from the image and with the
-		// RuntimeClass it had; else the profile's, else the defaults.
 		runtime := m.cfg.ProfileRuntime(profile)
 		image := opts.Image
-		var parkedRuntimeClass string
-		if parked != nil {
-			runtime = parked.SessionRuntime()
-			image = parked.Image
-			parkedRuntimeClass = parked.RuntimeClass
-		}
 		var (
 			runtimeClass string
 			providers    []string
@@ -483,13 +430,13 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 			if image == "" {
 				image = m.image
 			}
-			runtimeClass = config.ResolveRuntimeClass(parkedRuntimeClass, p.OpenShellRuntimeClass(), m.runtimeClass)
+			runtimeClass = config.ResolveRuntimeClass(p.OpenShellRuntimeClass(), m.runtimeClass)
 			providers = p.OpenShellProviders()
 		default:
 			if image == "" {
 				image = m.cfg.ProfileImage(profile)
 			}
-			runtimeClass = config.ResolveRuntimeClass(parkedRuntimeClass, m.cfg.ProfileRuntimeClass(profile))
+			runtimeClass = config.ResolveRuntimeClass(m.cfg.ProfileRuntimeClass(profile))
 		}
 		annotations := sessionAnnotations(opts.User.Username(), repos, name, profile, providers)
 		annotations[AnnotationRuntime] = runtime
@@ -527,7 +474,7 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 		}
 	}
 	m.monitor.noteReady(sandbox)
-	if !created && existing == nil && parked == nil {
+	if !created && existing == nil {
 		// Created by a concurrent start after the look above.
 		repos = mergeRepos(m.monitor.SessionRepos(sb), wanted, opts.RemoveRepos)
 	}
@@ -564,25 +511,10 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 		Providers:       m.sessionProviders(profile, sb),
 		ProviderChanges: changes,
 		Created:         created,
-		Unparked:        unparked && (!created || parked != nil),
+		WasSuspended:    wasSuspended && !created,
 		Command:         command,
 	}
 	s.setRepos(repos)
-
-	// Restore the session's snapshot into a sandbox this call created,
-	// before the clone check, so a restored checkout is resumed rather
-	// than cloned again. A failed restore deletes the sandbox again: the
-	// next start then restores into a new one.
-	if created && m.snaps != nil {
-		s.Restored, err = m.restoreSnapshot(ctx, opts, op, s, parked, progress)
-		if err != nil {
-			if !errors.Is(err, ErrRestoreConflict) {
-				op = "restore"
-			}
-			m.discardSandbox(sandbox)
-			return nil, err
-		}
-	}
 
 	// Renew the git credentials first: the clone uses them too.
 	token, err := m.issueToken(ctx, opts.User, sandbox)
@@ -595,11 +527,10 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 
 	// The session's current list: what the Monitor knows, else the
 	// sandbox's list file (`session repos` may have changed it since the
-	// sandbox was created; a snapshot restored above brought it back),
-	// else the list the sandbox was created with. The file is only
+	// sandbox was created), else the list the sandbox was created with. The file is only
 	// written when the list differs from that.
 	base, known := m.monitor.knownRepos(sandbox)
-	if !known && (!created || s.Restored != nil) {
+	if !known && !created {
 		onDisk, err := m.readRepos(ctx, sandbox)
 		if err != nil {
 			return nil, err
@@ -701,17 +632,14 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 		fmt.Fprintf(progress, "If %s lacks the credentials of a provider attached just now, exit it and attach again: the sandbox may not have applied the change yet\n", strings.Join(command, " ")) //nolint:errcheck
 	}
 	switch {
-	case s.Started && s.Unparked && parked != nil:
-		// A snapshot keeps /sandbox, not running programs.
-		fmt.Fprintf(progress, "Started %s again: it was not running when the session resumed (the session was parked to a snapshot of /sandbox, which keeps files but not running programs)\n", strings.Join(command, " ")) //nolint:errcheck
-	case s.Started && s.Unparked && s.Runtime != config.RuntimeOpenShell:
-		// Parking a pod session deletes its pod; a docker session's
+	case s.Started && s.WasSuspended && s.Runtime != config.RuntimeOpenShell:
+		// Suspending a pod session deletes its pod; a docker session's
 		// container is stopped.
-		fmt.Fprintf(progress, "Started %s again: parking stopped it (a parked %s session keeps /sandbox, not running programs)\n", strings.Join(command, " "), s.Runtime) //nolint:errcheck
-	case s.Started && s.Unparked:
+		fmt.Fprintf(progress, "Started %s again: suspending stopped it (a suspended %s session keeps /sandbox, not running programs)\n", strings.Join(command, " "), s.Runtime) //nolint:errcheck
+	case s.Started && s.WasSuspended:
 		// The sandbox's memory was not restored (it restarted cleanly,
 		// see resumeRestartIfRestoreFails), or the program had exited
-		// before the session was parked.
+		// before the session was suspended.
 		fmt.Fprintf(progress, "Started %s again: it was not running when the session resumed (it had exited, or the sandbox could not restore its memory and restarted cleanly)\n", strings.Join(command, " ")) //nolint:errcheck
 	case s.Started && !created:
 		fmt.Fprintf(progress, "Started %s again: it was not running\n", strings.Join(command, " ")) //nolint:errcheck
@@ -815,148 +743,54 @@ func (m *Manager) missingProviderError(profile string, err *MissingProviderError
 		profile, err.Provider, err.Provider, err)
 }
 
-// restoreSnapshot restores the session's snapshot, if it has one, into the
-// sandbox this start created, as opts.Restore says, and returns it; nil
-// when it restored none. A session parked to its snapshot is no longer
-// parked once restored (or started afresh).
-func (m *Manager) restoreSnapshot(ctx context.Context, opts StartOptions, op string, s *Session, parked *ParkedSnapshot, progress io.Writer) (*SnapshotInfo, error) {
-	uid := opts.User.ID()
-	unpark := func() {
-		if parked == nil {
-			return
-		}
-		if err := m.snaps.deleteMarker(ctx, uid, s.Sandbox); err != nil {
-			// Harmless: a marker is only shown while the sandbox is
-			// absent, and the next park or end replaces it.
-			m.logger.Warn("cannot clear a parked marker", "sandbox", s.Sandbox, "err", err)
-		}
-	}
-	if opts.Restore == RestoreSkip {
-		if parked != nil {
-			fmt.Fprintln(progress, "Not restoring the session's snapshot (--fresh): it starts afresh. The snapshot stays in S3 until the next one replaces it.") //nolint:errcheck
-		}
-		unpark()
-		return nil, nil
-	}
-
-	info, err := m.snaps.stat(ctx, uid, s.Sandbox)
-	if err != nil {
-		return nil, fmt.Errorf("openshell: look up the snapshot of session %s: %w", s.Name, err)
-	}
-	if info == nil {
-		if parked != nil {
-			return nil, fmt.Errorf("openshell: session %s was parked to a snapshot, but %s is missing; start it with --fresh to start afresh", s.Name, m.snaps.objectURL(m.snaps.key(uid, s.Sandbox)))
-		}
-		return nil, nil
-	}
-
-	if opts.Restore == RestoreAuto {
-		// A new sandbox's /sandbox holds what the image put there (the
-		// shell start-up files): the snapshot's versions win over those
-		// without asking. Sundae's own state or the checkout can only
-		// be there from earlier work, e.g. a volume that outlived its
-		// sandbox; replacing that is the user's call.
-		var paths []string
-		for _, r := range s.Repos {
-			paths = append(paths, repoDir(r))
-		}
-		paths = append(paths, sundaeStateDir)
-		found, err := probePaths(ctx, m.client, s.Sandbox, paths...)
-		if err != nil {
-			return nil, err
-		}
-		if len(found) > 0 {
-			return nil, &RestoreConflictError{Repo: s.Repo, Name: s.Name, Paths: found, Snapshot: *info}
-		}
-	}
-
-	fmt.Fprintf(progress, "Restoring /sandbox from the snapshot of %s...\n", info.Describe()) //nolint:errcheck
-	if err := m.snaps.restore(ctx, m.client, uid, s.Sandbox); err != nil {
-		return nil, fmt.Errorf("openshell: restore the snapshot of session %s (%s): %w", s.Name, info.URL, err)
-	}
-	m.publish(opts.User, events.SessionLifecycle{
-		Session: s.event(opts.User.Username()),
-		Step:    events.LifecycleRestored,
-		Op:      op,
-		Bytes:   info.Size,
-	}, nil)
-	unpark()
-	return info, nil
-}
-
-// discardSandbox deletes a sandbox this call created and could not
-// prepare. It uses a fresh context so it still runs when ctx was
-// cancelled.
-func (m *Manager) discardSandbox(sandbox string) {
-	ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
-	defer cancel()
-	if err := m.client.DeleteSandbox(ctx, sandbox); err != nil {
-		m.logger.Warn("cannot delete a sandbox that failed to start", "sandbox", sandbox, "err", err)
-	}
-}
-
-// Park suspends the sandbox of the user's named session (`session park`). It reports whether it parked it: a session that is
-// parked already is a successful no-op. It refuses a session with an open
-// bridge, one that is not running, and sandboxes Sundae did not create,
-// and publishes parked (Op ParkManual) on success. start and attach resume
-// the session.
-func (m *Manager) Park(ctx context.Context, user proto.User, name string) (bool, error) {
-	parked, _, err := m.ParkSession(ctx, user, name)
-	return parked, err
-}
-
-// ParkSession is Park, also reporting whether the session was parked to
-// its S3 snapshot (sessions.suspend.fallback: snapshot) rather than
-// suspended: its sandbox deleted and its program stopped.
-func (m *Manager) ParkSession(ctx context.Context, user proto.User, name string) (parked, snapshot bool, err error) {
+// Suspend suspends the sandbox of the user's named session (`session
+// suspend`): it stops the sandbox and keeps its storage. It reports whether
+// it suspended it: a session that is suspended already is a successful
+// no-op. It refuses a session with an open bridge, one that is not running,
+// sandboxes Sundae did not create, and a runtime that cannot suspend, and
+// publishes suspended (Op SuspendManual) on success. start, attach and
+// resume start the session again.
+func (m *Manager) Suspend(ctx context.Context, user proto.User, name string) (bool, error) {
 	if user == nil {
-		return false, false, proto.ErrUnauthorized
+		return false, proto.ErrUnauthorized
 	}
-	name, err = sessionName(name)
+	name, err := sessionName(name)
 	if err != nil {
-		return false, false, err
+		return false, err
 	}
 	sandbox := SessionSandboxName(user.Username(), name)
 	sb, err := m.client.GetSandbox(ctx, sandbox)
 	switch {
-	case IsNotFound(err) && m.snaps != nil:
-		// Parked to its snapshot already?
-		if p, merr := m.snaps.readMarker(ctx, user.ID(), sandbox); merr == nil && p != nil {
-			return false, true, nil
-		}
-		return false, false, fmt.Errorf("%w: %q", ErrNoSession, name)
 	case IsNotFound(err):
-		return false, false, fmt.Errorf("%w: %q", ErrNoSession, name)
+		return false, fmt.Errorf("%w: %q", ErrNoSession, name)
 	case err != nil:
-		return false, false, fmt.Errorf("openshell: get sandbox %q: %w", sandbox, err)
+		return false, fmt.Errorf("openshell: get sandbox %q: %w", sandbox, err)
 	case !owns(sb.Labels, ownerLabels(user)):
-		return false, false, ErrNotOwned
+		return false, ErrNotOwned
 	}
 	if _, ok := managedSandbox(sb); !ok {
-		return false, false, fmt.Errorf("openshell: sandbox %q was not created by Sundae; not parking it", sandbox)
+		return false, fmt.Errorf("openshell: sandbox %q was not created by Sundae; not suspending it", sandbox)
 	}
 	switch sb.Phase {
 	case sbx.Ready:
 	case sbx.Suspended, sbx.Suspending:
-		return false, false, nil
+		return false, nil
 	default:
-		return false, false, fmt.Errorf("session %s is %s; only a running session can be parked", name, sb.Phase)
+		return false, fmt.Errorf("session %s is %s; only a running session can be suspended", name, sb.Phase)
 	}
 
-	snapshot, err = m.monitor.ParkSession(ctx, m.client, sandbox)
-	if err != nil {
+	if err := m.monitor.Suspend(ctx, m.client, sandbox); err != nil {
 		if IsSuspendUnsupported(err) {
-			return false, false, fmt.Errorf("the OpenShell gateway cannot suspend this sandbox (set sessions.suspend.fallback: snapshot to park it to an S3 snapshot instead): %w", err)
+			return false, fmt.Errorf("session %s cannot be suspended: its %s runtime cannot suspend this sandbox, so it keeps running (\"session delete %s\" deletes it and its storage): %w", name, SandboxRuntime(sb), name, err)
 		}
-		return false, false, err
+		return false, err
 	}
 	m.publish(user, events.SessionLifecycle{
-		Session:  events.NewSession(user.Username(), name, sandbox, m.monitor.SessionRepos(sb)),
-		Step:     events.LifecycleParked,
-		Op:       ParkManual,
-		Snapshot: snapshot,
+		Session: events.NewSession(user.Username(), name, sandbox, m.monitor.SessionRepos(sb)),
+		Step:    events.LifecycleSuspended,
+		Op:      SuspendManual,
 	}, nil)
-	return true, snapshot, nil
+	return true, nil
 }
 
 // resolveProfile returns the profile a new session of repos is created
@@ -1024,85 +858,25 @@ func (m *Manager) Attach(ctx context.Context, s *Session, cols, rows uint32) (In
 	return is, nil
 }
 
-// EndOptions configures EndSession.
-type EndOptions struct {
-	// Force ends the session even when its snapshot fails.
-	Force bool
-	// DeleteSnapshot deletes the session's stored snapshot too, and takes
-	// no snapshot on end. A session parked to its snapshot loses it; one
-	// that has already ended has its snapshot deleted. It needs S3
-	// snapshots (ErrSnapshotsOff).
-	DeleteSnapshot bool
-	// Progress receives human-readable progress messages. May be nil.
-	Progress io.Writer
-}
-
-// EndResult is what EndSession did.
-type EndResult struct {
-	// Existed reports whether there was a session to end: a sandbox, or a
-	// session parked to its snapshot.
-	Existed bool
-	// Snapshot is the snapshot taken before the sandbox was deleted; nil
-	// when none was.
-	Snapshot *SnapshotInfo
-	// SnapshotErr is why the snapshot failed when Force ended the session
-	// anyway.
-	SnapshotErr error
-	// Parked reports that the session was parked to its snapshot, which is
-	// kept unless DeleteSnapshot.
-	Parked bool
-	// SnapshotDeleted is the stored snapshot DeleteSnapshot deleted; nil
-	// when there was none.
-	SnapshotDeleted *SnapshotInfo
-}
-
-// End is EndSession without options: a failed snapshot stops it.
-func (m *Manager) End(ctx context.Context, user proto.User, name string) (bool, error) {
-	r, err := m.EndSession(ctx, user, name, EndOptions{})
-	return r.Existed, err
-}
-
-// EndSession deletes the sandbox of the user's named session and revokes
-// its access tokens. Ending an absent session is a successful no-op.
+// Delete deletes the sandbox of the user's named session and its storage,
+// and revokes its git credentials. Deleting an absent session is a
+// successful no-op; it reports whether there was one.
 //
-// With snapshots.s3.on including end, /sandbox is snapshotted first; when
-// that fails the session is not ended and a *SnapshotError is returned,
-// unless Force is set. A session parked to its snapshot is ended by
-// forgetting that it is parked; its snapshot is kept.
-//
-// It publishes snapshotted when the snapshot is stored, ended once the
-// sandbox is deleted, and failed when the sandbox could not be looked up,
-// snapshotted or deleted. Ending an absent session publishes nothing.
-func (m *Manager) EndSession(ctx context.Context, user proto.User, name string, o EndOptions) (EndResult, error) {
-	var res EndResult
+// It publishes deleted once the sandbox is deleted, and failed when the
+// sandbox could not be looked up or deleted.
+func (m *Manager) Delete(ctx context.Context, user proto.User, name string) (bool, error) {
 	if user == nil {
-		return res, proto.ErrUnauthorized
+		return false, proto.ErrUnauthorized
 	}
 	name, err := sessionName(name)
 	if err != nil {
-		return res, err
-	}
-	progress := o.Progress
-	if progress == nil {
-		progress = io.Discard
-	}
-
-	if o.DeleteSnapshot && m.snaps == nil {
-		return res, ErrSnapshotsOff
+		return false, err
 	}
 	sandbox := SessionSandboxName(user.Username(), name)
 	sess := events.NewSession(user.Username(), name, sandbox, nil)
-	failed := func(op string, err error) (EndResult, error) {
-		m.publish(user, events.SessionLifecycle{Session: sess, Step: events.LifecycleFailed, Op: op}, err)
-		return res, err
-	}
-
-	if m.snaps != nil {
-		unlock, err := sandboxLocks.Lock(ctx, sandbox)
-		if err != nil {
-			return res, err
-		}
-		defer unlock()
+	failed := func(err error) (bool, error) {
+		m.publish(user, events.SessionLifecycle{Session: sess, Step: events.LifecycleFailed, Op: "delete"}, err)
+		return false, err
 	}
 
 	existed := true
@@ -1111,92 +885,26 @@ func (m *Manager) EndSession(ctx context.Context, user proto.User, name string, 
 	case IsNotFound(err):
 		existed = false
 	case err != nil:
-		return failed("end", fmt.Errorf("openshell: get sandbox %q: %w", sandbox, err))
+		return failed(fmt.Errorf("openshell: get sandbox %q: %w", sandbox, err))
 	case !owns(sb.Labels, ownerLabels(user)):
-		return failed("end", ErrNotOwned)
+		return failed(ErrNotOwned)
 	default:
 		sess = events.NewSession(user.Username(), name, sandbox, m.monitor.SessionRepos(sb))
 	}
 
-	if !existed && m.snaps != nil {
-		parked, err := m.snaps.readMarker(ctx, user.ID(), sandbox)
-		switch {
-		case err != nil && !o.Force:
-			return failed("end", fmt.Errorf("openshell: look up whether session %s is parked to a snapshot: %w (session end --force ends it anyway)", name, err))
-		case parked != nil:
-			sess = events.NewSession(user.Username(), name, sandbox, parked.AllRepos())
-			if err := m.snaps.deleteMarker(ctx, user.ID(), sandbox); err != nil {
-				return failed("end", err)
-			}
-			res.Existed, res.Parked = true, true
-			m.publish(user, events.SessionLifecycle{Session: sess, Step: events.LifecycleEnded}, nil)
-		}
-	}
-
 	if existed {
-		if m.snaps.onEnd() && !o.DeleteSnapshot {
-			info, serr := m.snapshotForEnd(ctx, user, sess, sb, progress)
-			switch {
-			case serr == nil:
-				res.Snapshot = info
-				m.publish(user, events.SessionLifecycle{Session: sess, Step: events.LifecycleSnapshotted, Op: "end", Bytes: info.Size}, nil)
-			case !o.Force:
-				return failed("snapshot", &SnapshotError{Repo: strings.Join(sess.AllRepos(), ", "), Name: name, Err: serr})
-			default:
-				res.SnapshotErr = serr
-				m.publish(user, events.SessionLifecycle{Session: sess, Step: events.LifecycleFailed, Op: "snapshot"}, serr)
-				fmt.Fprintf(progress, "Warning: the snapshot of /sandbox failed: %v; ending the session without it (--force)\n", serr) //nolint:errcheck
-			}
-		}
 		if err := m.client.DeleteSandbox(ctx, sandbox); err != nil {
-			return failed("end", err)
-		}
-		res.Existed = true
-		if m.snaps != nil {
-			// A marker left by a park whose delete failed would show the
-			// ended session as parked.
-			if err := m.snaps.deleteMarker(ctx, user.ID(), sandbox); err != nil {
-				m.logger.Warn("cannot clear a parked marker", "sandbox", sandbox, "err", err)
-			}
+			return failed(err)
 		}
 		m.monitor.forgetRepos(sandbox)
 		// The session is gone even if revoking its tokens below fails.
-		m.publish(user, events.SessionLifecycle{Session: sess, Step: events.LifecycleEnded}, nil)
-	}
-
-	if o.DeleteSnapshot {
-		info, err := m.snaps.stat(ctx, user.ID(), sandbox)
-		if err == nil && info != nil {
-			err = m.snaps.store.Delete(ctx, m.snaps.key(user.ID(), sandbox))
-		}
-		if err != nil {
-			return res, fmt.Errorf("openshell: delete the snapshot of session %s: %w", name, err)
-		}
-		res.SnapshotDeleted = info
+		m.publish(user, events.SessionLifecycle{Session: sess, Step: events.LifecycleDeleted}, nil)
 	}
 
 	if err := m.revokeTokens(ctx, user, TokenName(sandbox), true); err != nil {
-		return res, err
+		return existed, err
 	}
-
-	return res, nil
-}
-
-// snapshotForEnd snapshots the sandbox of a session being ended, resuming
-// it first when it is parked or stopped: only a running sandbox can be
-// archived.
-func (m *Manager) snapshotForEnd(ctx context.Context, user proto.User, sess events.Session, sb *Sandbox, progress io.Writer) (*SnapshotInfo, error) {
-	switch sb.Phase {
-	case sbx.Ready:
-	case sbx.Suspended, sbx.Suspending, sbx.Stopped, sbx.Provisioning, sbx.Starting:
-		fmt.Fprintf(progress, "Resuming sandbox %s to snapshot it...\n", sess.Sandbox) //nolint:errcheck
-		if _, err := m.client.ResumeSandbox(ctx, sess.Sandbox, ownerLabels(user)); err != nil {
-			return nil, err
-		}
-	default:
-		return nil, fmt.Errorf("the sandbox is %s", sb.Phase)
-	}
-	return m.snaps.take(ctx, m.client, user.ID(), sess, progress)
+	return existed, nil
 }
 
 // List returns the user's sessions sorted by session name.
@@ -1229,9 +937,6 @@ func (m *Manager) List(ctx context.Context, user proto.User) ([]Info, error) {
 			Phase:     string(sb.Phase),
 		})
 	}
-	if m.snaps != nil {
-		infos = m.withParkedSnapshots(ctx, user, sbs, infos)
-	}
 	slices.SortFunc(infos, func(a, b Info) int {
 		if c := strings.Compare(a.Name, b.Name); c != 0 {
 			return c
@@ -1241,37 +946,9 @@ func (m *Manager) List(ctx context.Context, user proto.User) ([]Info, error) {
 	return infos, nil
 }
 
-// withParkedSnapshots adds the user's sessions parked to their snapshots,
-// which have no sandbox, to infos. When the store cannot be read, they are
-// left out and that is logged: the running sessions are still listed.
-func (m *Manager) withParkedSnapshots(ctx context.Context, user proto.User, sbs []*Sandbox, infos []Info) []Info {
-	markers, err := m.snaps.listMarkers(ctx, user.ID())
-	if err != nil {
-		m.logger.Warn("cannot list sessions parked to snapshots", "user", user.Username(), "err", err)
-		return infos
-	}
-	for _, p := range markers {
-		if slices.ContainsFunc(sbs, func(sb *Sandbox) bool { return sb.Name == p.Sandbox }) {
-			// Recreated, and the marker not cleared yet.
-			continue
-		}
-		infos = append(infos, Info{
-			Repo:     p.Repo,
-			Repos:    p.AllRepos(),
-			Name:     p.Session,
-			Profile:  p.Profile,
-			Runtime:  p.SessionRuntime(),
-			Sandbox:  p.Sandbox,
-			Phase:    PhaseSnapshot,
-			Snapshot: &p,
-		})
-	}
-	return infos
-}
-
 // issueToken creates a fresh short-lived access token for the sandbox after
 // pruning its expired predecessors. Unexpired tokens are kept until they
-// expire or the session ends: a git command that read the credential file
+// expire or the session is deleted: a git command that read the credential file
 // just before it was replaced may still be using one.
 func (m *Manager) issueToken(ctx context.Context, user proto.User, sandbox string) (string, error) {
 	name := TokenName(sandbox)

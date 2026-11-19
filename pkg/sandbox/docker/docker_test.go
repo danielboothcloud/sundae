@@ -103,7 +103,7 @@ func TestLifecycle(t *testing.T) {
 		t.Fatalf("foreign: %v", err)
 	}
 
-	// Park stops the container; resume starts it.
+	// Suspend stops the container; resume starts it.
 	if sb, err := r.SuspendSandbox(ctx, "sd-a"); err != nil || sb.Phase != sbx.Suspended {
 		t.Fatalf("suspend: %+v %v", sb, err)
 	}
@@ -261,7 +261,7 @@ func TestLiveEngine(t *testing.T) {
 	}
 	_ = is.Close()
 
-	// Park keeps /sandbox.
+	// Suspend keeps /sandbox.
 	if sb, err := r.SuspendSandbox(ctx, name); err != nil || sb.Phase != sbx.Suspended {
 		t.Fatalf("suspend: %+v %v", sb, err)
 	}

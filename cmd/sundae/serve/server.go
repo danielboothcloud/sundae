@@ -48,7 +48,7 @@ type Server struct {
 	Events *events.Bus
 	// Notifier publishes notifications; nil when notifications are off.
 	Notifier *notify.Notifier
-	// Monitor collects session status and parks idle sessions; nil when
+	// Monitor collects session status and suspends idle sessions; nil when
 	// OpenShell is disabled.
 	Monitor *openshell.Monitor
 	// Signals keeps the signals feed, recording from the bus from setup
@@ -409,7 +409,7 @@ func (s *Server) startMonitor() (run func(), ok bool) {
 }
 
 // stopMonitor stops the session monitor and waits, within ctx, for it to
-// finish: polls in flight are abandoned, parks in flight are cancelled.
+// finish: polls in flight are abandoned, suspends in flight are cancelled.
 func (s *Server) stopMonitor(ctx context.Context) {
 	s.monitorMu.Lock()
 	s.monitorStopped = true

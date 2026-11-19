@@ -46,8 +46,8 @@ func sessionSignalsCommand() *cobra.Command {
 		Use:   "signals",
 		Short: "Show what your agent sessions reported, newest first",
 		Long: `Show the signals of your agent sessions, newest first: every status
-change (OSC 7501) and lifecycle step (created, ready, resumed, parked,
-exited, ended, failed) Sundae has seen, with when it happened, the state,
+change (OSC 7501) and lifecycle step (created, ready, resumed, suspended,
+exited, deleted, failed) Sundae has seen, with when it happened, the state,
 the session (and the record id of a child record) and the message.
 
 --attention shows only what asks for you: blocked, error and done reports,

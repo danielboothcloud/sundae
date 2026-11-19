@@ -26,7 +26,7 @@ const (
 // dangerWords are the first words of the help of actions that delete or
 // end something.
 var dangerWords = map[string]bool{
-	"end": true, "delete": true, "remove": true, "prune": true,
+	"delete": true, "remove": true, "prune": true,
 	"destroy": true, "kill": true, "drop": true, "revoke": true,
 }
 

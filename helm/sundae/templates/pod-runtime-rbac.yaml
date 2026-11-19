@@ -23,7 +23,8 @@ rules:
   - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get"]
-  # The sandbox's /sandbox volume, kept while a session is parked.
+  # The sandbox's /sandbox volume, kept while a session is suspended. Shared
+  # volumes (podRuntime.sharedVolumes) are Helm's, so Sundae only mounts them.
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
     verbs: ["get", "list", "watch", "create", "delete"]

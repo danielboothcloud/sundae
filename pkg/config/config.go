@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -229,8 +230,8 @@ type OpenShellConfig struct {
 
 	// SandboxPolicy is where the policy of a sandbox Sundae creates comes
 	// from: "sundae" (the default) sends one, OpenShell's restrictive
-	// default plus network rules for Sundae's git endpoint, the S3
-	// snapshot endpoint and NetworkPolicies; "image" sends none, so the
+	// default plus network rules for Sundae's git endpoint and
+	// NetworkPolicies; "image" sends none, so the
 	// image's /etc/openshell/policy.yaml applies, or OpenShell's default,
 	// which denies all network access. It applies when a sandbox is
 	// created; existing sandboxes keep theirs.
@@ -299,10 +300,6 @@ type Config struct {
 	// Notifications configures notifications on agent session and forge
 	// events. Off unless notifications.ntfy.enabled is true.
 	Notifications NotificationsConfig `envPrefix:"NOTIFICATIONS_" yaml:"notifications"`
-
-	// Snapshots configures snapshots of a session's /sandbox to S3. Off
-	// unless snapshots.s3.enabled is true.
-	Snapshots SnapshotsConfig `envPrefix:"SNAPSHOTS_" yaml:"snapshots"`
 
 	// InitialAdminKeys is a list of public keys that will be added to the list of admins.
 	InitialAdminKeys []string `env:"INITIAL_ADMIN_KEYS" envSeparator:"\n" yaml:"initial_admin_keys"`
@@ -420,9 +417,6 @@ func (c *Config) Environ() []string {
 	// The ntfy token only ever lives in its token_file.
 	envs = append(envs, c.notificationsEnviron()...)
 
-	// The S3 keys only ever live in their credentials_file.
-	envs = append(envs, c.snapshotsEnviron()...)
-
 	// AnonAccess and AllowKeyless are tri-state overrides: only emit them
 	// when explicitly set, so a subprocess parsing these envs sees the same
 	// "unset" state (rather than an empty string coercing to a zero value).
@@ -523,13 +517,16 @@ func describeKeyError(msg string) string {
 	if section != "" {
 		key = section + "." + key
 	}
-	if key == "notifications.true" || key == "snapshots.s3.true" {
+	if key == "notifications.true" {
 		// YAML 1.1 tools, Helm among them, read an unquoted `on:` key as
 		// the boolean true.
 		return fmt.Sprintf("line %s: unknown key %s (an unquoted `on:` key was read as true by a YAML 1.1 tool; quote it: \"on\":)", m[1], key)
 	}
 	if to, ok := movedKeys[key]; ok {
 		return fmt.Sprintf("line %s: %s has moved to %s", m[1], key, to)
+	}
+	if why, ok := removedKeys[key]; ok {
+		return fmt.Sprintf("line %s: %s was removed: %s; delete it", m[1], key, why)
 	}
 	return fmt.Sprintf("line %s: unknown key %s", m[1], key)
 }
@@ -595,6 +592,10 @@ func parseEnv(cfg *Config) error {
 // applyEnv overrides cfg with the SUNDAE_* environment variables, without
 // validating the result.
 func applyEnv(cfg *Config) error {
+	if err := checkRemovedEnv(os.Environ()); err != nil {
+		return err
+	}
+
 	// Merge initial admin keys from both config file and environment variables.
 	initialAdminKeys := append([]string{}, cfg.InitialAdminKeys...)
 
@@ -765,7 +766,10 @@ func DefaultConfig() *Config {
 		},
 		Pod: PodConfig{
 			ReadyTimeout: DefaultReadyTimeout,
-			PodSettings:  PodSettings{StorageSize: DefaultPodStorageSize},
+			PodSettings: PodSettings{
+				StorageSize:        DefaultPodStorageSize,
+				StorageAccessModes: slices.Clone(DefaultPodStorageAccessModes),
+			},
 		},
 		Docker: DockerConfig{ReadyTimeout: DefaultReadyTimeout},
 		Sessions: SessionsConfig{
@@ -777,9 +781,8 @@ func DefaultConfig() *Config {
 				PollInterval: DefaultStatusPollInterval,
 			},
 			Suspend: SessionSuspendConfig{
-				Enabled:  true,
-				After:    DefaultSuspendAfter,
-				Fallback: SuspendFallbackNone,
+				Enabled: true,
+				After:   DefaultSuspendAfter,
 			},
 			Signals: SessionSignalsConfig{
 				Keep: DefaultSignalsKeep,
@@ -788,12 +791,6 @@ func DefaultConfig() *Config {
 		Notifications: NotificationsConfig{
 			On:       append([]string(nil), DefaultTriggers...),
 			Debounce: DefaultNotificationDebounce,
-		},
-		Snapshots: SnapshotsConfig{
-			S3: S3SnapshotConfig{
-				Prefix: DefaultSnapshotPrefix,
-				On:     append([]string(nil), DefaultSnapshotOn...),
-			},
 		},
 	}
 }
@@ -844,7 +841,7 @@ func (c *Config) Validate() error {
 
 	c.HTTP.CORS.AllowedOrigins = append([]string{c.HTTP.PublicURL}, c.HTTP.CORS.AllowedOrigins...)
 
-	return errors.Join(c.validateOpenShell(), c.validateProviders(), c.validateSandboxPolicy(), c.validateSessions(), c.validatePod(), c.validateDocker(), c.validateProjects(), c.validateForges(), c.validateGitIdentities(), c.validateNotifications(), c.validateSnapshots())
+	return errors.Join(c.validateOpenShell(), c.validateProviders(), c.validateSandboxPolicy(), c.validateSessions(), c.validatePod(), c.validateDocker(), c.validateProjects(), c.validateForges(), c.validateGitIdentities(), c.validateNotifications())
 }
 
 // validateOpenShell validates the OpenShell configuration and resolves its

@@ -92,7 +92,7 @@ func TestRowWords(t *testing.T) {
 		{Row{
 			Info:   openshell.Info{Phase: "Suspended"},
 			Status: &openshell.SessionStatus{Record: events.Record{State: events.StateBlocked, Kind: events.BlockPermission}},
-		}, "blocked · permission · parked"},
+		}, "blocked · permission · suspended"},
 		{Row{Status: &openshell.SessionStatus{Record: events.Record{State: events.StateWorking, Progress: &forty}}}, "working 40%"},
 		{Row{Status: &openshell.SessionStatus{Exited: true, Stale: true}}, "none · exited · stale"},
 	} {
@@ -106,22 +106,14 @@ func TestRowWords(t *testing.T) {
 	}
 }
 
-func TestRowParkedToSnapshot(t *testing.T) {
-	memory := Row{Info: openshell.Info{Phase: "Suspended"}}
-	if !memory.Parked() || memory.ParkedToSnapshot() || memory.Note() != "" || memory.Words() != "none · parked" {
-		t.Fatalf("memory park: %v %v %q %q", memory.Parked(), memory.ParkedToSnapshot(), memory.Note(), memory.Words())
-	}
-	snap := Row{
-		Info:   openshell.Info{Phase: openshell.PhaseSnapshot, Snapshot: &openshell.ParkedSnapshot{}},
-		Status: &openshell.SessionStatus{Record: events.Record{State: events.StateIdle}},
-	}
-	if !snap.Parked() || !snap.ParkedToSnapshot() || snap.Words() != "idle · parked (snapshot)" ||
-		snap.Note() != "program stopped by the snapshot park; attach restarts it" || snap.Label() != "○ idle · parked (snapshot)" {
-		t.Fatalf("snapshot park: %v %v %q %q", snap.Parked(), snap.ParkedToSnapshot(), snap.Note(), snap.Words())
+func TestRowSuspended(t *testing.T) {
+	suspended := Row{Info: openshell.Info{Phase: "Suspended"}}
+	if !suspended.Suspended() || suspended.Words() != "none · suspended" {
+		t.Fatalf("suspended: %v %q", suspended.Suspended(), suspended.Words())
 	}
 	running := Row{Info: openshell.Info{Phase: "Ready"}}
-	if running.Parked() || running.Note() != "" {
-		t.Fatal("running row parked")
+	if running.Suspended() {
+		t.Fatal("running row suspended")
 	}
 }
 

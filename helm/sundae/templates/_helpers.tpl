@@ -221,28 +221,24 @@ The path of the mounted ntfy token file.
 {{- end }}
 
 {{/*
-Whether the S3 snapshot credentials secret is mounted.
+The name of the StorageClass podRuntime.storageClass creates.
 */}}
-{{- define "sundae.s3CredentialsMounted" -}}
-{{- $snap := .Values.config.snapshots | default dict -}}
-{{- $s3 := get $snap "s3" | default dict -}}
-{{- $creds := (.Values.snapshots | default dict).s3Credentials | default dict -}}
-{{- if and (get $s3 "enabled") $creds.secretName -}}
-true
-{{- end -}}
+{{- define "sundae.podStorageClassName" -}}
+{{- .Values.podRuntime.storageClass.name | default (printf "%s-sandbox" (include "sundae.fullname" .)) -}}
 {{- end }}
 
 {{/*
-The path config.snapshots.s3.credentials_file points at: the key's file, or
-the mount directory when no key is set.
+The claim name of a podRuntime.sharedVolumes entry: claimName, or
+<fullname>-<name> for one the chart creates.
 */}}
-{{- define "sundae.s3CredentialsPath" -}}
-{{- $creds := .Values.snapshots.s3Credentials -}}
-{{- $dir := $creds.mountPath | trimSuffix "/" -}}
-{{- if $creds.key -}}
-{{- printf "%s/%s" $dir $creds.key -}}
+{{- define "sundae.sharedVolumeClaim" -}}
+{{- $v := .v -}}
+{{- if $v.claimName -}}
+{{- $v.claimName -}}
+{{- else if $v.create -}}
+{{- printf "%s-%s" (include "sundae.fullname" .root) $v.name | trunc 63 | trimSuffix "-" -}}
 {{- else -}}
-{{- $dir -}}
+{{- fail (printf "podRuntime.sharedVolumes[%s].claimName is required unless create is true" $v.name) -}}
 {{- end -}}
 {{- end }}
 
@@ -257,17 +253,28 @@ The Sundae config file: .Values.config, plus
     empty openshell.token_file pointed at the mounted key;
   - when ntfy notifications are enabled and the ntfy token secret is mounted,
     an empty notifications.ntfy.token_file pointed at the mounted key;
-  - when S3 snapshots are enabled and their credentials secret is mounted,
-    an empty snapshots.s3.credentials_file pointed at it;
+  - with podRuntime.storageClass.create, an empty pod.storage_class set to
+    that StorageClass;
+  - podRuntime.sharedVolumes appended to pod.shared_volumes;
   - when any sessions use the pod runtime, an empty pod.namespace set to the
     release namespace and an empty openshell.clone_url (which pod sandboxes
     clone over too) set to this release's HTTP Service, with or without
     OpenShell.
-Refuses to render secret material or an OpenShell section Sundae itself
-would reject at startup.
+Refuses to render secret material, removed settings, or an OpenShell section
+Sundae itself would reject at startup.
 */}}
 {{- define "sundae.config" -}}
 {{- $cfg := deepCopy .Values.config -}}
+
+{{- if hasKey $cfg "snapshots" -}}
+{{- fail "config.snapshots was removed: S3 snapshots no longer exist (session suspend keeps a session's storage, session delete deletes it). Delete it from your values." -}}
+{{- end -}}
+{{- if hasKey .Values "snapshots" -}}
+{{- fail "snapshots (snapshots.s3Credentials) was removed with S3 snapshots. Delete it from your values." -}}
+{{- end -}}
+{{- if hasKey ((get $cfg "sessions" | default dict).suspend | default dict) "fallback" -}}
+{{- fail "config.sessions.suspend.fallback was removed with S3 snapshots: a session the runtime cannot suspend keeps running. Delete it from your values." -}}
+{{- end -}}
 
 {{- $keys := concat (.Values.initialAdminKeys | default list) (get $cfg "initial_admin_keys" | default list) | uniq -}}
 {{- range $keys -}}
@@ -317,6 +324,32 @@ would reject at startup.
 {{- $_ := set $cfg "openshell" $os -}}
 {{- end -}}
 
+{{- $pod := get $cfg "pod" | default dict -}}
+{{- if and .Values.podRuntime.storageClass.create (not (get $pod "storage_class")) -}}
+{{- $_ := set $pod "storage_class" (include "sundae.podStorageClassName" .) -}}
+{{- end -}}
+{{- $shared := get $pod "shared_volumes" | default list -}}
+{{- range $v := .Values.podRuntime.sharedVolumes -}}
+{{- $name := required "podRuntime.sharedVolumes[].name is required" $v.name -}}
+{{- range $shared -}}
+{{- if eq (toString .name) $name -}}
+{{- fail (printf "podRuntime.sharedVolumes %q is also in config.pod.shared_volumes: name it once" $name) -}}
+{{- end -}}
+{{- end -}}
+{{- $sv := dict "name" $name "claim_name" (include "sundae.sharedVolumeClaim" (dict "root" $ "v" $v)) "mount_path" (required (printf "podRuntime.sharedVolumes[%s].mountPath is required" $name) $v.mountPath) -}}
+{{- if $v.readOnly -}}
+{{- $_ := set $sv "read_only" true -}}
+{{- end -}}
+{{- with $v.subPath -}}
+{{- $_ := set $sv "sub_path" . -}}
+{{- end -}}
+{{- $shared = append $shared $sv -}}
+{{- end -}}
+{{- if $shared -}}
+{{- $_ := set $pod "shared_volumes" $shared -}}
+{{- end -}}
+{{- $_ := set $cfg "pod" $pod -}}
+
 {{- if include "sundae.podRuntime" . -}}
 {{- $pod := get $cfg "pod" | default dict -}}
 {{- if not (get $pod "namespace") -}}
@@ -349,30 +382,6 @@ would reject at startup.
 {{- end -}}
 {{- $_ := set $notif "ntfy" $ntfy -}}
 {{- $_ := set $cfg "notifications" $notif -}}
-{{- end -}}
-
-{{- $snap := get $cfg "snapshots" | default dict -}}
-{{- $s3 := get $snap "s3" | default dict -}}
-{{- if hasKey $s3 "true" -}}
-{{- fail "config.snapshots.s3 has a key `true`: Helm reads a bare `on:` as true. Quote the key: \"on\": [end]" -}}
-{{- end -}}
-{{- range $k := list "access_key_id" "secret_access_key" "aws_access_key_id" "aws_secret_access_key" -}}
-{{- if hasKey $s3 $k -}}
-{{- fail (printf "config.snapshots.s3.%s must not be set: the config is rendered into a ConfigMap. Put the keys in a Secret and set snapshots.s3Credentials.secretName; the chart mounts it and sets config.snapshots.s3.credentials_file." $k) -}}
-{{- end -}}
-{{- end -}}
-{{- if get $s3 "enabled" -}}
-{{- if not (get $s3 "bucket") -}}
-{{- fail "config.snapshots.s3.bucket is required when config.snapshots.s3.enabled is true" -}}
-{{- end -}}
-{{- if and (include "sundae.s3CredentialsMounted" .) (not (get $s3 "credentials_file")) -}}
-{{- $_ := set $s3 "credentials_file" (include "sundae.s3CredentialsPath" .) -}}
-{{- end -}}
-{{- if not (get $s3 "credentials_file") -}}
-{{- fail "config.snapshots.s3.credentials_file is required when config.snapshots.s3.enabled is true: set snapshots.s3Credentials.secretName to mount the keys from a Secret" -}}
-{{- end -}}
-{{- $_ := set $snap "s3" $s3 -}}
-{{- $_ := set $cfg "snapshots" $snap -}}
 {{- end -}}
 
 {{- toYaml $cfg -}}

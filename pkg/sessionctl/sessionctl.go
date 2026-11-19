@@ -62,21 +62,10 @@ func (r Row) State() events.State { return r.Record().State }
 // Polled reports whether the Monitor has read the session's status.
 func (r Row) Polled() bool { return r.Status != nil && !r.Status.Polled.IsZero() }
 
-// Parked reports whether the session is parked: its sandbox suspended, or
-// the session parked to its S3 snapshot.
-func (r Row) Parked() bool { return openshell.IsParkedWord(openshell.PhaseWord(r.Info.Phase)) }
-
-// ParkedToSnapshot reports whether the session is parked to its S3
-// snapshot: it has no sandbox, and its program was stopped.
-func (r Row) ParkedToSnapshot() bool { return r.Info.Snapshot != nil }
-
-// Note says what a session's state does not: for a session parked to its
-// snapshot, that its program was stopped. "" for none.
-func (r Row) Note() string {
-	if r.ParkedToSnapshot() {
-		return "program stopped by the snapshot park; attach restarts it"
-	}
-	return ""
+// Suspended reports whether the session's sandbox is suspended (or being
+// suspended).
+func (r Row) Suspended() bool {
+	return openshell.PhaseWord(r.Info.Phase) == openshell.WordSuspended
 }
 
 // Changed returns when the session's status last changed; zero when not
@@ -89,7 +78,7 @@ func (r Row) Changed() time.Time {
 }
 
 // Lifecycle returns the words shown after the state: the sandbox lifecycle
-// (parked, starting), else whether the program exited and whether the
+// (suspended, starting), else whether the program exited and whether the
 // status is stale.
 func (r Row) Lifecycle() []string {
 	if word := openshell.PhaseWord(r.Info.Phase); word != "" {
@@ -99,7 +88,7 @@ func (r Row) Lifecycle() []string {
 	if r.Status != nil && r.Status.Exited {
 		words = append(words, "exited")
 	}
-	if r.Status != nil && r.Status.Stale && !r.Status.Parked {
+	if r.Status != nil && r.Status.Stale && !r.Status.Suspended {
 		words = append(words, "stale")
 	}
 	return words
@@ -107,13 +96,13 @@ func (r Row) Lifecycle() []string {
 
 // Words renders the session's state without its glyph: the word, the
 // progress, what a blocked program waits for and the lifecycle words, e.g.
-// "blocked · permission · parked" or "working 40%".
+// "blocked · permission · suspended" or "working 40%".
 func (r Row) Words() string {
 	return strings.Join(append([]string{signals.RecordWords(r.Record())}, r.Lifecycle()...), " · ")
 }
 
 // Label renders the session's state with its glyph, as `session ls` shows
-// it, e.g. "▲ blocked · permission · parked".
+// it, e.g. "▲ blocked · permission · suspended".
 func (r Row) Label() string {
 	return r.State().Glyph() + " " + r.Words()
 }
@@ -121,7 +110,7 @@ func (r Row) Label() string {
 // List returns the user's sessions as the gateway lists them, each with the
 // status the Monitor last read, sorted by state (blocked, error, done,
 // working, idle, none) and within a state by repository and name. It never
-// resumes a parked session.
+// resumes a suspended session.
 func List(ctx context.Context, mgr *openshell.Manager, mon *openshell.Monitor, user proto.User) ([]Row, error) {
 	infos, err := mgr.List(ctx, user)
 	if err != nil {
@@ -134,18 +123,6 @@ func List(ctx context.Context, mgr *openshell.Manager, mon *openshell.Monitor, u
 	rows := make([]Row, len(infos))
 	for i, info := range infos {
 		rows[i] = Row{Info: info, Status: statuses[info.Sandbox]}
-		if p := info.Snapshot; p != nil && rows[i].Status == nil {
-			// No sandbox to read: the status it had when it was parked.
-			rows[i].Status = &openshell.SessionStatus{
-				Session: events.NewSession(p.User, p.Session, p.Sandbox, p.AllRepos()),
-				UserID:  p.UserID,
-				Profile: p.Profile,
-				Phase:   openshell.PhaseSnapshot,
-				Parked:  true,
-				Record:  p.Record,
-				Changed: p.Parked,
-			}
-		}
 	}
 	// List sorts by repository and name; keep that within a state.
 	slices.SortStableFunc(rows, func(a, b Row) int {
@@ -194,9 +171,6 @@ type Request struct {
 	Create bool
 	// Term is the client's TERM.
 	Term string
-	// Restore says whether a snapshot is restored into a newly created
-	// sandbox; see openshell.RestoreMode.
-	Restore openshell.RestoreMode
 	// Progress receives human-readable progress lines. May be nil.
 	Progress io.Writer
 }
@@ -213,7 +187,7 @@ func (req Request) repos() []string {
 }
 
 // Prepared is a session started or resumed and ready to attach to. Its
-// bridge is counted with the Monitor, so it is not parked, until Close.
+// bridge is counted with the Monitor, so it is not suspended, until Close.
 type Prepared struct {
 	Session     *openshell.Session
 	mgr         *openshell.Manager
@@ -366,7 +340,7 @@ func Prepare(ctx context.Context, mgr *openshell.Manager, req Request) (_ *Prepa
 	}
 
 	// Count the bridge from here until it closes, whichever way this
-	// returns, so the session is not parked while it is prepared or
+	// returns, so the session is not suspended while it is prepared or
 	// attached. An invalid name counts against a sandbox that cannot exist,
 	// briefly, and Start rejects it.
 	closeBridge := openshell.MonitorFromContext(ctx).OpenBridge(ctx,
@@ -402,7 +376,6 @@ func Prepare(ctx context.Context, mgr *openshell.Manager, req Request) (_ *Prepa
 		RepoProfile: repoProfile,
 		Image:       req.Image,
 		Term:        req.Term,
-		Restore:     req.Restore,
 		Progress:    req.Progress,
 	}
 	var s *openshell.Session

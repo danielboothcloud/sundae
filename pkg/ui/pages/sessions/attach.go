@@ -47,8 +47,6 @@ type operation struct {
 	attach bool
 	// key is the session's sandbox, when it is listed.
 	key string
-	// req is what run prepares, to run it again with an answer.
-	req sessionctl.Request
 
 	cancel context.CancelFunc
 	stop   func() bool
@@ -78,7 +76,6 @@ func newOperation(ctx context.Context, title string, repos []string, name string
 // run prepares the session in the background and returns the command
 // waiting for the operation's first message.
 func (op *operation) run(ctx context.Context, src Source, req sessionctl.Request) tea.Cmd {
-	op.req = req
 	req.Progress = op
 	return func() tea.Msg {
 		go func() {

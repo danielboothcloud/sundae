@@ -143,25 +143,8 @@ func (f *fakeSource) Command(string) string                   { return "bash" }
 func (f *fakeSource) AttachCommand(name string) string {
 	return "ssh -t host session attach " + name
 }
-func (f *fakeSource) End(context.Context, string, bool) (bool, error) { return true, nil }
-func (f *fakeSource) SnapshotsOnEnd() bool                            { return false }
-func (f *fakeSource) SnapshotsEnabled() bool                          { return false }
-func (f *fakeSource) EndDeletingSnapshot(context.Context, string) (bool, error) {
-	return false, openshell.ErrSnapshotsOff
-}
-
-func (f *fakeSource) Snapshots(context.Context) ([]openshell.StoredSnapshot, error) {
-	return nil, openshell.ErrSnapshotsOff
-}
-
-func (f *fakeSource) DeleteSnapshot(context.Context, string) (openshell.StoredSnapshot, error) {
-	return openshell.StoredSnapshot{}, openshell.ErrSnapshotsOff
-}
-
-func (f *fakeSource) PruneSnapshots(context.Context, time.Duration) ([]openshell.StoredSnapshot, error) {
-	return nil, openshell.ErrSnapshotsOff
-}
-func (f *fakeSource) Park(context.Context, string) (bool, error) { return true, nil }
+func (f *fakeSource) Delete(context.Context, string) (bool, error)  { return true, nil }
+func (f *fakeSource) Suspend(context.Context, string) (bool, error) { return true, nil }
 func (f *fakeSource) SyncRepos(context.Context, string, []string) ([]sessions.RepoSync, error) {
 	return nil, nil
 }
@@ -326,11 +309,11 @@ func TestTUIAttachRoundTrip(t *testing.T) {
 	}
 
 	// The TUI reads the keyboard again, at the size the window has now:
-	// the end confirm fills the 100-column line (94 inside the margins and
+	// the delete confirm fills the 100-column line (94 inside the margins and
 	// the footer's padding), its answers at the right end.
 	mark = out.len()
 	send("d")
-	out.waitFor(t, mark, "End r / main?")
+	out.waitFor(t, mark, "Delete r / main?")
 	out.waitFor(t, mark, "y yes • N no")
 	// 100 - 2 (margin) - 1 (padding) - 12 ("y yes • N no") + 1 = 86; an
 	// 80-column render puts it at 66.

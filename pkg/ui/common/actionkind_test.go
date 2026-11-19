@@ -14,11 +14,11 @@ func TestKindOf(t *testing.T) {
 		want ActionKind
 	}{
 		{b("enter", "attach"), ActionPrimary},
-		{b("d", "end"), ActionDanger},
-		{b("x", "Delete snapshot"), ActionDanger},
+		{b("d", "delete"), ActionDanger},
+		{b("x", "Delete repository"), ActionDanger},
 		{b("R", "remove repos"), ActionDanger},
-		{b("enter", "end session"), ActionDanger}, // danger wins
-		{b("z", "park"), ActionNormal},
+		{b("enter", "delete session"), ActionDanger}, // danger wins
+		{b("z", "suspend"), ActionNormal},
 		{b("n", "new"), ActionNormal},
 		{b("e", "endpoint"), ActionNormal}, // a word, not a prefix
 	}
@@ -28,7 +28,7 @@ func TestKindOf(t *testing.T) {
 		}
 	}
 	c := NewCommon(context.Background(), 80, 24)
-	if got, want := c.KeyStyle(b("d", "end")).Render("d"), c.Styles.Action.DangerKey.Render("d"); got != want {
+	if got, want := c.KeyStyle(b("d", "delete")).Render("d"), c.Styles.Action.DangerKey.Render("d"); got != want {
 		t.Errorf("danger key %q, want %q", got, want)
 	}
 	if got, want := c.KeyStyle(b("enter", "attach")).Render("enter"), c.Styles.Action.PrimaryKey.Render("enter"); got != want {

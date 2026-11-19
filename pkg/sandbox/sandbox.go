@@ -35,10 +35,10 @@ const (
 	Starting Phase = "Starting"
 	// Completed: the sandbox's main process exited.
 	Completed Phase = "Completed"
-	// Suspending: the sandbox is being parked.
+	// Suspending: the sandbox is being suspended.
 	Suspending Phase = "Suspending"
-	// Suspended: the sandbox is parked. Resuming it keeps /sandbox, and
-	// its memory where the runtime can.
+	// Suspended: the sandbox is stopped, its storage kept. Resuming it
+	// keeps /sandbox, and its memory where the runtime can.
 	Suspended Phase = "Suspended"
 )
 
@@ -158,11 +158,11 @@ func Cancel(s InteractiveSession) error {
 	return s.Close() //nolint:wrapcheck
 }
 
-// Runtime is a session runtime: where sandboxes are created, run, parked
+// Runtime is a session runtime: where sandboxes are created, run, suspended
 // and deleted, and where commands run in them.
 type Runtime interface {
 	// EnsureSandbox returns a ready sandbox named name, creating it from
-	// req when absent and starting or resuming it when stopped or parked.
+	// req when absent and starting or resuming it when stopped or suspended.
 	// created reports whether this call created it. A half-made sandbox is
 	// deleted when creation or the ready-wait fails.
 	EnsureSandbox(ctx context.Context, name string, req Request) (sb *Sandbox, created bool, err error)
@@ -172,16 +172,16 @@ type Runtime interface {
 	// ListSandboxes returns the sandboxes carrying all the given labels.
 	ListSandboxes(ctx context.Context, labels map[string]string) ([]*Sandbox, error)
 	// ResumeSandbox returns the existing sandbox named name, ready,
-	// starting or resuming it when stopped or parked. It never creates
+	// starting or resuming it when stopped or suspended. It never creates
 	// one. labels[owner label], when set, must match the sandbox's, or
 	// ErrNotOwned is returned.
 	ResumeSandbox(ctx context.Context, name string, labels map[string]string) (*Sandbox, error)
 	// DeleteSandbox deletes the named sandbox and its storage. An absent
 	// sandbox is not an error.
 	DeleteSandbox(ctx context.Context, name string) error
-	// SuspendSandbox parks the named sandbox and waits until it is
+	// SuspendSandbox stops the named sandbox and waits until it is
 	// Suspended: /sandbox is kept, and its memory where the runtime can.
-	// A runtime that cannot park returns an error wrapping
+	// A runtime that cannot suspend returns an error wrapping
 	// ErrSuspendUnsupported.
 	SuspendSandbox(ctx context.Context, name string) (*Sandbox, error)
 	// Upload copies the local file at localPath to remotePath in the
@@ -222,6 +222,6 @@ var (
 	// time.
 	ErrReadyTimeout = errors.New("ready timeout")
 	// ErrSuspendUnsupported is returned by SuspendSandbox when the
-	// runtime cannot park sandboxes.
+	// runtime cannot suspend sandboxes.
 	ErrSuspendUnsupported = errors.New("sandbox suspend is not supported")
 )

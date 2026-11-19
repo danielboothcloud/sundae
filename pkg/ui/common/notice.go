@@ -4,10 +4,10 @@ import "strings"
 
 // doneVerbs are the first words of notices that report a finished action.
 var doneVerbs = map[string]bool{
-	"started": true, "ended": true, "parked": true, "resumed": true,
+	"started": true, "suspended": true, "resumed": true,
 	"added": true, "removed": true, "imported": true, "created": true,
 	"deleted": true, "copied": true, "synced": true, "pushed": true,
-	"detached": true, "pruned": true, "restored": true,
+	"detached": true, "pruned": true,
 }
 
 // NoticeView renders a one-line result notice, at most width cells: an

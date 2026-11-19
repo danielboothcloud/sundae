@@ -127,11 +127,11 @@ func TestMonitorRemembersRepoLists(t *testing.T) {
 	if len(infos) != 1 || strings.Join(infos[0].Repos, ",") != "a,b,c" || infos[0].Repo != "a" || !infos[0].HasRepo("c") {
 		t.Fatalf("infos = %+v", infos)
 	}
-	if _, err := h.mgr.End(ctx, alice, "w"); err != nil {
+	if _, err := h.mgr.Delete(ctx, alice, "w"); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := mon.knownRepos(s.Sandbox); ok {
-		t.Fatal("list kept after end")
+		t.Fatal("list kept after delete")
 	}
 }
 

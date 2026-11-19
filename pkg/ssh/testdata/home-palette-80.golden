@@ -10,11 +10,11 @@
           │   2      Go to Sessions                                  │
           │   3      Go to About                                     │
           │   enter  Sessions › Attach                               │
-          │   z      Sessions › Park                                 │
+          │   z      Sessions › Suspend                              │
           │   A      Sessions › Add repos                            │
           │   u      Sessions › Sync with forge                      │
           │   c      Sessions › Copy attach command                  │
-          │   d      Sessions › End                                  │
+          │   d      Sessions › Delete                               │
           ╰──────────────────────────────────────────────────────────╯
 
 

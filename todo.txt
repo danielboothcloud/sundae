@@ -9,8 +9,8 @@ x 2026-11-13 2026-11-08 perhaps use a global service in cilium to bridge to dev 
 x 2026-11-13 2026-11-11 maybe add an agents menu with program status protocol, so you can monitor and ssh into agent sessions, pass via command to ssh command maybe?
 2026-11-13 add webserver which just serves the ssh which can be accessed via browser
 2026-11-13 per-profile network policies: sessions.profiles[].additional_network_policies (same schema as openshell.network_policies), merged with built-ins + global; open: key name, name clashes (error vs override), re-apply on start/resume, per-profile sandbox_policy, YAML-only
-2026-11-13 make sessions automatically scale down when all agents are at rest (0 replicas)
-2026-11-13 add richer session lifecycle controls
+x 2026-11-19 2026-11-13 make sessions automatically scale down when all agents are at rest (0 replicas)
+x 2026-11-19 2026-11-13 add richer session lifecycle controls
 2026-11-13 migrate to self hosted runners
 x 2026-11-18 2026-11-13 if repo is of type JJ you should be able to explore changes/log in the repositores tab
 x 2026-11-18 2026-11-13 you should be able to launch sessions fro mthe repositories tab
@@ -27,5 +27,5 @@ x 2026-11-18 2026-11-13 add caching for forge repos so results dont have to load
 2026-11-13 validate openshell.network_policies allowed_ips: reject ranges containing what OpenShell always blocks (0.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16, e.g. 0.0.0.0/0 or ::/0) at startup; today they pass validation and every connection is silently denied (transparent_tcp_destination_denied); also warn that a rule with allowed_ips and no host opens IP literals only (DNS names get policy_dns_ineligible)
 2026-11-14 need cleaner way to exit and enter sessions
 x 2026-11-18 2026-11-14 add runtime options (openshell, pod etc)
-2026-11-18 remove snapshots entirely, park should be called suspend and that just rolls down the pod, stop should be delete which deltes the deployment and underlying pvc, pvc dynamic provisioning should be configurable via helm chart
+x 2026-11-18 2026-11-18 remove snapshots entirely, park should be called suspend and that just rolls down the pod, stop should be delete which deltes the deployment and underlying pvc, pvc dynamic provisioning should be configurable via helm chart
 2026-11-18 run sundae through impeccable to improve ux and copy

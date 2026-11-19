@@ -122,7 +122,7 @@ func TestFilters(t *testing.T) {
 		status(1, review, events.StateBlocked, "Apply 3 to add?"),  // 2
 		status(1, docs, events.StateDone, "Implemented discovery"), // 3
 		child, // 4
-		lifecycle(1, infra, events.LifecycleParked), // 5
+		lifecycle(1, infra, events.LifecycleSuspended), // 5
 		failed,                                 // 6
 		status(1, infra, events.StateIdle, ""), // 7
 	)
@@ -138,7 +138,7 @@ func TestFilters(t *testing.T) {
 		"text msg":       {Query{Text: "APPLY"}, []uint64{2}},
 		"text app":       {Query{Text: "lint"}, []uint64{4}},
 		"text reason":    {Query{Text: "image pull"}, []uint64{6}},
-		"text state":     {Query{Text: "parked"}, []uint64{5}},
+		"text state":     {Query{Text: "suspended"}, []uint64{5}},
 		"text repo":      {Query{Text: "doc"}, []uint64{6, 3}},
 		"limit":          {Query{Limit: 2}, []uint64{7, 6}},
 		"limit filtered": {Query{Attention: true, Limit: 3}, []uint64{6, 4, 3}},
@@ -420,11 +420,11 @@ func TestLastStateOfLifecycleSignals(t *testing.T) {
 	feed(h,
 		lifecycle(1, a, events.LifecycleCreated),
 		status(1, a, events.StateIdle, ""),
-		lifecycle(1, a, events.LifecycleParked), // 3: idle, from the feed
-		lifecycle(1, b, events.LifecycleParked), // 4: blocked, from the lookup
+		lifecycle(1, a, events.LifecycleSuspended), // 3: idle, from the feed
+		lifecycle(1, b, events.LifecycleSuspended), // 4: blocked, from the lookup
 		events.SessionStatusEvent(1, events.SessionStatus{Session: a, Record: events.Record{ID: "child", State: events.StateError}}),
 		lifecycle(1, a, events.LifecycleResumed), // 6: a child record does not change the root state
-		lifecycle(1, a, events.LifecycleEnded),
+		lifecycle(1, a, events.LifecycleDeleted),
 		lifecycle(1, a, events.LifecycleCreated),
 		lifecycle(1, a, events.LifecycleReady), // 9: forgotten on end
 	)
@@ -435,17 +435,17 @@ func TestLastStateOfLifecycleSignals(t *testing.T) {
 	}
 	for id, want := range map[uint64]string{
 		1: "+ created",
-		3: "○ idle · parked",
-		4: "▲ blocked · parked",
+		3: "○ idle · suspended",
+		4: "▲ blocked · suspended",
 		6: "○ idle · resumed",
-		7: "- ended",
+		7: "- deleted",
 		9: "· none · ready",
 	} {
 		if got := byID[id].Label(); got != want {
 			t.Errorf("signal %d label = %q, want %q", id, got, want)
 		}
 	}
-	// A parked row of a blocked session is not itself a report asking for
+	// A suspended row of a blocked session is not itself a report asking for
 	// attention.
 	if byID[4].NeedsAttention() {
 		t.Error("lifecycle rows other than failed do not ask for attention")
@@ -482,9 +482,9 @@ func TestRendering(t *testing.T) {
 			events.SessionLifecycleEvent(1, events.SessionLifecycle{Session: a, Step: events.LifecycleFailed, Op: "start", Reason: "no\x07 image"}),
 			"✗ failed · start", "infra / claude-1", "could not start the session: no image", true, events.StateError,
 		},
-		"parked auto": {
-			events.SessionLifecycleEvent(1, events.SessionLifecycle{Session: a, Step: events.LifecycleParked, Op: "auto"}),
-			"· none · parked", "infra / claude-1", "parked while idle", false, events.StateNone,
+		"suspended auto": {
+			events.SessionLifecycleEvent(1, events.SessionLifecycle{Session: a, Step: events.LifecycleSuspended, Op: "auto"}),
+			"· none · suspended", "infra / claude-1", "suspended while idle; storage kept", false, events.StateNone,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

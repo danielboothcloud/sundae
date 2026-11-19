@@ -290,7 +290,7 @@ func (c *classifier) classify(ev events.Event) (note, bool) {
 	case ev.Lifecycle != nil:
 		l := *ev.Lifecycle
 		key := sessionKey("lifecycle", ev.UserID, l.Session)
-		if l.Step == events.LifecycleEnded {
+		if l.Step == events.LifecycleDeleted {
 			// The session is gone: forget it, so a new session of the
 			// same name starts afresh.
 			status := sessionKey("status", ev.UserID, l.Session) + sep

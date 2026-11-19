@@ -7,7 +7,6 @@ import (
 
 	v1 "github.com/NVIDIA/OpenShell/sdk/go/openshell/v1"
 	"github.com/danielboothcloud/sundae/pkg/config"
-	"github.com/danielboothcloud/sundae/pkg/s3store"
 )
 
 // SandboxPolicy is an OpenShell sandbox policy.
@@ -48,12 +47,6 @@ func restrictiveDefaultPolicy() *SandboxPolicy {
 //
 //   - sundae_git: Sundae's HTTP git endpoint (cfg.OpenShellCloneURL), the
 //     host and port git and jj clone, fetch and push over;
-//   - sundae_snapshots, with snapshots.s3 enabled: the host and port the
-//     presigned snapshot URLs point at, which curl in the sandbox uploads
-//     to and downloads from. With virtual-hosted addressing that is
-//     <bucket>.<endpoint host>, e.g. <bucket>.s3.<region>.amazonaws.com for
-//     AWS; with path_style, the endpoint's host. The bucket is fixed, so
-//     the host is exact and no wildcard is needed;
 //   - each of openshell.network_policies.
 //
 // Sundae's own rules allow any program ("/**") and inspect nothing (no
@@ -72,18 +65,6 @@ func BuildSandboxPolicy(cfg *config.Config) (*SandboxPolicy, error) {
 		return nil, fmt.Errorf("openshell: sandbox policy: clone URL %q %w", cfg.OpenShellCloneURL(), err)
 	}
 	p.NetworkPolicies[config.NetworkPolicyGit] = builtinRule(config.NetworkPolicyGit, host, port)
-
-	if cfg.Snapshots.S3.Enabled {
-		st, err := s3store.New(cfg.Snapshots.S3)
-		if err != nil {
-			return nil, fmt.Errorf("openshell: sandbox policy: snapshots: %w", err)
-		}
-		host, port, err := config.URLHostPort(st.BucketURL().String())
-		if err != nil {
-			return nil, fmt.Errorf("openshell: sandbox policy: snapshots endpoint %w", err)
-		}
-		p.NetworkPolicies[config.NetworkPolicySnapshots] = builtinRule(config.NetworkPolicySnapshots, host, port)
-	}
 
 	for _, r := range cfg.OpenShell.NetworkPolicies {
 		if _, ok := p.NetworkPolicies[r.Name]; ok {

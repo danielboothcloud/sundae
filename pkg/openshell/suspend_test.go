@@ -115,17 +115,17 @@ func TestSuspendAndResumeSandbox(t *testing.T) {
 	}
 }
 
-// parkSession suspends the sandbox of a started session.
-func parkSession(t *testing.T, h *harness, sandbox string) {
+// suspendSession suspends the sandbox of a started session.
+func suspendSession(t *testing.T, h *harness, sandbox string) {
 	t.Helper()
 	if _, err := h.mgr.client.SuspendSandbox(context.Background(), sandbox); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// start and attach resume a parked session; with its memory restored the
+// start and attach resume a suspended session; with its memory restored the
 // program is still running.
-func TestStartAndAttachResumeParkedSession(t *testing.T) {
+func TestStartAndAttachResumeSuspendedSession(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(t)
 	sub := withBus(t, h)
@@ -136,7 +136,7 @@ func TestStartAndAttachResumeParkedSession(t *testing.T) {
 	drain(t, sub)
 
 	for _, op := range []string{"start", "attach"} {
-		parkSession(t, h, s.Sandbox)
+		suspendSession(t, h, s.Sandbox)
 		var progress bytes.Buffer
 		opts := StartOptions{User: alice, Repo: "r", Progress: &progress}
 		var again *Session
@@ -148,10 +148,10 @@ func TestStartAndAttachResumeParkedSession(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", op, err)
 		}
-		if !again.Unparked || again.Started || again.OsewaID != s.OsewaID || again.Created {
+		if !again.WasSuspended || again.Started || again.OsewaID != s.OsewaID || again.Created {
 			t.Fatalf("%s: %+v", op, again)
 		}
-		if !strings.Contains(progress.String(), "Session main was parked; resuming it") || strings.Contains(progress.String(), "Started") {
+		if !strings.Contains(progress.String(), "Session main was suspended; resuming it") || strings.Contains(progress.String(), "Started") {
 			t.Fatalf("%s: progress %q", op, progress.String())
 		}
 		sb, _ := h.fc.Sandboxes().Get(ctx, "default", s.Sandbox)
@@ -163,11 +163,11 @@ func TestStartAndAttachResumeParkedSession(t *testing.T) {
 		}
 	}
 
-	// Not parked: no word about it.
+	// Not suspended: no word about it.
 	var progress bytes.Buffer
 	again, err := h.mgr.Resume(ctx, StartOptions{User: alice, Repo: "r", Progress: &progress})
-	if err != nil || again.Unparked || strings.Contains(progress.String(), "parked") {
-		t.Fatalf("not parked: %+v %v %q", again, err, progress.String())
+	if err != nil || again.WasSuspended || strings.Contains(progress.String(), "suspended") {
+		t.Fatalf("not suspended: %+v %v %q", again, err, progress.String())
 	}
 }
 
@@ -181,7 +181,7 @@ func TestAttachAfterCleanRestoreRestartsProgram(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parkSession(t, h, s.Sandbox)
+	suspendSession(t, h, s.Sandbox)
 	// The restart lost every process; /sandbox (the checkout, osewa's
 	// files, the recorded session id) is still there.
 	h.exec.mu.Lock()
@@ -195,7 +195,7 @@ func TestAttachAfterCleanRestoreRestartsProgram(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !again.Unparked || !again.Started || again.OsewaID == s.OsewaID {
+	if !again.WasSuspended || !again.Started || again.OsewaID == s.OsewaID {
 		t.Fatalf("session = %+v", again)
 	}
 	if !strings.Contains(progress.String(), "Started bash -l again: it was not running when the session resumed") ||
@@ -213,7 +213,7 @@ func TestAttachAfterCleanRestoreRestartsProgram(t *testing.T) {
 	}
 }
 
-func TestManagerPark(t *testing.T) {
+func TestManagerSuspend(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(t)
 	sub := withBus(t, h)
@@ -223,31 +223,31 @@ func TestManagerPark(t *testing.T) {
 	}
 	drain(t, sub)
 
-	parked, err := h.mgr.Park(ctx, alice, "two")
-	if err != nil || !parked {
-		t.Fatalf("park: %v %v", parked, err)
+	suspended, err := h.mgr.Suspend(ctx, alice, "two")
+	if err != nil || !suspended {
+		t.Fatalf("suspend: %v %v", suspended, err)
 	}
 	sb, _ := h.fc.Sandboxes().Get(ctx, "default", s.Sandbox)
 	if sb.Status.Phase != types.SandboxSuspended {
 		t.Fatalf("phase %s", sb.Status.Phase)
 	}
 	got := drain(t, sub)
-	if steps(got) != "parked" || got[0].Op != ParkManual || got[0].Session.Name != "two" || got[0].Session.Sandbox != s.Sandbox {
+	if steps(got) != "suspended" || got[0].Op != SuspendManual || got[0].Session.Name != "two" || got[0].Session.Sandbox != s.Sandbox {
 		t.Fatalf("lifecycle %+v", got)
 	}
-	// Parking again is a no-op.
-	if parked, err := h.mgr.Park(ctx, alice, "two"); err != nil || parked {
-		t.Fatalf("park again: %v %v", parked, err)
+	// Suspending again is a no-op.
+	if suspended, err := h.mgr.Suspend(ctx, alice, "two"); err != nil || suspended {
+		t.Fatalf("suspend again: %v %v", suspended, err)
 	}
 	if got := drain(t, sub); len(got) != 0 {
 		t.Fatalf("lifecycle %+v", got)
 	}
 
 	// Absent, someone else's, not running, not Sundae's, bad name.
-	if _, err := h.mgr.Park(ctx, alice, "nope"); !errors.Is(err, ErrNoSession) {
+	if _, err := h.mgr.Suspend(ctx, alice, "nope"); !errors.Is(err, ErrNoSession) {
 		t.Fatalf("absent: %v", err)
 	}
-	if _, err := h.mgr.Park(ctx, testUser{id: 9, name: "alice"}, "two"); !errors.Is(err, ErrNotOwned) {
+	if _, err := h.mgr.Suspend(ctx, testUser{id: 9, name: "alice"}, "two"); !errors.Is(err, ErrNotOwned) {
 		t.Fatalf("foreign: %v", err)
 	}
 	h.fc.AddSandbox("default", &types.Sandbox{
@@ -255,7 +255,7 @@ func TestManagerPark(t *testing.T) {
 		Labels: ownerLabels(alice), Annotations: sessionAnnotations("alice", []string{"r"}, "stopped", "", nil),
 		Status: types.SandboxStatus{Phase: types.SandboxStopped},
 	})
-	if _, err := h.mgr.Park(ctx, alice, "stopped"); err == nil || !strings.Contains(err.Error(), "only a running session can be parked") {
+	if _, err := h.mgr.Suspend(ctx, alice, "stopped"); err == nil || !strings.Contains(err.Error(), "only a running session can be suspended") {
 		t.Fatalf("stopped: %v", err)
 	}
 	h.fc.AddSandbox("default", &types.Sandbox{
@@ -264,17 +264,17 @@ func TestManagerPark(t *testing.T) {
 		Annotations: map[string]string{AnnotationRepo: "r"},
 		Status:      types.SandboxStatus{Phase: types.SandboxReady},
 	})
-	if _, err := h.mgr.Park(ctx, alice, "foreign"); err == nil || !strings.Contains(err.Error(), "not created by Sundae") {
+	if _, err := h.mgr.Suspend(ctx, alice, "foreign"); err == nil || !strings.Contains(err.Error(), "not created by Sundae") {
 		t.Fatalf("unmanaged: %v", err)
 	}
-	if _, err := h.mgr.Park(ctx, alice, "Bad"); !errors.Is(err, ErrInvalidSessionName) {
+	if _, err := h.mgr.Suspend(ctx, alice, "Bad"); !errors.Is(err, ErrInvalidSessionName) {
 		t.Fatalf("bad name: %v", err)
 	}
-	if _, err := h.mgr.Park(ctx, nil, ""); err == nil {
-		t.Fatal("anonymous park")
+	if _, err := h.mgr.Suspend(ctx, nil, ""); err == nil {
+		t.Fatal("anonymous suspend")
 	}
 
-	// With the server's Monitor, an open bridge refuses the park, and a
+	// With the server's Monitor, an open bridge refuses the suspend, and a
 	// gateway that cannot suspend is reported.
 	mon := NewMonitor(func() (Client, error) { return h.mgr.client, nil }, newHarnessConfig())
 	h.mgr.monitor = mon
@@ -283,19 +283,19 @@ func TestManagerPark(t *testing.T) {
 		t.Fatal(err)
 	}
 	closeBridge := mon.OpenBridge(ctx, main.Sandbox)
-	if _, err := h.mgr.Park(ctx, alice, ""); !errors.Is(err, ErrBridgeOpen) {
+	if _, err := h.mgr.Suspend(ctx, alice, ""); !errors.Is(err, ErrBridgeOpen) {
 		t.Fatalf("bridge open: %v", err)
 	}
 	closeBridge()
 	mon.unsuspendable[main.Sandbox] = "compute driver does not support sandbox suspend"
-	if _, err := h.mgr.Park(ctx, alice, ""); !IsSuspendUnsupported(err) || !strings.Contains(err.Error(), "cannot suspend") {
+	if _, err := h.mgr.Suspend(ctx, alice, ""); !IsSuspendUnsupported(err) || !strings.Contains(err.Error(), "cannot suspend") {
 		t.Fatalf("unsupported: %v", err)
 	}
 	delete(mon.unsuspendable, main.Sandbox)
-	if parked, err := h.mgr.Park(ctx, alice, ""); err != nil || !parked {
-		t.Fatalf("park main: %v %v", parked, err)
+	if suspended, err := h.mgr.Suspend(ctx, alice, ""); err != nil || !suspended {
+		t.Fatalf("suspend main: %v %v", suspended, err)
 	}
-	if got := drain(t, sub); steps(got) != "created,ready,parked" {
+	if got := drain(t, sub); steps(got) != "created,ready,suspended" {
 		t.Fatalf("lifecycle %s", steps(got))
 	}
 }

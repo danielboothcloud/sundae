@@ -182,7 +182,7 @@ func TestRouter(t *testing.T) {
 		t.Fatal("sync pod with providers: no error")
 	}
 
-	// Parking goes to the sandbox's runtime.
+	// Suspending goes to the sandbox's runtime.
 	if sb, err := r.SuspendSandbox(ctx, "sd-a"); err != nil || sb.Phase != sbx.Suspended {
 		t.Fatalf("suspend: %+v %v", sb, err)
 	}

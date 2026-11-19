@@ -244,9 +244,8 @@ config:
     # The policy of the sandboxes Sundae creates. OpenShell denies a sandbox
     # all network access its policy does not allow. "sundae" (the default):
     # Sundae sends OpenShell's restrictive default policy plus network rules
-    # letting any program in the sandbox reach clone_url (git, jj) and, with
-    # config.snapshots.s3 enabled, the S3 endpoint (curl), and the rules in
-    # network_policies. "image": Sundae sends none, so the image's
+    # letting any program in the sandbox reach clone_url (git, jj), and the
+    # rules in network_policies. "image": Sundae sends none, so the image's
     # /etc/openshell/policy.yaml applies, or OpenShell's default, which
     # allows no network access. Applies to sandboxes created after the
     # change; existing ones keep theirs. A gateway-global policy (`openshell
@@ -271,8 +270,9 @@ config:
   # each session is one Kubernetes Pod plus one PVC mounted at /sandbox,
   # which Sundae creates through the Kubernetes API with its own
   # ServiceAccount (the chart then mounts its token and creates a Role, see
-  # podRuntime below); the terminal runs through pods/exec. Parking deletes
-  # the Pod and keeps the PVC; ending a session deletes both. Only read when
+  # podRuntime below); the terminal runs through pods/exec. `session suspend`
+  # deletes the Pod and keeps the PVC; `session delete` deletes both. Only
+  # read when
   # a session uses the pod runtime. Semantics in the chart README, "Pod
   # runtime". A profile can override every key except namespace, kubeconfig
   # and ready_timeout (sessions.profiles.<name>.pod).
@@ -320,10 +320,14 @@ config:
     # The sandbox container's resources (requests, limits). A device-plugin
     # resource goes under limits.
     resources: {}
-    # The PVC mounted at /sandbox. Empty storage_class: the cluster's
-    # default StorageClass. Use block storage (ReadWriteOnce).
+    # The PVC mounted at /sandbox, one per session, dynamically provisioned
+    # and deleted with the session. Empty storage_class: podRuntime.storageClass
+    # when the chart creates one, else the cluster's default StorageClass.
+    # Use block storage. storage_access_modes: ReadWriteOnce,
+    # ReadWriteMany or ReadWriteOncePod (alone).
     storage_class: ""
     storage_size: "10Gi"
+    storage_access_modes: [ReadWriteOnce]
     node_selector: {}
     tolerations: []
     # Added to every sandbox Pod, next to Sundae's own labels
@@ -331,9 +335,20 @@ config:
     annotations: {}
     labels: {}
     # Extra volumes of the sandbox Pod and their mounts in the sandbox
-    # container (Kubernetes Volume and VolumeMount objects).
+    # container (Kubernetes Volume and VolumeMount objects). A profile that
+    # sets them replaces these.
     volumes: []
     volume_mounts: []
+    # Existing PVCs mounted into every session's Pod (name, claim_name,
+    # mount_path, read_only, sub_path), e.g. a shared ReadWriteMany cache.
+    # A profile's entries are merged with these by name, the profile's
+    # winning. mount_path must be outside /sandbox. podRuntime.sharedVolumes
+    # adds entries here, and can create the PVCs.
+    shared_volumes: []
+    #  - name: tools
+    #    claim_name: team-tools
+    #    mount_path: /opt/tools
+    #    read_only: true
 
   # What runs in the sandboxes: several named sessions per repository
   # (session start <repo> --name <name>), each from a profile.
@@ -356,17 +371,14 @@ config:
       # notifications. At least 1s.
       poll_interval: 10s
     suspend:
-      # Park (suspend) a session's sandbox once nobody has been attached and it
-      # has not reported "working" for `after`. Needs an OpenShell compute
-      # driver with suspend support; the OpenShell 0.1.8 Kubernetes driver has
-      # none, and Sundae then leaves sandboxes running (logged once).
+      # Suspend a session's sandbox once nobody has been attached and it has
+      # not reported "working" for `after`: its storage is kept. Pod
+      # sessions lose their Pod, docker sessions are stopped. OpenShell needs
+      # a compute driver with suspend support; the OpenShell 0.1.8
+      # Kubernetes driver has none, and Sundae then leaves those sandboxes
+      # running (logged once).
       enabled: true
       after: 30m
-      # Where the gateway cannot suspend (the 0.1.8 Kubernetes driver):
-      # "none" leaves the sandbox running; "snapshot" saves /sandbox to S3
-      # (config.snapshots.s3 must be enabled) and deletes the sandbox, which
-      # stops the session's program until the next start or attach.
-      fallback: none
     signals:
       # How many signals (session status changes and lifecycle events) to
       # keep for `session signals` and the TUI, across all users. In memory
@@ -492,34 +504,6 @@ config:
       # Optional URL opened when a notification is tapped, with the
       # placeholders {repo}, {session}, {sandbox} and {user}.
       click_url: ""
-
-  # Snapshots of a session's /sandbox in an S3 bucket (AWS S3, or MinIO,
-  # Ceph RGW and other S3-compatible stores). Off by default; while
-  # s3.enabled is false nothing here is checked. Semantics in the top-level
-  # README, "S3 snapshots". The sandboxes upload and download the snapshot
-  # themselves through presigned URLs; the sandbox policy Sundae sends
-  # (config.openshell.sandbox_policy: sundae) allows the endpoint. Sundae
-  # needs egress to it too.
-  snapshots:
-    s3:
-      enabled: false
-      # Empty for AWS S3; e.g. http://rook-ceph-rgw-store.rook-ceph.svc:80
-      # for Ceph RGW.
-      endpoint: ""
-      # Required for AWS; defaults to us-east-1 with an endpoint.
-      region: ""
-      bucket: ""
-      prefix: "sundae/sessions"
-      # Leave empty to have the chart point it at the mounted
-      # snapshots.s3Credentials secret. Never put keys here.
-      credentials_file: ""
-      # "AES256", "aws:kms" or "" (the bucket's default encryption).
-      sse: ""
-      # Most MinIO and Ceph RGW deployments need path-style addressing.
-      path_style: false
-      # Keep the key quoted (see notifications). "end", and "park" for a
-      # backup before every memory-retaining park.
-      "on": ["end"]
 
   # Leave empty; use the top-level initialAdminKeys instead.
   initial_admin_keys: []
@@ -671,13 +655,50 @@ podRuntime:
             matchLabels:
               k8s-app: kube-dns
     # NetworkPolicyEgressRule objects appended as they are: everything else
-    # the sandboxes need, e.g. the S3 snapshot endpoint, package registries,
-    # model APIs, or a clone_url that is not this release's Service.
+    # the sandboxes need, e.g. package registries, model APIs, or a
+    # clone_url that is not this release's Service.
     extraEgress: []
     #  - to:
     #      - ipBlock: {cidr: 0.0.0.0/0, except: [10.0.0.0/8]}
     #    ports:
     #      - {port: 443, protocol: TCP}
+  # A StorageClass the chart creates for the sessions' /sandbox PVCs, which
+  # are provisioned dynamically through it. When created, an empty
+  # config.pod.storage_class uses it. StorageClasses are cluster-scoped and
+  # mostly immutable: change parameters by renaming it. reclaimPolicy
+  # Delete makes `session delete` free the volume too; with Retain the
+  # PersistentVolume outlives the session.
+  storageClass:
+    create: false
+    # Empty: <release fullname>-sandbox.
+    name: ""
+    # Required with create, e.g. ebs.csi.aws.com, rook-ceph.rbd.csi.ceph.com.
+    provisioner: ""
+    parameters: {}
+    reclaimPolicy: Delete
+    # WaitForFirstConsumer binds a volume where the session's Pod is
+    # scheduled.
+    volumeBindingMode: WaitForFirstConsumer
+    allowVolumeExpansion: true
+    mountOptions: []
+    annotations: {}
+  # PVCs mounted into every session's Pod, added to
+  # config.pod.shared_volumes. With create, the chart creates the PVC in the
+  # pod namespace, annotated helm.sh/resource-policy: keep so uninstalling
+  # the release does not delete its data; without, claimName names an
+  # existing PVC there. Sessions created before an entry was added do not
+  # get it (their Pod template is fixed); delete and start them again.
+  sharedVolumes: []
+  #  # A shared mise cache: tools installed once, used by every session.
+  #  - name: mise              # pod volume name, a DNS label
+  #    create: true
+  #    claimName: ""           # empty: <release fullname>-<name>
+  #    storageClass: ""        # empty: the cluster's default (must support RWX)
+  #    size: 20Gi
+  #    accessModes: [ReadWriteMany]
+  #    mountPath: /mise
+  #    readOnly: false
+  #    subPath: ""
 
 # Chart-side wiring for config.notifications. Only used when
 # config.notifications.ntfy.enabled is true.
@@ -691,25 +712,6 @@ notifications:
     secretName: ""
     key: token
     mountPath: /etc/sundae-ntfy
-
-# Chart-side wiring for config.snapshots. Only used when
-# config.snapshots.s3.enabled is true.
-snapshots:
-  # The S3 access key, from an existing Secret in this namespace. When
-  # secretName is set the Secret is mounted read-only at mountPath and
-  # config.snapshots.s3.credentials_file points at it:
-  #   - with `key` set, at <mountPath>/<key>, a file in the AWS
-  #     shared-credentials format ([default] aws_access_key_id = ...,
-  #     aws_secret_access_key = ...);
-  #   - with `key` empty, at the directory itself, which must hold the keys
-  #     AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY: the Secret a Rook
-  #     ObjectBucketClaim creates can be used as it is.
-  # The directory is mounted rather than a subPath, so a rotated Secret
-  # reaches the pod; Sundae reads the keys again for every operation.
-  s3Credentials:
-    secretName: ""
-    key: credentials
-    mountPath: /etc/sundae-s3
 
 # Extra existing Secrets mounted read-only as files, for anything the config
 # refers to by path (http.tls_key_path, ssh.key_path, ...).

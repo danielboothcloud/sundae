@@ -17,8 +17,8 @@ import (
 // that file:
 //
 //   - The token is in gitCredentialFile (mode 0600, directory 0700), under
-//     /tmp: not in /sandbox, so never in .git/config, ~/.gitconfig or a
-//     snapshot of /sandbox, and gone when the sandbox's runtime is replaced.
+//     /tmp: not in /sandbox, so never in .git/config, ~/.gitconfig or the
+//     session's storage, and gone when the sandbox's runtime is replaced.
 //   - ~/.gitconfig only gains `include.path = <that file>`; git skips an
 //     include whose file is missing.
 //   - It is sent as an Authorization header scoped to the clone URL, as

@@ -240,11 +240,11 @@ func newMonitorHarness(t *testing.T, configure func(*config.Config)) *monitorHar
 	return &monitorHarness{mc: mc, mon: mon, clk: clk, sub: bus.Subscribe(events.Buffer(128)), logs: logs}
 }
 
-// poll runs one round and waits for the parks it started.
+// poll runs one round and waits for the suspends it started.
 func (h *monitorHarness) poll(t *testing.T) {
 	t.Helper()
 	h.mon.Poll(t.Context())
-	h.mon.parks.Wait()
+	h.mon.suspends.Wait()
 }
 
 // events returns the events published so far.
@@ -524,13 +524,13 @@ func TestMonitorNewSessionPublishes(t *testing.T) {
 		t.Fatalf("exited at first sight: %q", d)
 	}
 
-	// An ended session is forgotten.
+	// A deleted session is forgotten.
 	if err := h.mc.DeleteSandbox(t.Context(), other); err != nil {
 		t.Fatal(err)
 	}
 	h.poll(t)
 	if _, ok := h.mon.Status(other); ok {
-		t.Fatal("ended session still listed")
+		t.Fatal("deleted session still listed")
 	}
 }
 
@@ -594,9 +594,9 @@ func TestMonitorStale(t *testing.T) {
 func TestMonitorPollsOnlyReadyManagedSandboxes(t *testing.T) {
 	h := newMonitorHarness(t, nil)
 	ready := h.mc.addSession(alice, "r", "main", types.SandboxReady)
-	parked := h.mc.addSession(alice, "r", "parked", types.SandboxReady)
+	suspended := h.mc.addSession(alice, "r", "suspended", types.SandboxReady)
 	stopped := h.mc.addSession(alice, "r", "stopped", types.SandboxReady)
-	for _, sb := range []string{ready, parked, stopped} {
+	for _, sb := range []string{ready, suspended, stopped} {
 		h.mc.set(sb, "o1", osewaSessionInfo{ID: "o1", Status: st("blocked", "permission", "Apply?")})
 	}
 	h.mc.fc.AddSandbox("default", &types.Sandbox{
@@ -612,12 +612,12 @@ func TestMonitorPollsOnlyReadyManagedSandboxes(t *testing.T) {
 	})
 	h.poll(t)
 
-	h.mc.setPhase(t, parked, types.SandboxSuspended)
+	h.mc.setPhase(t, suspended, types.SandboxSuspended)
 	h.mc.setPhase(t, stopped, types.SandboxStopped)
 	starting := h.mc.addSession(alice, "r", "starting", types.SandboxProvisioning)
 	h.poll(t)
 
-	for sb, want := range map[string]int{ready: 2, parked: 1, stopped: 1, starting: 0, "someone-elses": 0, "managed-but-ownerless": 0} {
+	for sb, want := range map[string]int{ready: 2, suspended: 1, stopped: 1, starting: 0, "someone-elses": 0, "managed-but-ownerless": 0} {
 		if got := h.mc.runCount(sb); got != want {
 			t.Errorf("%s exec'd %d times, want %d", sb, got, want)
 		}
@@ -627,11 +627,11 @@ func TestMonitorPollsOnlyReadyManagedSandboxes(t *testing.T) {
 			t.Errorf("%s is tracked", sb)
 		}
 	}
-	// A parked session keeps the status it had: still blocked, not stale.
-	if got := h.status(t, parked); !got.Parked || got.Stale || got.Record.State != events.StateBlocked || got.Phase != string(types.SandboxSuspended) {
-		t.Fatalf("parked: %+v", got)
+	// A suspended session keeps the status it had: still blocked, not stale.
+	if got := h.status(t, suspended); !got.Suspended || got.Stale || got.Record.State != events.StateBlocked || got.Phase != string(types.SandboxSuspended) {
+		t.Fatalf("suspended: %+v", got)
 	}
-	if got := h.status(t, stopped); got.Parked || !got.Stale || got.Record.State != events.StateBlocked {
+	if got := h.status(t, stopped); got.Suspended || !got.Stale || got.Record.State != events.StateBlocked {
 		t.Fatalf("stopped: %+v", got)
 	}
 	if got := h.status(t, starting); got.Stale != true || got.Record.State != events.StateNone {
@@ -737,7 +737,7 @@ func TestMonitorRun(t *testing.T) {
 	nilMon.Run(ctx) // a nil Monitor returns at once
 }
 
-func TestParkable(t *testing.T) {
+func TestSuspendable(t *testing.T) {
 	now := time.Date(2026, 11, 12, 12, 0, 0, 0, time.UTC)
 	after := 30 * time.Minute
 	idle := func(mutate func(*entry)) *entry {
@@ -773,22 +773,17 @@ func TestParkable(t *testing.T) {
 		"no program yet":                 {idle(func(e *entry) { e.st.Running, e.st.OsewaID, e.st.Record = false, "", events.Record{} }), 0, true},
 		"status unknown":                 {idle(func(e *entry) { e.known = false }), 0, false},
 		"stale":                          {idle(func(e *entry) { e.st.Stale = true }), 0, false},
-		"parked already":                 {idle(func(e *entry) { e.st.Phase = string(types.SandboxSuspended) }), 0, false},
+		"suspended already":              {idle(func(e *entry) { e.st.Phase = string(types.SandboxSuspended) }), 0, false},
 		"stopped":                        {idle(func(e *entry) { e.st.Phase = string(types.SandboxStopped) }), 0, false},
 		"unsuspendable":                  {idle(func(e *entry) { e.st.Unsuspendable = "no" }), 0, false},
 	} {
-		if got, why := parkable(tc.e, tc.bridges, now, after, false); got != tc.want {
-			t.Errorf("%s: parkable = %v (%s), want %v", name, got, why, tc.want)
+		if got, why := suspendable(tc.e, tc.bridges, now, after); got != tc.want {
+			t.Errorf("%s: suspendable = %v (%s), want %v", name, got, why, tc.want)
 		}
-	}
-	// With the snapshot fallback, a sandbox the gateway cannot suspend is
-	// parked all the same.
-	if got, why := parkable(idle(func(e *entry) { e.st.Unsuspendable = "no" }), 0, now, after, true); !got {
-		t.Errorf("unsuspendable with fallback: parkable = false (%s)", why)
 	}
 }
 
-func TestMonitorAutoPark(t *testing.T) {
+func TestMonitorAutoSuspend(t *testing.T) {
 	h := newMonitorHarness(t, nil)
 	sb := h.mc.addSession(alice, "infra", "main", types.SandboxReady)
 	busy := h.mc.addSession(alice, "infra", "busy", types.SandboxReady)
@@ -801,29 +796,29 @@ func TestMonitorAutoPark(t *testing.T) {
 	h.clk.advance(30*time.Minute - time.Second)
 	h.poll(t)
 	if h.mc.suspendCount(sb) != 0 {
-		t.Fatal("parked early")
+		t.Fatal("suspended early")
 	}
 	h.clk.advance(time.Second)
 	h.poll(t)
 	if h.mc.suspendCount(sb) != 1 || h.mc.phase(t, sb) != types.SandboxSuspended {
-		t.Fatalf("not parked: %d %s", h.mc.suspendCount(sb), h.mc.phase(t, sb))
+		t.Fatalf("not suspended: %d %s", h.mc.suspendCount(sb), h.mc.phase(t, sb))
 	}
 	if h.mc.suspendCount(busy) != 0 {
-		t.Fatal("parked a working session")
+		t.Fatal("suspended a working session")
 	}
-	if d := describe(h.events()); d != "lifecycle main parked auto" {
+	if d := describe(h.events()); d != "lifecycle main suspended auto" {
 		t.Fatalf("events: %q", d)
 	}
-	// Parked, it keeps reading blocked and is not exec'd again.
+	// Suspended, it keeps reading blocked and is not exec'd again.
 	got := h.status(t, sb)
-	if !got.Parked || got.Record.State != events.StateBlocked || got.Stale {
-		t.Fatalf("parked: %+v", got)
+	if !got.Suspended || got.Record.State != events.StateBlocked || got.Stale {
+		t.Fatalf("suspended: %+v", got)
 	}
 	runs := h.mc.runCount(sb)
 	h.clk.advance(time.Hour)
 	h.poll(t)
 	if h.mc.runCount(sb) != runs || h.mc.suspendCount(sb) != 1 {
-		t.Fatal("parked sandbox exec'd or suspended again")
+		t.Fatal("suspended sandbox exec'd or suspended again")
 	}
 
 	// Resumed (by a session command): a new idle window.
@@ -832,20 +827,20 @@ func TestMonitorAutoPark(t *testing.T) {
 	}
 	h.poll(t)
 	if h.mc.suspendCount(sb) != 1 {
-		t.Fatal("parked again right after resuming")
+		t.Fatal("suspended again right after resuming")
 	}
-	if got := h.status(t, sb); got.Parked {
-		t.Fatalf("still parked: %+v", got)
+	if got := h.status(t, sb); got.Suspended {
+		t.Fatalf("still suspended: %+v", got)
 	}
 	h.clk.advance(30 * time.Minute)
 	h.poll(t)
 	if h.mc.suspendCount(sb) != 2 {
-		t.Fatal("not parked after a new window")
+		t.Fatal("not suspended after a new window")
 	}
 }
 
 // Attached clients, open bridges and working status hold a session off.
-func TestMonitorAutoParkActivity(t *testing.T) {
+func TestMonitorAutoSuspendActivity(t *testing.T) {
 	h := newMonitorHarness(t, nil)
 	sb := h.mc.addSession(alice, "r", "main", types.SandboxReady)
 	h.mc.set(sb, "o1", osewaSessionInfo{ID: "o1", Status: st("idle", "", "")})
@@ -860,21 +855,21 @@ func TestMonitorAutoParkActivity(t *testing.T) {
 	h.clk.advance(29 * time.Minute)
 	h.poll(t)
 	if h.mc.suspendCount(sb) != 0 {
-		t.Fatal("parked within the window after an attach")
+		t.Fatal("suspended within the window after an attach")
 	}
 
-	// A bridge is open: never parked, however long.
+	// A bridge is open: never suspended, however long.
 	closeBridge := h.mon.OpenBridge(t.Context(), sb)
 	h.clk.advance(2 * time.Hour)
 	h.poll(t)
 	if h.mc.suspendCount(sb) != 0 {
-		t.Fatal("parked under an open bridge")
+		t.Fatal("suspended under an open bridge")
 	}
 	closeBridge()
 	h.clk.advance(29 * time.Minute)
 	h.poll(t)
 	if h.mc.suspendCount(sb) != 0 {
-		t.Fatal("parked within the window after the bridge closed")
+		t.Fatal("suspended within the window after the bridge closed")
 	}
 
 	// Working holds it off until the window after it has passed.
@@ -885,12 +880,12 @@ func TestMonitorAutoParkActivity(t *testing.T) {
 	h.clk.advance(29 * time.Minute)
 	h.poll(t)
 	if h.mc.suspendCount(sb) != 0 {
-		t.Fatal("parked within the window after working")
+		t.Fatal("suspended within the window after working")
 	}
 	h.clk.advance(time.Minute)
 	h.poll(t)
 	if h.mc.suspendCount(sb) != 1 {
-		t.Fatal("not parked")
+		t.Fatal("not suspended")
 	}
 }
 
@@ -902,7 +897,7 @@ func TestMonitorSuspendDisabled(t *testing.T) {
 	h.clk.advance(48 * time.Hour)
 	h.poll(t)
 	if h.mc.suspendCount(sb) != 0 {
-		t.Fatal("parked with suspend disabled")
+		t.Fatal("suspended with suspend disabled")
 	}
 }
 
@@ -937,9 +932,9 @@ func TestMonitorSuspendUnsupported(t *testing.T) {
 	if evs := h.events(); len(evs) != 0 {
 		t.Fatalf("published %s", describe(evs))
 	}
-	// Manual parks are refused at once.
-	if err := h.mon.Park(t.Context(), h.mc, a); !IsSuspendUnsupported(err) || h.mc.suspendCount(a) != 1 {
-		t.Fatalf("manual park: %v", err)
+	// Manual suspends are refused at once.
+	if err := h.mon.Suspend(t.Context(), h.mc, a); !IsSuspendUnsupported(err) || h.mc.suspendCount(a) != 1 {
+		t.Fatalf("manual suspend: %v", err)
 	}
 
 	// Another failure is not taken for unsupported: tried again next time.
@@ -990,8 +985,8 @@ func TestMonitorBridges(t *testing.T) {
 	if got := h.status(t, sb); got.Bridges != 2 {
 		t.Fatalf("status bridges = %d", got.Bridges)
 	}
-	if err := h.mon.Park(t.Context(), h.mc, sb); !errors.Is(err, ErrBridgeOpen) {
-		t.Fatalf("park with a bridge: %v", err)
+	if err := h.mon.Suspend(t.Context(), h.mc, sb); !errors.Is(err, ErrBridgeOpen) {
+		t.Fatalf("suspend with a bridge: %v", err)
 	}
 	c1()
 	c1() // idempotent
@@ -1002,8 +997,8 @@ func TestMonitorBridges(t *testing.T) {
 	if n := h.mon.Bridges(sb); n != 0 {
 		t.Fatalf("bridges after both = %d", n)
 	}
-	if err := h.mon.Park(t.Context(), h.mc, sb); err != nil || h.mc.phase(t, sb) != types.SandboxSuspended {
-		t.Fatalf("park: %v", err)
+	if err := h.mon.Suspend(t.Context(), h.mc, sb); err != nil || h.mc.phase(t, sb) != types.SandboxSuspended {
+		t.Fatalf("suspend: %v", err)
 	}
 
 	var nilMon *Monitor
@@ -1025,38 +1020,38 @@ func (b *blockingSuspend) SuspendSandbox(ctx context.Context, name string) (*San
 	return b.monitorClient.SuspendSandbox(ctx, name)
 }
 
-// A command that opens a bridge while the session is being parked waits for
-// the park to finish, then finds it parked (and resumes it).
-func TestOpenBridgeWaitsForPark(t *testing.T) {
+// A command that opens a bridge while the session is being suspended waits for
+// the suspend to finish, then finds it suspended (and resumes it).
+func TestOpenBridgeWaitsForSuspend(t *testing.T) {
 	h := newMonitorHarness(t, nil)
 	sb := h.mc.addSession(alice, "r", "main", types.SandboxReady)
 	h.mc.set(sb, "o1", osewaSessionInfo{ID: "o1"})
 	h.poll(t)
 
 	bs := &blockingSuspend{monitorClient: h.mc, entered: make(chan struct{}), release: make(chan struct{})}
-	parked := make(chan error, 1)
-	go func() { parked <- h.mon.Park(t.Context(), bs, sb) }()
+	suspended := make(chan error, 1)
+	go func() { suspended <- h.mon.Suspend(t.Context(), bs, sb) }()
 	<-bs.entered
 
 	opened := make(chan func())
 	go func() { opened <- h.mon.OpenBridge(t.Context(), sb) }()
 	select {
 	case <-opened:
-		t.Fatal("OpenBridge did not wait for the park")
+		t.Fatal("OpenBridge did not wait for the suspend")
 	default:
 	}
-	// A second park meanwhile is refused.
-	if err := h.mon.Park(t.Context(), h.mc, sb); !errors.Is(err, ErrParkInProgress) && !errors.Is(err, ErrBridgeOpen) {
-		t.Fatalf("concurrent park: %v", err)
+	// A second suspend meanwhile is refused.
+	if err := h.mon.Suspend(t.Context(), h.mc, sb); !errors.Is(err, ErrSuspendInProgress) && !errors.Is(err, ErrBridgeOpen) {
+		t.Fatalf("concurrent suspend: %v", err)
 	}
 	close(bs.release)
-	if err := <-parked; err != nil {
+	if err := <-suspended; err != nil {
 		t.Fatal(err)
 	}
 	closeBridge := <-opened
 	defer closeBridge()
 	if h.mc.phase(t, sb) != types.SandboxSuspended {
-		t.Fatal("not parked")
+		t.Fatal("not suspended")
 	}
 	if n := h.mon.Bridges(sb); n != 1 {
 		t.Fatalf("bridges = %d", n)
@@ -1100,11 +1095,11 @@ func TestMonitorReadAPI(t *testing.T) {
 		t.Fatal("found bob's docs session")
 	}
 
-	// Snapshots are copies.
+	// Statuses are copies.
 	st, _ := h.mon.Status(a1)
 	st.Record.Msg = "changed"
 	if again, _ := h.mon.Status(a1); again.Record.Msg != a1 {
-		t.Fatal("snapshot shares state")
+		t.Fatal("status copy shares state")
 	}
 
 	ctx := ContextWithMonitor(context.Background(), h.mon)

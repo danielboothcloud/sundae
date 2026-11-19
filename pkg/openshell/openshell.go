@@ -8,9 +8,7 @@
 // Inside the sandbox, an osewa session holds the session's program, so it
 // outlives the SSH connection that started it. The server's Monitor keeps
 // what it reads of each session's status, and the open bridges, in memory
-// only. With S3 snapshots on (snapshots.s3), a session parked to its
-// snapshot has no sandbox; a small marker object next to the snapshot is
-// then its only record (see ParkedSnapshot).
+// only.
 package openshell
 
 import (
@@ -80,7 +78,7 @@ const (
 	// none can be derived from a repository.
 	DefaultSessionName = "main"
 
-	// suspendTimeout bounds how long a park waits for a sandbox to be
+	// suspendTimeout bounds how long a suspend waits for a sandbox to be
 	// Suspended.
 	suspendTimeout = 5 * time.Minute
 	// cleanupTimeout bounds best-effort cleanup calls.
@@ -108,7 +106,7 @@ var ErrSuspendUnsupported = sbx.ErrSuspendUnsupported
 // the session stays usable with whatever the backend kept of /sandbox (the
 // checkout, unpushed work), and Start finds the osewa session gone and starts
 // the program again, telling the user. With false the session could only be
-// ended, losing more than the clean restart does.
+// deleted, losing more than the clean restart does.
 const resumeRestartIfRestoreFails = true
 
 // IsSuspendUnsupported reports whether err means the runtime cannot
@@ -359,7 +357,7 @@ func (c *sdkClient) resume(ctx context.Context, sb *v1.Sandbox) (*Sandbox, error
 	case v1.SandboxProvisioning, v1.SandboxStarting, v1.SandboxUnknown, "":
 		return c.waitReady(ctx, sb.Name)
 	case v1.SandboxSuspending:
-		// Parked a moment ago: let the suspend finish, then resume.
+		// Suspended a moment ago: let the suspend finish, then resume.
 		if _, err := c.waitSuspended(ctx, sb.Name); err != nil {
 			return nil, err
 		}

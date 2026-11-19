@@ -63,7 +63,7 @@ func TestSessionListStatus(t *testing.T) {
 		_, _, err := runSessionCmd(t, noPty, args...)
 		is.NoErr(err)
 	}
-	sb := func(repo, name string) string { return openshell.SessionSandboxName("alice", name) }
+	sb := func(_, name string) string { return openshell.SessionSandboxName("alice", name) }
 	fc.setStatus(sb("infra", "infra"), 1, map[string]any{"state": "working", "app": "claude-code", "msg": "Running go test ./pkg/ui/...", "progress": 40})
 	fc.setStatus(sb("infra", "review"), 0, map[string]any{
 		"state": "blocked", "kind": "permission", "app": "claude-code",
@@ -74,10 +74,10 @@ func TestSessionListStatus(t *testing.T) {
 	fc.setStatus(sb("web", "quiet"), 0, nil)
 	mon.Poll(ctx)
 
-	// A parked blocked session still reads blocked.
-	_, stderr, err := runSessionCmd(t, ctx, "park", "review")
+	// A suspended blocked session still reads blocked.
+	_, stderr, err := runSessionCmd(t, ctx, "suspend", "review")
 	is.NoErr(err)
-	is.True(strings.Contains(stderr, "Session review parked. Resume it with: session resume review"))
+	is.True(strings.Contains(stderr, "Session review suspended; its storage is kept. Resume it with: session resume review"))
 	mon.Poll(ctx)
 
 	stdout, _, err := runSessionCmd(t, ctx, "ls")
@@ -88,7 +88,7 @@ func TestSessionListStatus(t *testing.T) {
 	rows := tableRows(stdout)
 	is.Equal(len(rows), 5)
 	want := []string{
-		"review | infra | - | openshell | " + sb("infra", "review") + " | Suspended | ▲ blocked · permission · parked | Apply [31m3 to add, 1 to change? x",
+		"review | infra | - | openshell | " + sb("infra", "review") + " | Suspended | ▲ blocked · permission · suspended | Apply [31m3 to add, 1 to change? x",
 		"web | web | - | openshell | " + sb("web", "web") + " | Ready | ✗ error | build failed | 0 | now",
 		"docs | docs | - | openshell | " + sb("docs", "docs") + " | Ready | ✓ done | Implemented GitHub discovery | 0 | now",
 		"infra | infra | - | openshell | " + sb("infra", "infra") + " | Ready | ● working 40% | Running go test ./pkg/ui/... | 1 | now",
@@ -121,7 +121,7 @@ func TestSessionListStatus(t *testing.T) {
 	review := got[0]
 	is.Equal(review["state"], "blocked")
 	is.Equal(review["kind"], "permission")
-	is.Equal(review["parked"], true)
+	is.Equal(review["suspended"], true)
 	is.Equal(review["phase"], "Suspended")
 	is.True(!strings.ContainsAny(review["msg"].(string), "\x1b\u202e\n"))
 	is.True(strings.HasSuffix(review["msg"].(string), strings.Repeat("x", 100))) // not cut
@@ -138,10 +138,10 @@ func TestSessionListStatus(t *testing.T) {
 	is.NoErr(err)
 	rows = tableRows(stdout)
 	is.True(strings.HasPrefix(rows[0], "docs | docs | - | openshell | "+sb("docs", "docs")+" | Ready | · none | - | - | -"))
-	is.True(strings.Contains(stdout, "· none · parked"))
+	is.True(strings.Contains(stdout, "· none · suspended"))
 }
 
-func TestSessionParkAndResumeCommands(t *testing.T) {
+func TestSessionSuspendAndResumeCommands(t *testing.T) {
 	is := is.New(t)
 	ctx, be, user, fc := newSessionTestContext(t)
 	_, err := be.CreateRepository(ctx, "r", user, proto.RepositoryOptions{})
@@ -157,37 +157,37 @@ func TestSessionParkAndResumeCommands(t *testing.T) {
 	is.NoErr(err)
 	sandbox := openshell.SessionSandboxName("alice", "two")
 
-	_, stderr, err := runSessionCmd(t, ctx, "park", "two")
+	_, stderr, err := runSessionCmd(t, ctx, "suspend", "two")
 	is.NoErr(err)
-	is.True(strings.Contains(stderr, "Session two parked"))
+	is.True(strings.Contains(stderr, "Session two suspended"))
 	is.Equal(fc.phase(sandbox), sbx.Suspended)
-	_, stderr, err = runSessionCmd(t, ctx, "park", "two")
+	_, stderr, err = runSessionCmd(t, ctx, "suspend", "two")
 	is.NoErr(err)
-	is.True(strings.Contains(stderr, "Session two is already parked"))
+	is.True(strings.Contains(stderr, "Session two is already suspended"))
 
 	_, stderr, err = runSessionCmd(t, noPty, "resume", "two")
 	is.NoErr(err)
-	is.True(strings.Contains(stderr, "Session two was parked; resuming it"))
+	is.True(strings.Contains(stderr, "Session two was suspended; resuming it"))
 	is.True(strings.Contains(stderr, "Session two (r) is running in sandbox "+sandbox))
 	is.Equal(fc.phase(sandbox), sbx.Ready)
 	is.Equal(fc.resumes, 1)
 	is.Equal(len(fc.interactive), 0) // resume never attaches
 
-	// resume never creates; park needs a session.
+	// resume never creates; suspend needs a session.
 	_, _, err = runSessionCmd(t, noPty, "resume", "nope")
 	is.True(err != nil && strings.Contains(err.Error(), "no such session"))
-	_, _, err = runSessionCmd(t, ctx, "park", "nope")
+	_, _, err = runSessionCmd(t, ctx, "suspend", "nope")
 	is.True(err != nil && strings.Contains(err.Error(), "no such session"))
 	_, ok := fc.sandboxes[openshell.SessionSandboxName("alice", "nope")]
 	is.True(!ok)
 
 	// A gateway that cannot suspend says so.
 	fc.suspendErr = &types.StatusError{Code: types.ErrorConflict, GRPCCode: 9, Message: "compute driver does not support sandbox suspend"}
-	_, _, err = runSessionCmd(t, ctx, "park", "two")
+	_, _, err = runSessionCmd(t, ctx, "suspend", "two")
 	is.True(err != nil && strings.Contains(err.Error(), "cannot suspend"))
 	fc.suspendErr = nil
 	// ...and the Monitor remembers: it is not asked again.
-	_, _, err = runSessionCmd(t, ctx, "park", "two")
+	_, _, err = runSessionCmd(t, ctx, "suspend", "two")
 	is.True(err != nil && strings.Contains(err.Error(), "cannot suspend"))
 	is.Equal(fc.suspends, 1)
 
@@ -197,12 +197,12 @@ func TestSessionParkAndResumeCommands(t *testing.T) {
 		l := (<-sub.C).Lifecycle
 		steps = append(steps, string(l.Step)+":"+l.Op)
 	}
-	is.Equal(strings.Join(steps, ","), "created:,ready:,parked:park,resumed:,ready:")
+	is.Equal(strings.Join(steps, ","), "created:,ready:,suspended:suspend,resumed:,ready:")
 }
 
-// Attaching to a parked session resumes it; after a clean restart the
+// Attaching to a suspended session resumes it; after a clean restart the
 // program is started again and the user is told.
-func TestSessionAttachParkedCleanRestart(t *testing.T) {
+func TestSessionAttachSuspendedCleanRestart(t *testing.T) {
 	is := is.New(t)
 	ctx, be, user, fc := newSessionTestContext(t)
 	_, err := be.CreateRepository(ctx, "r", user, proto.RepositoryOptions{})
@@ -210,14 +210,14 @@ func TestSessionAttachParkedCleanRestart(t *testing.T) {
 	ctx, _ = withMonitor(ctx, fc)
 	_, _, err = runSessionCmd(t, context.WithValue(ctx, sshutils.ContextKeySession, &fakeSSHSession{noPty: true}), "start", "r", "-d")
 	is.NoErr(err)
-	_, _, err = runSessionCmd(t, ctx, "park", "r")
+	_, _, err = runSessionCmd(t, ctx, "suspend", "r")
 	is.NoErr(err)
 
 	fc.cleanRestart = true
 	sess := &fakeSSHSession{}
 	_, stderr, err := runSessionCmd(t, context.WithValue(ctx, sshutils.ContextKeySession, sess), "attach", "r")
 	is.NoErr(err)
-	is.True(strings.Contains(stderr, "Session r was parked; resuming it"))
+	is.True(strings.Contains(stderr, "Session r was suspended; resuming it"))
 	is.True(strings.Contains(stderr, "Started bash -l again: it was not running when the session resumed"))
 	is.Equal(fc.resumes, 1)
 	is.Equal(strings.Join(fc.interactive[0], " "), "/usr/local/bin/osewa attach --take --predict never sandbox id2")
@@ -316,4 +316,22 @@ func TestSessionListProviders(t *testing.T) {
 	is.Equal(providers["r"], []string{"my-claude", "my-github"})
 	is.Equal(providers["plain"], nil)
 	is.True(!strings.Contains(stdout, `"providers":null`))
+}
+
+// The old command names, their aliases and the snapshot flags are gone.
+func TestSessionRemovedCommands(t *testing.T) {
+	is := is.New(t)
+	ctx, _, _, _ := newSessionTestContext(t)
+	for _, name := range []string{"park", "end", "stop", "rm", "snapshot"} {
+		_, _, err := runSessionCmd(t, ctx, name, "x")
+		is.True(err != nil && strings.Contains(err.Error(), `unknown command "`+name+`"`))
+	}
+	for _, flag := range []string{"--restore", "--fresh"} {
+		_, _, err := runSessionCmd(t, ctx, "start", "r", "-d", flag)
+		is.True(err != nil && strings.Contains(err.Error(), "unknown flag: "+flag))
+	}
+	for _, flag := range []string{"--force", "--delete-snapshot"} {
+		_, _, err := runSessionCmd(t, ctx, "delete", "x", flag)
+		is.True(err != nil && strings.Contains(err.Error(), "unknown flag: "+flag))
+	}
 }

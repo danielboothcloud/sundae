@@ -54,36 +54,19 @@ type Source interface {
 	// `session attach` do before they attach. The Attacher counts a bridge
 	// on the session until it is closed.
 	Prepare(ctx context.Context, req sessionctl.Request) (Attacher, error)
-	// End ends a session, deleting its sandbox. It reports whether there
-	// was one. When the session's S3 snapshot fails it is not ended
-	// (openshell.ErrSnapshotFailed), unless force is set.
-	End(ctx context.Context, name string, force bool) (bool, error)
-	// SnapshotsOnEnd reports whether ending a session saves /sandbox to
-	// S3 first.
-	SnapshotsOnEnd() bool
-	// SnapshotsEnabled reports whether S3 snapshots are configured, so the
-	// Snapshots view and end-and-delete are offered.
-	SnapshotsEnabled() bool
-	// EndDeletingSnapshot ends a session and deletes its S3 snapshot,
-	// taking none (session end --delete-snapshot). It reports whether
-	// there was a session.
-	EndDeletingSnapshot(ctx context.Context, name string) (bool, error)
-	// Snapshots lists the user's stored snapshots, newest first.
-	Snapshots(ctx context.Context) ([]openshell.StoredSnapshot, error)
-	// DeleteSnapshot deletes the snapshot of the session name.
-	DeleteSnapshot(ctx context.Context, name string) (openshell.StoredSnapshot, error)
-	// PruneSnapshots deletes the snapshots of ended sessions older than
-	// olderThan (0: any age) and returns them.
-	PruneSnapshots(ctx context.Context, olderThan time.Duration) ([]openshell.StoredSnapshot, error)
-	// Park parks a running session. It reports whether it parked it.
-	Park(ctx context.Context, name string) (bool, error)
+	// Delete deletes a session, its sandbox and its storage. It reports
+	// whether there was one.
+	Delete(ctx context.Context, name string) (bool, error)
+	// Suspend suspends a running session, keeping its storage. It reports
+	// whether it suspended it.
+	Suspend(ctx context.Context, name string) (bool, error)
 	// AttachCommand is the command that attaches to the session from a
 	// terminal.
 	AttachCommand(name string) string
 	// SyncRepos brings the session's checkouts up to date: it first syncs
 	// each repository imported from a forge from that forge (server
 	// admins only, like the Forges tab), then resumes the session if it
-	// is parked and updates its checkouts (openshell.UpdateCheckouts).
+	// is suspended and updates its checkouts (openshell.UpdateCheckouts).
 	SyncRepos(ctx context.Context, name string, repos []string) ([]RepoSync, error)
 }
 
@@ -269,58 +252,20 @@ func (s *source) Prepare(ctx context.Context, req sessionctl.Request) (Attacher,
 	return &attacher{Prepared: p, client: client}, nil
 }
 
-func (s *source) End(ctx context.Context, name string, force bool) (existed bool, err error) {
+func (s *source) Delete(ctx context.Context, name string) (existed bool, err error) {
 	err = s.withClient(func(mgr *openshell.Manager) error {
-		res, err := mgr.EndSession(ctx, s.user, name, openshell.EndOptions{Force: force})
-		existed = res.Existed
+		existed, err = mgr.Delete(ctx, s.user, name)
 		return err //nolint:wrapcheck
 	})
 	return existed, err
 }
 
-func (s *source) SnapshotsOnEnd() bool { return s.cfg.Snapshots.S3.Snapshots(config.SnapshotOnEnd) }
-
-func (s *source) SnapshotsEnabled() bool { return s.cfg.Snapshots.S3.Enabled }
-
-func (s *source) EndDeletingSnapshot(ctx context.Context, name string) (existed bool, err error) {
+func (s *source) Suspend(ctx context.Context, name string) (suspended bool, err error) {
 	err = s.withClient(func(mgr *openshell.Manager) error {
-		res, err := mgr.EndSession(ctx, s.user, name, openshell.EndOptions{DeleteSnapshot: true})
-		existed = res.Existed
+		suspended, err = mgr.Suspend(ctx, s.user, name)
 		return err //nolint:wrapcheck
 	})
-	return existed, err
-}
-
-func (s *source) Snapshots(ctx context.Context) (out []openshell.StoredSnapshot, err error) {
-	err = s.withClient(func(mgr *openshell.Manager) error {
-		out, err = mgr.Snapshots(ctx, s.user)
-		return err //nolint:wrapcheck
-	})
-	return out, err
-}
-
-func (s *source) DeleteSnapshot(ctx context.Context, name string) (out openshell.StoredSnapshot, err error) {
-	err = s.withClient(func(mgr *openshell.Manager) error {
-		out, err = mgr.DeleteSnapshot(ctx, s.user, name)
-		return err //nolint:wrapcheck
-	})
-	return out, err
-}
-
-func (s *source) PruneSnapshots(ctx context.Context, olderThan time.Duration) (out []openshell.StoredSnapshot, err error) {
-	err = s.withClient(func(mgr *openshell.Manager) error {
-		out, err = mgr.PruneSnapshots(ctx, s.user, openshell.PruneOptions{OlderThan: olderThan})
-		return err //nolint:wrapcheck
-	})
-	return out, err
-}
-
-func (s *source) Park(ctx context.Context, name string) (parked bool, err error) {
-	err = s.withClient(func(mgr *openshell.Manager) error {
-		parked, err = mgr.Park(ctx, s.user, name)
-		return err //nolint:wrapcheck
-	})
-	return parked, err
+	return suspended, err
 }
 
 func (s *source) AttachCommand(name string) string {
@@ -347,7 +292,7 @@ func (s *source) SyncRepos(ctx context.Context, name string, repos []string) ([]
 		}
 	}
 
-	// Prepare resumes a parked session and renews the sandbox's git
+	// Prepare resumes a suspended session and renews the sandbox's git
 	// credentials, which the fetch uses.
 	client, err := NewClient(s.cfg)
 	if err != nil {

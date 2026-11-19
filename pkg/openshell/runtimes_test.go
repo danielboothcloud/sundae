@@ -153,16 +153,16 @@ func TestPodRuntimeSession(t *testing.T) {
 		t.Fatalf("list = %+v", infos)
 	}
 
-	// Park: the pod goes, the volume stays.
-	if parked, err := h.mgr.Park(ctx, alice, "main"); err != nil || !parked {
-		t.Fatalf("park: %v %v", parked, err)
+	// Suspend: the pod goes, the volume stays.
+	if suspended, err := h.mgr.Suspend(ctx, alice, "main"); err != nil || !suspended {
+		t.Fatalf("suspend: %v %v", suspended, err)
 	}
 	if _, err := h.cs.CoreV1().Pods("sundae").Get(ctx, s.Sandbox, metav1.GetOptions{}); err == nil {
 		t.Fatal("pod still there")
 	}
 	infos, _ = h.mgr.List(ctx, alice)
-	if PhaseWord(infos[0].Phase) != WordParked {
-		t.Fatalf("parked phase = %q", infos[0].Phase)
+	if PhaseWord(infos[0].Phase) != WordSuspended {
+		t.Fatalf("suspended phase = %q", infos[0].Phase)
 	}
 
 	// Attach resumes it: a new pod, the program started again.
@@ -171,22 +171,22 @@ func TestPodRuntimeSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !s.Unparked || !s.Started || s.Created {
+	if !s.WasSuspended || !s.Started || s.Created {
 		t.Fatalf("resumed session = %+v", s)
 	}
-	if !strings.Contains(progress.String(), "parking stopped it") {
+	if !strings.Contains(progress.String(), "suspending stopped it") {
 		t.Fatalf("progress = %q", progress.String())
 	}
 
-	// End: pod and volume go.
-	if existed, err := h.mgr.End(ctx, alice, "main"); err != nil || !existed {
-		t.Fatalf("end: %v %v", existed, err)
+	// Delete: pod and volume go.
+	if existed, err := h.mgr.Delete(ctx, alice, "main"); err != nil || !existed {
+		t.Fatalf("delete: %v %v", existed, err)
 	}
 	if _, err := h.cs.CoreV1().PersistentVolumeClaims("sundae").Get(ctx, s.Sandbox, metav1.GetOptions{}); err == nil {
 		t.Fatal("claim still there")
 	}
 	if _, err := h.mgr.Resume(ctx, StartOptions{User: alice, Name: "main"}); !errors.Is(err, ErrNoSession) {
-		t.Fatalf("resume ended: %v", err)
+		t.Fatalf("resume deleted: %v", err)
 	}
 }
 
@@ -267,18 +267,18 @@ func TestDockerRuntimeSession(t *testing.T) {
 		t.Fatalf("list: %+v %v", infos, err)
 	}
 
-	if parked, err := mgr.Park(ctx, alice, "main"); err != nil || !parked {
-		t.Fatalf("park: %v %v", parked, err)
+	if suspended, err := mgr.Suspend(ctx, alice, "main"); err != nil || !suspended {
+		t.Fatalf("suspend: %v %v", suspended, err)
 	}
 	progress.Reset()
 	s, err = mgr.Resume(ctx, StartOptions{User: alice, Name: "main", Progress: &progress})
-	if err != nil || !s.Unparked || !s.Started {
+	if err != nil || !s.WasSuspended || !s.Started {
 		t.Fatalf("resume: %+v %v", s, err)
 	}
-	if !strings.Contains(progress.String(), "a parked docker session keeps /sandbox") {
+	if !strings.Contains(progress.String(), "a suspended docker session keeps /sandbox") {
 		t.Fatalf("progress = %q", progress.String())
 	}
-	if existed, err := mgr.End(ctx, alice, "main"); err != nil || !existed || len(engine.Containers)+len(engine.Volumes) != 0 {
-		t.Fatalf("end: %v %v", existed, err)
+	if existed, err := mgr.Delete(ctx, alice, "main"); err != nil || !existed || len(engine.Containers)+len(engine.Volumes) != 0 {
+		t.Fatalf("delete: %v %v", existed, err)
 	}
 }

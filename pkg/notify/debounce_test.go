@@ -233,13 +233,13 @@ func TestClassifier(t *testing.T) {
 
 	// Ending a session forgets its statuses, so a new session of the same
 	// name notifies again.
-	ended := events.SessionLifecycleEvent(1, events.SessionLifecycle{
+	deleted := events.SessionLifecycleEvent(1, events.SessionLifecycle{
 		Session: events.Session{User: "alice", Repo: "infra", Sandbox: "sb"},
-		Step:    events.LifecycleEnded,
+		Step:    events.LifecycleDeleted,
 	})
 	c.classify(statusEv(1, "sb", "", events.StateDone, "", "ok"))
-	if _, ok := c.classify(ended); !ok {
-		t.Fatal("ended not observed")
+	if _, ok := c.classify(deleted); !ok {
+		t.Fatal("deleted not observed")
 	}
 	if n, ok := c.classify(statusEv(1, "sb", "", events.StateDone, "", "ok")); !ok || !n.trigger {
 		t.Fatalf("after end: %+v %v", n, ok)

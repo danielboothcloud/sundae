@@ -101,7 +101,8 @@ func TestLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if *pvc.Spec.StorageClassName != "fast" || pvc.Spec.Resources.Requests.Storage().String() != config.DefaultPodStorageSize {
+	if *pvc.Spec.StorageClassName != "fast" || pvc.Spec.Resources.Requests.Storage().String() != config.DefaultPodStorageSize ||
+		!slices.Equal(pvc.Spec.AccessModes, []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}) {
 		t.Fatalf("claim spec = %+v", pvc.Spec)
 	}
 	pod, err := cs.CoreV1().Pods(ns).Get(ctx, "sd-a", metav1.GetOptions{})
@@ -149,20 +150,20 @@ func TestLifecycle(t *testing.T) {
 		t.Fatalf("foreign resume: %v", err)
 	}
 
-	// Park: the pod goes, the claim stays.
+	// Suspend: the pod goes, the claim stays.
 	sb, err = r.SuspendSandbox(ctx, "sd-a")
 	if err != nil || sb.Phase != sbx.Suspended {
 		t.Fatalf("suspend: %+v %v", sb, err)
 	}
 	if _, err := cs.CoreV1().Pods(ns).Get(ctx, "sd-a", metav1.GetOptions{}); err == nil {
-		t.Fatal("pod still there after park")
+		t.Fatal("pod still there after suspend")
 	}
 	if sb, err := r.GetSandbox(ctx, "sd-a"); err != nil || sb.Phase != sbx.Suspended || sb.Image != "img:2" {
-		t.Fatalf("parked: %+v %v", sb, err)
+		t.Fatalf("suspended: %+v %v", sb, err)
 	}
 	list, err := r.ListSandboxes(ctx, map[string]string{sbx.LabelManaged: "true"})
 	if err != nil || len(list) != 1 || list[0].Phase != sbx.Suspended {
-		t.Fatalf("list parked: %+v %v", list, err)
+		t.Fatalf("list suspended: %+v %v", list, err)
 	}
 
 	// Resume: the pod is created again from the recorded template, not
@@ -177,7 +178,7 @@ func TestLifecycle(t *testing.T) {
 		t.Fatalf("resumed pod spec = %+v", pod.Spec)
 	}
 
-	// End: both go.
+	// Delete: both go.
 	if err := r.DeleteSandbox(ctx, "sd-a"); err != nil {
 		t.Fatal(err)
 	}
@@ -395,5 +396,57 @@ func TestTemplateRoundTrip(t *testing.T) {
 	b, _ := json.Marshal(got)
 	if !bytes.Equal(a, b) {
 		t.Fatalf("template changed:\n%s\n%s", a, b)
+	}
+}
+
+func TestSharedVolumesAndAccessModes(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.DefaultConfig()
+	cfg.DataPath = t.TempDir()
+	cfg.Sessions.Runtime = config.RuntimePod
+	cfg.Pod.Image = "sandbox:1"
+	cfg.Pod.StorageAccessModes = []string{"ReadWriteMany"}
+	cfg.Pod.SharedVolumes = []config.SharedVolume{{Name: "mise", ClaimName: "mise-cache", MountPath: "/mise"}}
+	cfg.Sessions.Profiles = map[string]config.SessionProfile{
+		"ro": {Pod: &config.PodSettings{SharedVolumes: []config.SharedVolume{{Name: "mise", ClaimName: "mise-cache", MountPath: "/mise", ReadOnly: true, SubPath: "v1"}}}},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	r, cs := newTestRuntime(t, cfg, nil)
+	if _, _, err := r.EnsureSandbox(ctx, "sd-b", request("ro")); err != nil {
+		t.Fatal(err)
+	}
+	pvc, err := cs.CoreV1().PersistentVolumeClaims(ns).Get(ctx, "sd-b", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(pvc.Spec.AccessModes, []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany}) {
+		t.Fatalf("access modes = %v", pvc.Spec.AccessModes)
+	}
+	pod, err := cs.CoreV1().Pods(ns).Get(ctx, "sd-b", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	vols := pod.Spec.Volumes
+	if len(vols) != 2 || vols[1].Name != "mise" || vols[1].PersistentVolumeClaim.ClaimName != "mise-cache" || !vols[1].PersistentVolumeClaim.ReadOnly {
+		t.Fatalf("volumes = %+v", vols)
+	}
+	m := pod.Spec.Containers[0].VolumeMounts
+	if len(m) != 2 || m[1].MountPath != "/mise" || !m[1].ReadOnly || m[1].SubPath != "v1" {
+		t.Fatalf("mounts = %+v", m)
+	}
+	// Suspend keeps the session's claim; the shared claim is never Sundae's to delete.
+	if _, err := r.SuspendSandbox(ctx, "sd-b"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cs.CoreV1().PersistentVolumeClaims(ns).Get(ctx, "sd-b", metav1.GetOptions{}); err != nil {
+		t.Fatalf("claim gone after suspend: %v", err)
+	}
+	if err := r.DeleteSandbox(ctx, "sd-b"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cs.CoreV1().PersistentVolumeClaims(ns).Get(ctx, "sd-b", metav1.GetOptions{}); err == nil {
+		t.Fatal("claim still there after delete")
 	}
 }

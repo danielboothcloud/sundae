@@ -8,11 +8,11 @@
   ┃   App╭──────────────────────────────╮estroy…
          │ infra / claude-1             │
     ✓ sun│ > enter  Attach              │
-      don│   z      Park                │
+      don│   z      Suspend             │
       Imp│   A      Add repos           │
          │   u      Sync with forge     │
     ● gat│   c      Copy attach command │
-      wor│   d      End                 │
+      wor│   d      Delete              │
       bas╰──────────────────────────────╯
 
 

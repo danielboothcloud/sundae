@@ -21,7 +21,7 @@ config.openshell.sandbox_policy is "image": Sundae sends no sandbox policy, so t
 image's /etc/openshell/policy.yaml must allow that (OpenShell otherwise denies all
 sandbox egress). See the chart README, "Sandbox egress".
 {{- else }}
-Sundae gives each sandbox it creates a policy allowing that{{ if (($cfg.snapshots).s3).enabled }} and the S3 snapshot endpoint{{ end }}
+Sundae gives each sandbox it creates a policy allowing that
 {{- with $os.network_policies }}, plus {{ len . }} rule(s) from config.openshell.network_policies{{ end }}.
 Other egress is denied unless an attached provider allows it; see the chart README, "Sandbox egress".
 {{- end }}
@@ -38,7 +38,12 @@ Other egress is denied unless an attached provider allows it; see the chart READ
 
 Pod sessions are enabled ({{ if eq (toString $s.runtime) "pod" }}the default runtime{{ if $profiles }}, and the profile(s) {{ join ", " $profiles }}{{ end }}{{ else }}profile(s) {{ join ", " $profiles }}{{ end }}):
 each session is a Pod and a PVC in namespace {{ $cfg.pod.namespace }}, created with
-ServiceAccount {{ include "sundae.serviceAccountName" . }}.
+ServiceAccount {{ include "sundae.serviceAccountName" . }}. `session suspend` deletes the Pod and keeps
+the PVC; `session delete` deletes both.
+The PVCs use StorageClass {{ $cfg.pod.storage_class | default "(the cluster's default)" }}{{ if .Values.podRuntime.storageClass.create }}, created by this release{{ end }}.
+{{- with $cfg.pod.shared_volumes }}
+Every session Pod mounts {{ range $i, $v := . }}{{ if $i }}, {{ end }}PVC {{ $v.claim_name }} at {{ $v.mount_path }}{{ if $v.read_only }} (read-only){{ end }}{{ end }}.
+{{- end }}
 {{- if not .Values.podRuntime.rbac.create }}
 podRuntime.rbac.create is off: that ServiceAccount needs a Role there (see the chart README, "Pod runtime").
 {{- end }}

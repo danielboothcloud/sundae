@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"slices"
 	"strconv"
 	"strings"
@@ -25,25 +24,23 @@ const (
 	// DefaultPollTimeout bounds one gateway call of a poll: the sandbox
 	// listing, and each sandbox's `osewa local ls` exec.
 	DefaultPollTimeout = 15 * time.Second
-	// parkTimeout bounds one park: the suspend call and the wait for the
-	// sandbox to be Suspended.
-	parkTimeout = suspendTimeout
 )
 
-// Who parked a session: the Op of a LifecycleParked event.
+// Who suspended a session: the Op of a LifecycleSuspended event.
 const (
-	// ParkAuto: the Monitor parked an idle session.
-	ParkAuto = "auto"
-	// ParkManual: the user ran `session park`.
-	ParkManual = "park"
+	// SuspendAuto: the Monitor suspended an idle session.
+	SuspendAuto = "auto"
+	// SuspendManual: the user ran `session suspend`.
+	SuspendManual = "suspend"
 )
 
-// ErrBridgeOpen is returned when parking a session that has an open SSH
+// ErrBridgeOpen is returned when suspending a session that has an open SSH
 // bridge.
 var ErrBridgeOpen = errors.New("the session has an open bridge; detach first")
 
-// ErrParkInProgress is returned when the session is already being parked.
-var ErrParkInProgress = errors.New("the session is already being parked")
+// ErrSuspendInProgress is returned when the session is already being
+// suspended.
+var ErrSuspendInProgress = errors.New("the session is already being suspended")
 
 // SessionStatus is what the Monitor knows of one session.
 type SessionStatus struct {
@@ -55,9 +52,9 @@ type SessionStatus struct {
 	Profile string `json:"profile,omitempty"`
 	// Phase is the sandbox phase at the last listing.
 	Phase string `json:"phase"`
-	// Parked reports whether the sandbox is suspended (or suspending). A
-	// parked session keeps the status it had when it was parked.
-	Parked bool `json:"parked"`
+	// Suspended reports whether the sandbox is suspended (or suspending).
+	// A suspended session keeps the status it had when it was suspended.
+	Suspended bool `json:"suspended"`
 	// Record is the session's latest root OSC 7501 record; its State is
 	// events.StateNone when there is none. Title and Msg are untrusted
 	// program output.
@@ -89,7 +86,7 @@ type SessionStatus struct {
 	// Error is why the last poll failed; empty when it succeeded.
 	Error string `json:"error,omitempty"`
 	// Stale reports that the status is the last one known: the last poll
-	// failed, or the sandbox is neither running nor parked.
+	// failed, or the sandbox is neither running nor suspended.
 	Stale bool `json:"stale"`
 	// Unsuspendable is why the gateway refused to suspend the sandbox;
 	// Sundae does not try again while it runs.
@@ -116,8 +113,8 @@ type entry struct {
 // the sandboxes Sundae created and, in each Ready one, runs `osewa local
 // ls` (one exec each, a bounded number at a time) to read the session's
 // status, publishing changes on the event bus. It counts the SSH bridges
-// open on each session and, when parking is enabled, suspends sessions that
-// nobody has used for a while.
+// open on each session and, when sessions.suspend is enabled, suspends
+// sessions that nobody has used for a while.
 //
 // It keeps everything in memory; after a restart it starts again from what
 // the sandboxes report. A nil *Monitor is valid: it knows nothing and
@@ -132,18 +129,14 @@ type Monitor struct {
 	timeout     time.Duration
 	concurrency int
 	suspend     config.SessionSuspendConfig
-	// snaps is the S3 snapshot store; nil when snapshots are off.
-	snaps *snapshotStore
-	// fallback parks sessions the gateway cannot suspend to their S3
-	// snapshot (sessions.suspend.fallback: snapshot).
-	fallback bool
 
 	mu      sync.Mutex
 	entries map[string]*entry
 	// bridges counts the open bridges per sandbox.
 	bridges map[string]int
-	// parking holds a channel per sandbox being parked, closed when done.
-	parking map[string]chan struct{}
+	// suspending holds a channel per sandbox being suspended, closed when
+	// done.
+	suspending map[string]chan struct{}
 	// unsuspendable maps a sandbox to the gateway's refusal to suspend it.
 	unsuspendable map[string]string
 	// listed reports whether a listing has succeeded.
@@ -158,15 +151,15 @@ type Monitor struct {
 	reposMu   sync.Mutex
 	repoLists map[string][]string
 
-	// parks tracks background parks; parkSem bounds them.
-	parks   sync.WaitGroup
-	parkSem chan struct{}
+	// suspends tracks background suspends; suspendSem bounds them.
+	suspends   sync.WaitGroup
+	suspendSem chan struct{}
 }
 
 // MonitorOption configures a Monitor.
 type MonitorOption func(*Monitor)
 
-// WithMonitorEvents publishes status changes, exits and parks on bus.
+// WithMonitorEvents publishes status changes, exits and suspends on bus.
 func WithMonitorEvents(bus *events.Bus) MonitorOption {
 	return func(m *Monitor) { m.bus = bus }
 }
@@ -177,7 +170,7 @@ func WithMonitorLogger(l *log.Logger) MonitorOption {
 }
 
 // NewMonitor returns a Monitor configured from cfg.Sessions. newClient is
-// called for every poll and every park, and the client closed after, so a
+// called for every poll and every suspend, and the client closed after, so a
 // rotated gateway token is picked up as it is by the session commands.
 func NewMonitor(newClient func() (Client, error), cfg *config.Config, opts ...MonitorOption) *Monitor {
 	m := &Monitor{
@@ -188,12 +181,10 @@ func NewMonitor(newClient func() (Client, error), cfg *config.Config, opts ...Mo
 		timeout:       DefaultPollTimeout,
 		concurrency:   DefaultPollConcurrency,
 		suspend:       cfg.Sessions.Suspend,
-		snaps:         newSnapshotStore(cfg),
-		fallback:      cfg.SnapshotFallback(),
 		entries:       map[string]*entry{},
 		repoLists:     map[string][]string{},
 		bridges:       map[string]int{},
-		parking:       map[string]chan struct{}{},
+		suspending:    map[string]chan struct{}{},
 		unsuspendable: map[string]string{},
 	}
 	if m.interval <= 0 {
@@ -209,17 +200,17 @@ func NewMonitor(newClient func() (Client, error), cfg *config.Config, opts ...Mo
 		m.logger = log.Default()
 	}
 	m.logger = m.logger.WithPrefix("sessions")
-	m.parkSem = make(chan struct{}, m.concurrency)
+	m.suspendSem = make(chan struct{}, m.concurrency)
 	return m
 }
 
 // Run polls at once and then every poll interval until ctx is done, and
-// returns once the parks it started have finished.
+// returns once the suspends it started have finished.
 func (m *Monitor) Run(ctx context.Context) {
 	if m == nil {
 		return
 	}
-	defer m.parks.Wait()
+	defer m.suspends.Wait()
 	for {
 		m.Poll(ctx)
 		select {
@@ -231,8 +222,8 @@ func (m *Monitor) Run(ctx context.Context) {
 }
 
 // Poll runs one round now: list the sandboxes, read every running
-// session's status, and start parking the sessions that are due. Run calls
-// it on every tick; parks it starts finish in the background.
+// session's status, and start suspending the sessions that are due. Run
+// calls it on every tick; suspends it starts finish in the background.
 func (m *Monitor) Poll(ctx context.Context) {
 	if m == nil {
 		return
@@ -254,7 +245,7 @@ func (m *Monitor) Poll(ctx context.Context) {
 
 	m.pollAll(ctx, client, m.reconcile(sbs))
 	if m.suspend.Enabled {
-		m.parkIdle(ctx)
+		m.suspendIdle(ctx)
 	}
 }
 
@@ -275,7 +266,7 @@ func (m *Monitor) listFailed(err error) {
 
 // managedSandbox returns the owner of a sandbox Sundae created: one
 // labelled managed, with a numeric owner and a repository. Sundae never
-// polls or parks any other.
+// polls or suspends any other.
 func managedSandbox(sb *Sandbox) (userID int64, ok bool) {
 	if sb == nil || sb.Labels[LabelManaged] != "true" || sb.Annotations[AnnotationRepo] == "" {
 		return 0, false
@@ -296,43 +287,27 @@ func (m *Monitor) sessionOf(sb *Sandbox) events.Session {
 	return events.NewSession(sb.Annotations[AnnotationUser], name, sb.Name, m.SessionRepos(sb))
 }
 
-func isParkedPhase(p sbx.Phase) bool {
+func isSuspendedPhase(p sbx.Phase) bool {
 	return p == sbx.Suspended || p == sbx.Suspending
 }
 
 // Sandbox lifecycle words, shown after a session's state.
 const (
-	WordParked   = "parked"
-	WordStarting = "starting"
-	// WordParkedSnapshot is a session parked to its S3 snapshot: it has no
-	// sandbox, and its program was stopped.
-	WordParkedSnapshot = "parked (snapshot)"
+	WordSuspended = "suspended"
+	WordStarting  = "starting"
 )
 
-// PhaseSnapshot is the phase Sundae shows for a session parked to its
-// S3 snapshot. It is not a sandbox phase: the session has no sandbox.
-const PhaseSnapshot = "Snapshot"
-
 // PhaseWord returns the lifecycle word shown after a session's state for a
-// sandbox phase: WordParked for a suspended (or suspending) sandbox,
-// WordParkedSnapshot for PhaseSnapshot, WordStarting for one being
-// provisioned or started, else "".
+// sandbox phase: WordSuspended for a suspended (or suspending) sandbox,
+// WordStarting for one being provisioned or started, else "".
 func PhaseWord(phase string) string {
 	switch sbx.Phase(phase) {
 	case sbx.Suspended, sbx.Suspending:
-		return WordParked
+		return WordSuspended
 	case sbx.Provisioning, sbx.Starting:
 		return WordStarting
-	case PhaseSnapshot:
-		return WordParkedSnapshot
 	}
 	return ""
-}
-
-// IsParkedWord reports whether a lifecycle word is a park: WordParked or
-// WordParkedSnapshot.
-func IsParkedWord(word string) bool {
-	return word == WordParked || word == WordParkedSnapshot
 }
 
 // reconcile brings the entries in line with a listing and returns the
@@ -369,7 +344,7 @@ func (m *Monitor) reconcile(sbs []*Sandbox) []string {
 		prev := e.st.Phase
 		phase := sb.Phase
 		e.st.Phase = string(phase)
-		e.st.Parked = isParkedPhase(phase)
+		e.st.Suspended = isSuspendedPhase(phase)
 		if phase == sbx.Ready {
 			if prev != "" && prev != string(sbx.Ready) {
 				// Resumed or started again: a new idle window.
@@ -378,10 +353,10 @@ func (m *Monitor) reconcile(sbs []*Sandbox) []string {
 			ready = append(ready, sb.Name)
 			continue
 		}
-		// Not exec'd: keep the last known status. A parked session's
-		// program is frozen, so its status still holds.
-		e.st.Stale = !e.st.Parked
-		if !e.st.Parked {
+		// Not exec'd: keep the last known status. A suspended session's
+		// program is not running, so its last status still holds.
+		e.st.Stale = !e.st.Suspended
+		if !e.st.Suspended {
 			e.st.Error = ""
 		}
 	}
@@ -478,7 +453,7 @@ func (m *Monitor) observe(sandbox, id string, ls osewaList, pollErr error) {
 	m.mu.Lock()
 	e := m.entries[sandbox]
 	if e == nil {
-		// Ended while it was polled.
+		// Deleted while it was polled.
 		m.mu.Unlock()
 		return
 	}
@@ -561,22 +536,23 @@ func (m *Monitor) observe(sandbox, id string, ls osewaList, pollErr error) {
 	}
 }
 
-// parkable reports whether a session is due to be parked, and if not, why.
+// suspendable reports whether a session is due to be suspended, and if not,
+// why.
 //
-// A session is parked once, for the whole of `after`, nobody has been
+// A session is suspended once, for the whole of `after`, nobody has been
 // attached (no osewa client, no Sundae bridge) and it has not reported
 // working. Every other state counts as not working: idle, done, blocked,
 // error, and none. A program that never reported a status (none) must also
 // have been quiet: osewa has seen no output from it for `after`, so a plain
 // shell running a long build is not frozen mid-build. A program that has
-// exited, or whose osewa session is gone, runs nothing: it is parked like an
-// idle one, and the next start or attach starts it again either way.
-func parkable(e *entry, bridges int, now time.Time, after time.Duration, fallback bool) (bool, string) {
+// exited, or whose osewa session is gone, runs nothing: it is suspended like
+// an idle one, and the next start or attach starts it again either way.
+func suspendable(e *entry, bridges int, now time.Time, after time.Duration) (bool, string) {
 	st := e.st
 	switch {
 	case st.Phase != string(sbx.Ready):
 		return false, "the sandbox is " + st.Phase
-	case st.Unsuspendable != "" && !fallback:
+	case st.Unsuspendable != "":
 		return false, "the gateway cannot suspend it"
 	case bridges > 0:
 		return false, "a bridge is open"
@@ -594,19 +570,19 @@ func parkable(e *entry, bridges int, now time.Time, after time.Duration, fallbac
 	return true, ""
 }
 
-// parkIdle starts parking every session that is due.
-func (m *Monitor) parkIdle(ctx context.Context) {
+// suspendIdle starts suspending every session that is due.
+func (m *Monitor) suspendIdle(ctx context.Context) {
 	now := m.now()
 	m.mu.Lock()
 	var due []string
 	for name, e := range m.entries {
-		if _, busy := m.parking[name]; busy {
+		if _, busy := m.suspending[name]; busy {
 			continue
 		}
-		if _, no := m.unsuspendable[name]; no && !m.fallback {
+		if _, no := m.unsuspendable[name]; no {
 			continue
 		}
-		if ok, _ := parkable(e, m.bridges[name], now, m.suspend.After, m.fallback); ok {
+		if ok, _ := suspendable(e, m.bridges[name], now, m.suspend.After); ok {
 			due = append(due, name)
 		}
 	}
@@ -614,32 +590,32 @@ func (m *Monitor) parkIdle(ctx context.Context) {
 	slices.Sort(due)
 
 	for _, name := range due {
-		m.parks.Add(1)
+		m.suspends.Add(1)
 		go func() {
-			defer m.parks.Done()
+			defer m.suspends.Done()
 			select {
-			case m.parkSem <- struct{}{}:
+			case m.suspendSem <- struct{}{}:
 			case <-ctx.Done():
 				return
 			}
-			defer func() { <-m.parkSem }()
-			m.autoPark(ctx, name)
+			defer func() { <-m.suspendSem }()
+			m.autoSuspend(ctx, name)
 		}()
 	}
 }
 
-// autoPark parks an idle session and publishes parked.
-func (m *Monitor) autoPark(ctx context.Context, sandbox string) {
+// autoSuspend suspends an idle session and publishes suspended.
+func (m *Monitor) autoSuspend(ctx context.Context, sandbox string) {
 	client, err := m.newClient()
 	if err != nil {
-		m.logger.Warn("cannot park session", "sandbox", sandbox, "err", err)
+		m.logger.Warn("cannot suspend session", "sandbox", sandbox, "err", err)
 		return
 	}
 	defer client.Close() //nolint:errcheck
 
-	ctx, cancel := context.WithTimeout(ctx, parkTimeout)
+	ctx, cancel := context.WithTimeout(ctx, suspendTimeout)
 	defer cancel()
-	snapshot, err := m.park(ctx, client, sandbox, true)
+	err = m.suspendSandbox(ctx, client, sandbox, true)
 	switch {
 	case err == nil:
 		m.mu.Lock()
@@ -653,242 +629,85 @@ func (m *Monitor) autoPark(ctx context.Context, sandbox string) {
 		m.mu.Unlock()
 		if userID != 0 {
 			m.bus.Publish(events.SessionLifecycleEvent(userID, events.SessionLifecycle{
-				Session:  sess,
-				Step:     events.LifecycleParked,
-				Op:       ParkAuto,
-				Snapshot: snapshot,
+				Session: sess,
+				Step:    events.LifecycleSuspended,
+				Op:      SuspendAuto,
 			}))
 		}
-		if snapshot {
-			m.logger.Info("parked idle session to an S3 snapshot and deleted its sandbox", "sandbox", sandbox, "after", m.suspend.After)
-		} else {
-			m.logger.Info("parked idle session", "sandbox", sandbox, "after", m.suspend.After)
-		}
-	case errors.Is(err, errNotDue), errors.Is(err, ErrBridgeOpen), errors.Is(err, ErrParkInProgress):
+		m.logger.Info("suspended idle session", "sandbox", sandbox, "after", m.suspend.After)
+	case errors.Is(err, errNotDue), errors.Is(err, ErrBridgeOpen), errors.Is(err, ErrSuspendInProgress):
 	case IsSuspendUnsupported(err):
-		// Logged by park.
+		// Logged by suspendSandbox.
 	default:
-		if m.fallback {
-			// Not again until the session has been idle for another
-			// `after`.
-			m.mu.Lock()
-			m.touch(sandbox)
-			m.mu.Unlock()
-		}
-		m.logger.Warn("cannot park session", "sandbox", sandbox, "err", err)
+		m.logger.Warn("cannot suspend session", "sandbox", sandbox, "err", err)
 	}
 }
 
-// errNotDue is returned by park when an automatic park is no longer due.
+// errNotDue is returned by suspendSandbox when an automatic suspend is no
+// longer due.
 var errNotDue = errors.New("not due")
 
-// park parks the sandbox unless a bridge is open on it, it is being parked
-// already, or the gateway has refused to suspend it before (and there is
-// no snapshot fallback). auto parks re-check that the session is still
-// due. Commands that open a bridge meanwhile wait for the park to finish
+// suspendSandbox suspends the sandbox, keeping its storage, unless a bridge
+// is open on it, it is being suspended already, or its runtime has refused
+// to suspend it before. auto suspends re-check that the session is still
+// due. Commands that open a bridge meanwhile wait for the suspend to finish
 // (see OpenBridge), then resume it.
-//
-// It suspends the sandbox, after a backup snapshot when snapshots.s3.on
-// includes park. Where the gateway cannot suspend and
-// sessions.suspend.fallback is snapshot, it parks the session to its S3
-// snapshot instead (see parkToSnapshot), and reports snapshot.
-func (m *Monitor) park(ctx context.Context, client Client, sandbox string, auto bool) (snapshot bool, err error) {
+func (m *Monitor) suspendSandbox(ctx context.Context, client Client, sandbox string, auto bool) error {
 	m.mu.Lock()
 	if m.bridges[sandbox] > 0 {
 		m.mu.Unlock()
-		return false, ErrBridgeOpen
+		return ErrBridgeOpen
 	}
-	if _, busy := m.parking[sandbox]; busy {
+	if _, busy := m.suspending[sandbox]; busy {
 		m.mu.Unlock()
-		return false, ErrParkInProgress
+		return ErrSuspendInProgress
 	}
-	reason, unsupported := m.unsuspendable[sandbox]
-	if unsupported && !m.fallback {
+	if reason, unsupported := m.unsuspendable[sandbox]; unsupported {
 		m.mu.Unlock()
-		return false, fmt.Errorf("%w: %s", ErrSuspendUnsupported, reason)
-	}
-	// The gateway has one compute driver: once it refused one sandbox,
-	// the fallback does not ask again for the next.
-	unsupported = unsupported || (m.fallback && m.warnedUnsupported)
-	var rec events.Record
-	if e := m.entries[sandbox]; e != nil {
-		rec = e.st.Record
+		return fmt.Errorf("%w: %s", ErrSuspendUnsupported, reason)
 	}
 	if auto {
 		e := m.entries[sandbox]
 		if e == nil {
 			m.mu.Unlock()
-			return false, errNotDue
+			return errNotDue
 		}
-		if ok, _ := parkable(e, 0, m.now(), m.suspend.After, m.fallback); !ok {
+		if ok, _ := suspendable(e, 0, m.now(), m.suspend.After); !ok {
 			m.mu.Unlock()
-			return false, errNotDue
+			return errNotDue
 		}
 	}
 	done := make(chan struct{})
-	m.parking[sandbox] = done
+	m.suspending[sandbox] = done
 	m.mu.Unlock()
 	defer func() {
 		m.mu.Lock()
-		delete(m.parking, sandbox)
+		delete(m.suspending, sandbox)
 		m.mu.Unlock()
 		close(done)
 	}()
 
-	if m.snaps != nil {
-		unlock, err := sandboxLocks.Lock(ctx, sandbox)
-		if err != nil {
-			return false, err
-		}
-		defer unlock()
-	}
-
-	op := ParkManual
-	if auto {
-		op = ParkAuto
-	}
-	if !unsupported {
-		var backup *SnapshotInfo
-		if m.snaps.onPark() {
-			backup = m.backup(ctx, client, sandbox)
-		}
-		sb, err := client.SuspendSandbox(ctx, sandbox)
-		switch {
-		case err == nil:
-			m.mu.Lock()
-			if e := m.entries[sandbox]; e != nil {
-				e.st.Phase = string(sbx.Suspended)
-				if sb != nil && sb.Phase != "" {
-					e.st.Phase = string(sb.Phase)
-				}
-				e.st.Parked = true
-			}
-			m.mu.Unlock()
-			return false, nil
-		case !IsSuspendUnsupported(err):
-			return false, err
-		}
+	sb, err := client.SuspendSandbox(ctx, sandbox)
+	switch {
+	case IsSuspendUnsupported(err):
 		m.markUnsuspendable(sandbox, err)
-		if !m.fallback {
-			return false, err
-		}
-		if err := m.parkToSnapshot(ctx, client, sandbox, op, rec, backup); err != nil {
-			return false, err
-		}
-		return true, nil
-	}
-	if err := m.parkToSnapshot(ctx, client, sandbox, op, rec, nil); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-// backup takes the snapshot snapshots.s3.on: [park] asks for before a
-// memory-retaining park. A failure is published and logged; the park goes
-// on.
-func (m *Monitor) backup(ctx context.Context, client Client, sandbox string) *SnapshotInfo {
-	sb, err := client.GetSandbox(ctx, sandbox)
-	if err != nil {
-		m.logger.Warn("cannot snapshot session before parking it", "sandbox", sandbox, "err", err)
-		return nil
-	}
-	userID, ok := managedSandbox(sb)
-	if !ok {
-		return nil
-	}
-	sess := m.sessionOf(sb)
-	info, err := m.snaps.take(ctx, client, userID, sess, io.Discard)
-	if err != nil {
-		m.logger.Warn("cannot snapshot session before parking it", "sandbox", sandbox, "err", err)
-		m.bus.Publish(events.SessionLifecycleEvent(userID, events.SessionLifecycle{
-			Session: sess, Step: events.LifecycleFailed, Op: "snapshot", Reason: err.Error(),
-		}))
-		return nil
-	}
-	m.bus.Publish(events.SessionLifecycleEvent(userID, events.SessionLifecycle{
-		Session: sess, Step: events.LifecycleSnapshotted, Op: "park", Bytes: info.Size,
-	}))
-	return info
-}
-
-// parkToSnapshot parks a session the gateway cannot suspend: it snapshots
-// /sandbox (unless taken is a snapshot taken a moment ago), records the
-// session as parked next to the snapshot (ParkedSnapshot), and deletes the
-// sandbox. The session's program is stopped; start and attach recreate the
-// sandbox, restore /sandbox and start the program again. The marker is the
-// session's only record while it has no sandbox, which is why it is written
-// before the sandbox is deleted, and removed again if the delete fails.
-func (m *Monitor) parkToSnapshot(ctx context.Context, client Client, sandbox, op string, rec events.Record, taken *SnapshotInfo) error {
-	sb, err := client.GetSandbox(ctx, sandbox)
-	if err != nil {
-		return fmt.Errorf("openshell: get sandbox %q: %w", sandbox, err)
-	}
-	userID, ok := managedSandbox(sb)
-	if !ok {
-		return fmt.Errorf("openshell: sandbox %q was not created by Sundae; not parking it", sandbox)
-	}
-	if sb.Phase != sbx.Ready {
-		return fmt.Errorf("openshell: sandbox %q is %s; only a running session can be parked", sandbox, sb.Phase)
-	}
-	sess := m.sessionOf(sb)
-	info := taken
-	if info == nil {
-		info, err = m.snaps.take(ctx, client, userID, sess, io.Discard)
-		if err != nil {
-			m.bus.Publish(events.SessionLifecycleEvent(userID, events.SessionLifecycle{
-				Session: sess, Step: events.LifecycleFailed, Op: "snapshot", Reason: err.Error(),
-			}))
-			return fmt.Errorf("openshell: park session to a snapshot: %w", err)
-		}
-		m.bus.Publish(events.SessionLifecycleEvent(userID, events.SessionLifecycle{
-			Session: sess, Step: events.LifecycleSnapshotted, Op: "park", Bytes: info.Size,
-		}))
-	}
-
-	marker := ParkedSnapshot{
-		UserID:  userID,
-		User:    sess.User,
-		Repo:    sess.Repo,
-		Repos:   sess.Repos,
-		Session: sess.Name,
-		Sandbox: sandbox,
-		Profile: sb.Annotations[AnnotationProfile],
-		Parked:  m.now().UTC(),
-		Op:      op,
-		Record:  rec,
-		Size:    info.Size,
-	}
-	marker.Image = sb.Image
-	if r := SandboxRuntime(sb); r != config.RuntimeOpenShell {
-		marker.Runtime = r
-	}
-	// Record the default runtime too, so a later openshell.runtime_class
-	// or profile change does not move the session to another runtime.
-	marker.RuntimeClass = SandboxRuntimeClass(sb)
-	if marker.RuntimeClass == "" {
-		marker.RuntimeClass = config.RuntimeClassDefault
-	}
-	if err := m.snaps.writeMarker(ctx, marker); err != nil {
-		return fmt.Errorf("openshell: record the session as parked: %w", err)
-	}
-	if err := client.DeleteSandbox(ctx, sandbox); err != nil {
-		if derr := m.snaps.deleteMarker(context.WithoutCancel(ctx), userID, sandbox); derr != nil {
-			m.logger.Warn("cannot clear a parked marker", "sandbox", sandbox, "err", derr)
-		}
+		return err
+	case err != nil:
 		return err
 	}
-
 	m.mu.Lock()
 	if e := m.entries[sandbox]; e != nil {
-		e.st.Phase = PhaseSnapshot
-		e.st.Parked = true
-		e.st.Running = false
+		e.st.Phase = string(sbx.Suspended)
+		if sb != nil && sb.Phase != "" {
+			e.st.Phase = string(sb.Phase)
+		}
+		e.st.Suspended = true
 	}
 	m.mu.Unlock()
 	return nil
 }
 
-// markUnsuspendable stops parking a sandbox the gateway cannot suspend. The
+// markUnsuspendable stops suspending a sandbox its runtime cannot suspend. The
 // first refusal is logged as a warning; the gateway has one compute driver,
 // so later ones say the same and are logged at debug level.
 func (m *Monitor) markUnsuspendable(sandbox string, err error) {
@@ -898,37 +717,30 @@ func (m *Monitor) markUnsuspendable(sandbox string, err error) {
 	m.warnedUnsupported = true
 	m.mu.Unlock()
 	if first {
-		m.logger.Warn("the OpenShell gateway cannot suspend sandboxes; sessions it refuses are left running", "sandbox", sandbox, "err", err)
+		m.logger.Warn("the OpenShell gateway cannot suspend sandboxes; idle sessions it refuses are left running", "sandbox", sandbox, "err", err)
 	} else {
 		m.logger.Debug("the OpenShell gateway cannot suspend sandbox", "sandbox", sandbox, "err", err)
 	}
 }
 
-// Park parks a session for the user's `session park`: see park. It is the
-// caller's job to check ownership and publish.
-func (m *Monitor) Park(ctx context.Context, client Client, sandbox string) error {
-	_, err := m.ParkSession(ctx, client, sandbox)
-	return err
-}
-
-// ParkSession is Park, reporting whether the session was parked to its S3
-// snapshot (its sandbox deleted, its program stopped) rather than
-// suspended. A nil Monitor only suspends.
-func (m *Monitor) ParkSession(ctx context.Context, client Client, sandbox string) (snapshot bool, err error) {
+// Suspend suspends a session for the user's `session suspend`: see
+// suspendSandbox. It is the caller's job to check ownership and publish. A
+// nil Monitor only suspends.
+func (m *Monitor) Suspend(ctx context.Context, client Client, sandbox string) error {
 	if m == nil {
 		_, err := client.SuspendSandbox(ctx, sandbox)
-		return false, err //nolint:wrapcheck
+		return err //nolint:wrapcheck
 	}
-	return m.park(ctx, client, sandbox, false)
+	return m.suspendSandbox(ctx, client, sandbox, false)
 }
 
 // OpenBridge counts a bridge open on the sandbox's session until the
 // returned function is called; calling it again does nothing. A session with
-// an open bridge is never parked. Session commands open it before they
-// prepare the session, so a session being started or resumed is not parked
-// under them, and close it, deferred, when the bridge ends, however it ends.
+// an open bridge is never suspended. Session commands open it before they
+// prepare the session, so a session being started or resumed is not
+// suspended under them, and close it, deferred, when the bridge ends, however it ends.
 //
-// When the session is being parked, OpenBridge waits (until ctx is done) for
+// When the session is being suspended, OpenBridge waits (until ctx is done) for
 // that to finish, so the caller then finds it Suspended and resumes it.
 func (m *Monitor) OpenBridge(ctx context.Context, sandbox string) (closeBridge func()) {
 	if m == nil {
@@ -937,7 +749,7 @@ func (m *Monitor) OpenBridge(ctx context.Context, sandbox string) (closeBridge f
 	m.mu.Lock()
 	m.bridges[sandbox]++
 	m.touch(sandbox)
-	wait := m.parking[sandbox]
+	wait := m.suspending[sandbox]
 	m.mu.Unlock()
 	if wait != nil {
 		select {
@@ -977,7 +789,7 @@ func (m *Monitor) touch(sandbox string) {
 }
 
 // noteReady records that a session command brought the sandbox up: it is
-// no longer parked, and a new idle window starts. The status stays the last
+// no longer suspended, and a new idle window starts. The status stays the last
 // known until the next poll.
 func (m *Monitor) noteReady(sandbox string) {
 	if m == nil {
@@ -987,14 +799,14 @@ func (m *Monitor) noteReady(sandbox string) {
 	defer m.mu.Unlock()
 	if e := m.entries[sandbox]; e != nil {
 		e.st.Phase = string(sbx.Ready)
-		e.st.Parked = false
+		e.st.Suspended = false
 		e.lastActive = m.now()
 	}
 }
 
-// snapshot returns a copy of an entry's status, with the bridge count and
+// statusOf returns a copy of an entry's status, with the bridge count and
 // suspend refusal filled in. Call with mu held.
-func (m *Monitor) snapshot(name string, e *entry) SessionStatus {
+func (m *Monitor) statusOf(name string, e *entry) SessionStatus {
 	st := e.st
 	st.Bridges = m.bridges[name]
 	st.Unsuspendable = m.unsuspendable[name]
@@ -1019,7 +831,7 @@ func (m *Monitor) filter(keep func(*SessionStatus) bool) []SessionStatus {
 	out := make([]SessionStatus, 0, len(m.entries))
 	for name, e := range m.entries {
 		if keep(&e.st) {
-			out = append(out, m.snapshot(name, e))
+			out = append(out, m.statusOf(name, e))
 		}
 	}
 	m.mu.Unlock()
@@ -1044,7 +856,7 @@ func (m *Monitor) Status(sandbox string) (SessionStatus, bool) {
 	if !ok {
 		return SessionStatus{}, false
 	}
-	return m.snapshot(sandbox, e), true
+	return m.statusOf(sandbox, e), true
 }
 
 // All returns every session's status.

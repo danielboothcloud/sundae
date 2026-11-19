@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -10,8 +11,8 @@ import (
 // default; sessions.profiles.<name>.runtime overrides it for one profile.
 const (
 	// RuntimeOpenShell runs sandboxes on the OpenShell gateway
-	// (openshell:). The default. Only it has providers, the L7 egress
-	// policy and suspend.
+	// (openshell:). The default. Only it has providers and the L7 egress
+	// policy.
 	RuntimeOpenShell = "openshell"
 	// RuntimePod runs each sandbox as a plain Kubernetes pod (pod:).
 	RuntimePod = "pod"
@@ -75,4 +76,38 @@ func runtimeProblem(r string) string {
 var movedKeys = map[string]string{
 	"sessions.profiles.<name>.providers":     "sessions.profiles.<name>.openshell.providers",
 	"sessions.profiles.<name>.runtime_class": "sessions.profiles.<name>.openshell.runtime_class",
+}
+
+// snapshotsRemoved says why the S3 snapshot settings are gone.
+const snapshotsRemoved = "S3 snapshots were removed (session suspend keeps a session's storage, session delete deletes it)"
+
+// removedKeys maps config keys that no longer exist to why, for the
+// unknown-key error. The keys are in the form describeKeyError reports them.
+var removedKeys = map[string]string{
+	"snapshots":                 snapshotsRemoved,
+	"sessions.suspend.fallback": snapshotsRemoved,
+}
+
+// removedEnv lists the environment variables, or prefixes ending in "_",
+// of removed settings.
+var removedEnv = []string{
+	"SUNDAE_SNAPSHOTS_",
+	"SUNDAE_SESSIONS_SUSPEND_FALLBACK",
+}
+
+// checkRemovedEnv fails on a set environment variable of a removed
+// setting: it would otherwise be ignored silently.
+func checkRemovedEnv(environ []string) error {
+	var errs []error
+	for _, kv := range environ {
+		name, _, _ := strings.Cut(kv, "=")
+		for _, r := range removedEnv {
+			if name == r || (strings.HasSuffix(r, "_") && strings.HasPrefix(name, r)) {
+				errs = append(errs, fmt.Errorf("environment variable %s was removed: %s; unset it", name, snapshotsRemoved))
+				break
+			}
+		}
+	}
+	slices.SortFunc(errs, func(a, b error) int { return strings.Compare(a.Error(), b.Error()) })
+	return errors.Join(errs...)
 }

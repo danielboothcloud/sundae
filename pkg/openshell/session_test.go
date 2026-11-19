@@ -171,8 +171,6 @@ type fakeExec struct {
 	probeExit int
 	// identityExit makes the git identity script fail.
 	identityExit int
-	// snap configures the snapshot scripts (see snapshot_test.go).
-	snap fakeSnapshotKnobs
 }
 
 func newFakeExec() *fakeExec {
@@ -390,8 +388,6 @@ func (f *fakeExec) Run(_ context.Context, _, sandbox string, command []string, o
 		return ok(b.files[a[0]])
 	case writeReposName:
 		b.files[a[0]] = env(o, "SUNDAE_REPOS")
-	case snapshotPackName, snapshotUploadName, snapshotRestoreName, snapshotProbeName:
-		return f.snapshotScript(b, call)
 	default:
 		return nil, fmt.Errorf("fakeExec: unexpected script %q", call.script())
 	}
@@ -1201,9 +1197,9 @@ func TestNamedSessions(t *testing.T) {
 	}
 
 	// Ending one named session leaves the others.
-	existed, err := h.mgr.End(ctx, alice, "review")
+	existed, err := h.mgr.Delete(ctx, alice, "review")
 	if err != nil || !existed {
-		t.Fatalf("end review: existed=%v err=%v", existed, err)
+		t.Fatalf("delete review: existed=%v err=%v", existed, err)
 	}
 	if _, err := h.fc.Sandboxes().Get(ctx, "default", review.Sandbox); !IsNotFound(err) {
 		t.Fatalf("review not deleted: %v", err)
@@ -1385,9 +1381,9 @@ func TestEndIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	existed, err := h.mgr.End(ctx, alice, "")
+	existed, err := h.mgr.Delete(ctx, alice, "")
 	if err != nil || !existed {
-		t.Fatalf("end: existed=%v err=%v", existed, err)
+		t.Fatalf("delete: existed=%v err=%v", existed, err)
 	}
 	if _, err := h.fc.Sandboxes().Get(ctx, "default", SessionSandboxName("alice", "main")); !IsNotFound(err) {
 		t.Fatalf("sandbox not deleted: %v", err)
@@ -1399,11 +1395,11 @@ func TestEndIsIdempotent(t *testing.T) {
 		t.Fatal("unrelated token revoked")
 	}
 
-	existed, err = h.mgr.End(ctx, alice, "main")
+	existed, err = h.mgr.Delete(ctx, alice, "main")
 	if err != nil || existed {
-		t.Fatalf("second end: existed=%v err=%v", existed, err)
+		t.Fatalf("second delete: existed=%v err=%v", existed, err)
 	}
-	if _, err := h.mgr.End(ctx, alice, "-bad"); !errors.Is(err, ErrInvalidSessionName) {
+	if _, err := h.mgr.Delete(ctx, alice, "-bad"); !errors.Is(err, ErrInvalidSessionName) {
 		t.Fatalf("invalid name: err = %v", err)
 	}
 }
@@ -1414,7 +1410,7 @@ func TestEndRejectsForeignSandbox(t *testing.T) {
 		Name:   SessionSandboxName("alice", "main"),
 		Labels: map[string]string{LabelUserID: "99"},
 	})
-	if _, err := h.mgr.End(context.Background(), alice, ""); !errors.Is(err, ErrNotOwned) {
+	if _, err := h.mgr.Delete(context.Background(), alice, ""); !errors.Is(err, ErrNotOwned) {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -1567,7 +1563,7 @@ func (f *fakeInteractive) Cancel() error {
 }
 func (f *fakeInteractive) Close() error { return f.outR.Close() }
 
-func (f *fakeInteractive) snapshot() (string, [][2]uint32, bool) {
+func (f *fakeInteractive) state() (string, [][2]uint32, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.input.String(), append([][2]uint32(nil), f.resizes...), f.inClosed
@@ -1640,18 +1636,18 @@ func TestBridge(t *testing.T) {
 	if _, err := term.inW.Write([]byte("ls\r")); err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, "input", func() bool { in, _, _ := is.snapshot(); return in == "ls\r" })
+	eventually(t, "input", func() bool { in, _, _ := is.state(); return in == "ls\r" })
 
 	// Window changes resize the sandbox PTY.
 	term.winch <- ssh.Window{Width: 120, Height: 40}
 	eventually(t, "resize", func() bool {
-		_, rs, _ := is.snapshot()
+		_, rs, _ := is.state()
 		return len(rs) == 1 && rs[0] == [2]uint32{120, 40}
 	})
 
 	// Client EOF closes the remote input.
 	_ = term.inW.Close()
-	eventually(t, "input close", func() bool { _, _, closed := is.snapshot(); return closed })
+	eventually(t, "input close", func() bool { _, _, closed := is.state(); return closed })
 
 	// The remote exit code is returned.
 	is.exit <- 3

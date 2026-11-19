@@ -2,7 +2,8 @@
 // Kubernetes Pod running the sandbox image, with a PersistentVolumeClaim
 // mounted at /sandbox. The claim is the sandbox: it carries the session's
 // labels and annotations and the pod template, and outlives the pod.
-// Parking deletes the pod; resuming creates it again from the template.
+// Suspending deletes the pod; resuming creates it again from the template;
+// deleting the session deletes the pod and the claim.
 // Commands run through the pods/exec subresource.
 package pod
 
@@ -31,7 +32,7 @@ const (
 	// NetworkPolicy.
 	LabelRuntime = "sundae.runtime"
 	// AnnotationTemplate on the claim holds the pod template (JSON), so a
-	// parked session's pod is created again as it was.
+	// suspended session's pod is created again as it was.
 	AnnotationTemplate = "sundae.pod-template"
 	// ContainerName is the sandbox container.
 	ContainerName = "sandbox"
@@ -179,7 +180,7 @@ func (r *Runtime) EnsureSandbox(ctx context.Context, name string, req sbx.Reques
 		return nil, false, sbx.ErrNotOwned
 	}
 	if pvc.DeletionTimestamp != nil {
-		// Ended a moment ago: let it go, then start afresh.
+		// Deleted a moment ago: let it go, then start afresh.
 		if err := r.waitClaimGone(ctx, name); err != nil {
 			return nil, false, err
 		}
@@ -297,7 +298,7 @@ func (r *Runtime) build(name string, req sbx.Request) (*template, *corev1.Persis
 	pvc := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: own, Annotations: claimAnnotations},
 		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			AccessModes: s.StorageAccessModes,
 			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{corev1.ResourceStorage: s.StorageSize},
 			},
@@ -327,7 +328,7 @@ func (r *Runtime) createPod(ctx context.Context, name string, tmpl *template) er
 func claimTemplate(pvc *corev1.PersistentVolumeClaim) (*template, error) {
 	raw, ok := pvc.Annotations[AnnotationTemplate]
 	if !ok {
-		return nil, fmt.Errorf("pod runtime: claim %q has no %s annotation; end the session", pvc.Name, AnnotationTemplate)
+		return nil, fmt.Errorf("pod runtime: claim %q has no %s annotation; delete the session", pvc.Name, AnnotationTemplate)
 	}
 	var t template
 	if err := json.Unmarshal([]byte(raw), &t); err != nil {
@@ -347,7 +348,7 @@ func (r *Runtime) resume(ctx context.Context, pvc *corev1.PersistentVolumeClaim)
 		return nil, fmt.Errorf("pod runtime: get pod %q: %w", name, err)
 	}
 	if pod != nil && (pod.DeletionTimestamp != nil || pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded) {
-		// Being parked, or stopped (evicted): replace it.
+		// Being suspended, or stopped (evicted): replace it.
 		if pod.DeletionTimestamp == nil {
 			if err := r.pods().Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 				return nil, fmt.Errorf("pod runtime: delete stopped pod %q: %w", name, err)
@@ -452,7 +453,7 @@ func (r *Runtime) DeleteSandbox(ctx context.Context, name string) error {
 	return r.waitClaimGone(ctx, name)
 }
 
-// SuspendSandbox parks the sandbox: it deletes the pod, which stops the
+// SuspendSandbox suspends the sandbox: it deletes the pod, which stops the
 // session's program, and keeps the claim and so /sandbox.
 func (r *Runtime) SuspendSandbox(ctx context.Context, name string) (*sbx.Sandbox, error) {
 	pvc, err := r.claims().Get(ctx, name, metav1.GetOptions{})
@@ -622,7 +623,7 @@ func podWaiting(pod *corev1.Pod) string {
 	return strings.Join(parts, "; ")
 }
 
-// toSandbox returns the sandbox of a claim and its pod (nil when parked).
+// toSandbox returns the sandbox of a claim and its pod (nil when suspended).
 func toSandbox(pvc *corev1.PersistentVolumeClaim, pod *corev1.Pod) *sbx.Sandbox {
 	sb := &sbx.Sandbox{
 		Name:        pvc.Name,

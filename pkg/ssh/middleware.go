@@ -121,7 +121,7 @@ func EventsContextMiddleware(bus *events.Bus) func(ssh.Handler) ssh.Handler {
 }
 
 // MonitorContextMiddleware attaches the session Monitor to the session
-// context, so session commands read status, count bridges and park through
+// context, so session commands read status, count bridges and suspend through
 // it. mon is nil when OpenShell is disabled; nothing is attached then.
 func MonitorContextMiddleware(mon *openshell.Monitor) func(ssh.Handler) ssh.Handler {
 	return func(sh ssh.Handler) ssh.Handler {

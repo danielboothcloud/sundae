@@ -89,62 +89,6 @@ func TestBuildSandboxPolicyGitRule(t *testing.T) {
 	}
 }
 
-func TestBuildSandboxPolicySnapshots(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		s3   config.S3SnapshotConfig
-		want v1.PolicyNetworkEndpoint
-	}{
-		{
-			"aws virtual-hosted",
-			config.S3SnapshotConfig{Region: "eu-west-2", Bucket: "snaps"},
-			v1.PolicyNetworkEndpoint{Host: "snaps.s3.eu-west-2.amazonaws.com", Port: 443},
-		},
-		{
-			"aws path-style",
-			config.S3SnapshotConfig{Region: "eu-west-2", Bucket: "snaps", PathStyle: true},
-			v1.PolicyNetworkEndpoint{Host: "s3.eu-west-2.amazonaws.com", Port: 443},
-		},
-		{
-			"rgw path-style",
-			config.S3SnapshotConfig{Endpoint: "http://rook-ceph-rgw-store.rook-ceph.svc", Bucket: "snaps", PathStyle: true},
-			v1.PolicyNetworkEndpoint{Host: "rook-ceph-rgw-store.rook-ceph.svc", Port: 80},
-		},
-		{
-			"minio virtual-hosted",
-			config.S3SnapshotConfig{Endpoint: "https://minio.example.com:9000", Bucket: "snaps"},
-			v1.PolicyNetworkEndpoint{Host: "snaps.minio.example.com", Port: 9000},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			cfg := policyConfig("http://sundae:23232")
-			cfg.Snapshots.S3 = tc.s3
-			cfg.Snapshots.S3.Enabled = true
-			p, err := BuildSandboxPolicy(cfg)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got, want := p.NetworkPolicies["sundae_snapshots"], anyBinaryRule("sundae_snapshots", tc.want); !reflect.DeepEqual(got, want) {
-				t.Fatalf("sundae_snapshots = %+v, want %+v", got, want)
-			}
-			if len(p.NetworkPolicies) != 2 {
-				t.Fatalf("rules = %v", p.NetworkPolicies)
-			}
-		})
-	}
-
-	// Off: no rule, even when the section is filled in.
-	cfg := policyConfig("http://sundae:23232")
-	cfg.Snapshots.S3 = config.S3SnapshotConfig{Region: "eu-west-2", Bucket: "snaps"}
-	p, err := BuildSandboxPolicy(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := p.NetworkPolicies["sundae_snapshots"]; ok || len(p.NetworkPolicies) != 1 {
-		t.Fatalf("snapshots off: rules = %v", p.NetworkPolicies)
-	}
-}
-
 func TestBuildSandboxPolicyExtraRules(t *testing.T) {
 	cfg := policyConfig("http://sundae:23232")
 	cfg.OpenShell.NetworkPolicies = []config.OpenShellNetworkPolicy{
@@ -190,7 +134,6 @@ func TestBuildSandboxPolicyExtraRules(t *testing.T) {
 func TestBuildSandboxPolicyImageMode(t *testing.T) {
 	cfg := policyConfig("http://sundae:23232")
 	cfg.OpenShell.SandboxPolicy = config.SandboxPolicyImage
-	cfg.Snapshots.S3 = config.S3SnapshotConfig{Enabled: true, Region: "eu-west-2", Bucket: "snaps"}
 	p, err := BuildSandboxPolicy(cfg)
 	if err != nil || p != nil {
 		t.Fatalf("image mode: policy = %+v, err = %v; want none", p, err)
