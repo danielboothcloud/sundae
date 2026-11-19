@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -139,7 +140,9 @@ the image. Both only apply when the session is created.
 
 Detach with the prefix key then d (Ctrl-] d unless
 sessions.attach.detach_key says otherwise), ~. after a newline, or just close
-the connection: the program keeps running. "session attach" re-attaches, "session suspend" stops the
+the connection: the program keeps running. While attached, the prefix key
+then n or p switches to your next or previous session by name, and s picks
+one from a numbered list (q goes back). "session attach" re-attaches, "session suspend" stops the
 sandbox and keeps its storage, and "session delete" deletes the sandbox and
 its storage. With --detach, start the session without attaching. A
 suspended session is resumed first.`
@@ -179,7 +182,9 @@ func sessionAttachCommand() *cobra.Command {
 The session is resumed first if it is suspended, and its program is started
 again if it is not running. Detach with the prefix key then d (Ctrl-] d
 unless sessions.attach.detach_key says otherwise), ~. after a newline, or
-close the connection; the program keeps running.
+close the connection; the program keeps running. The prefix key then n or p
+switches to your next or previous session by name, s picks one from a
+numbered list (q goes back), ? lists the keys; ~. only detaches.
 
 Without SESSION, attach to your only session; with several, pick one from a
 numbered list, most urgent first.
@@ -335,32 +340,63 @@ func runSession(cmd *cobra.Command, req sessionctl.Request, detach bool) error {
 		}
 	}
 
-	p, err := sessionctl.Prepare(ctx, newManager(ctx, client), req)
+	mgr := newManager(ctx, client)
+	p, err := sessionctl.Prepare(ctx, mgr, req)
 	if err != nil {
 		return err
 	}
 	defer p.Close()
 
 	if detach {
-		s := p.Session
+		s := p.Session()
 		cmd.PrintErrf("Session %s (%s) is running in sandbox %s.\n", s.Name, strings.Join(s.Repos, ", "), s.Sandbox)
 		cmd.PrintErrf("Attach with: session attach %s\n", s.Name)
 		return nil
 	}
 
-	return attach(ctx, cmd, p, sess)
+	return attach(ctx, cmd, p, sess, cliSwitcher(ctx, mgr, req.Term))
 }
 
-// attach bridges the SSH session to the osewa session and propagates the
-// exit code of the attach client: the program's exit code when it ended, 0
-// when the user detached.
-func attach(ctx context.Context, cmd *cobra.Command, p *sessionctl.Prepared, sess sshSession) error {
-	s := p.Session
-	label := signals.SessionLabel(s.Name, s.Repos)
-	cmd.PrintErrf("Attached to %s. %s\n", label, sessionctl.DetachHint(sessionctl.PrefixKey(config.FromContext(ctx))))
-	code, err := p.Attach(ctx, sess)
+// cliSwitcher switches sessions on the SSH terminal; prefix s shows the
+// numbered picker of `session attach`.
+func cliSwitcher(ctx context.Context, mgr *openshell.Manager, term string) *sessionctl.Switcher {
+	user := proto.UserFromContext(ctx)
+	return &sessionctl.Switcher{
+		Names: func(ctx context.Context) ([]string, error) {
+			infos, err := mgr.List(ctx, user)
+			names := make([]string, len(infos))
+			for i, info := range infos {
+				names[i] = info.Name
+			}
+			return names, err //nolint:wrapcheck
+		},
+		Prepare: func(ctx context.Context, name string, progress io.Writer) (sessionctl.Attacher, error) {
+			return sessionctl.Prepare(ctx, mgr, sessionctl.Request{Name: name, Term: term, Progress: progress}) //nolint:wrapcheck
+		},
+		Pick: func(ctx context.Context, t openshell.Terminal, current string) (string, error) {
+			rows, err := sessionctl.List(ctx, mgr, openshell.MonitorFromContext(ctx), user)
+			if err != nil {
+				return "", err //nolint:wrapcheck
+			}
+			name, err := promptSession(t, rows, current)
+			if errors.Is(err, errPickCancelled) {
+				return current, nil
+			}
+			return name, err
+		},
+		Prefix: sessionctl.PrefixKey(config.FromContext(ctx)),
+	}
+}
+
+// attach bridges the SSH session to the osewa session, switching sessions as
+// the user asks (sw), and propagates the exit code of the last attach
+// client: its program's exit code when it ended, 0 when the user detached.
+func attach(ctx context.Context, cmd *cobra.Command, p *sessionctl.Prepared, sess sshSession, sw *sessionctl.Switcher) error {
+	s := p.Session()
+	cmd.PrintErrf("Attached to %s. %s\n", signals.SessionLabel(s.Name, s.Repos), sessionctl.DetachHint(sessionctl.PrefixKey(config.FromContext(ctx))))
+	last, code, err := sw.Run(ctx, sess, p)
 	if errors.Is(err, openshell.ErrDetached) {
-		cmd.PrintErrf("Detached from %s; it keeps running. Re-attach: session attach %s\n", label, s.Name)
+		cmd.PrintErrf("Detached from %s; it keeps running. Re-attach: session attach %s\n", signals.SessionLabel(last.Name, last.Repos), last.Name)
 		return nil
 	}
 	if err != nil {

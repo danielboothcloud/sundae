@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"image/color"
+	"io"
 	"path"
 	"slices"
 	"strings"
@@ -1061,12 +1062,40 @@ func (m *Sessions) onOp(op *operation) tea.Cmd {
 	if s := att.Session(); s != nil {
 		m.selKey = s.Sandbox
 	}
-	return attachCmd(m.ctx, m.handoff, att, op.repos, op.name, op.title)
+	return attachCmd(m.ctx, m.handoff, att, m.switcher(), op.repos, op.name, op.title)
+}
+
+// switcher switches sessions while attached (prefix n and p); prefix s
+// comes back to the tab, which is the picker.
+func (m *Sessions) switcher() *sessionctl.Switcher {
+	src, term := m.src, m.term()
+	return &sessionctl.Switcher{
+		Names: func(ctx context.Context) ([]string, error) {
+			rows, err := src.List(ctx)
+			names := make([]string, len(rows))
+			for i, r := range rows {
+				names[i] = r.Info.Name
+			}
+			return names, err //nolint:wrapcheck
+		},
+		Prepare: func(ctx context.Context, name string, progress io.Writer) (sessionctl.Attacher, error) {
+			return src.Prepare(ctx, sessionctl.Request{Name: name, Term: term, Progress: progress}) //nolint:wrapcheck
+		},
+		Prefix: sessionctl.PrefixKey(config.FromContext(m.common.Context())),
+	}
 }
 
 func (m *Sessions) onAttachDone(msg attachDoneMsg) tea.Cmd {
 	label := sessionLabel(msg.name, msg.repos)
+	if msg.key != "" {
+		m.selKey = msg.key
+		m.sortRows()
+	}
+	var sw *openshell.SwitchRequest
 	switch {
+	case errors.As(msg.err, &sw):
+		m.pane = sessionsPane
+		m.notice = notice{text: "Choose a session: enter attaches"}
 	case errors.Is(msg.err, openshell.ErrDetached):
 		m.notice = notice{text: "✓ Detached from " + label + "; it keeps running."}
 	case msg.err != nil:

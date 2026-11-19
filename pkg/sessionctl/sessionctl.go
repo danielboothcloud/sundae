@@ -189,12 +189,15 @@ func (req Request) repos() []string {
 // Prepared is a session started or resumed and ready to attach to. Its
 // bridge is counted with the Monitor, so it is not suspended, until Close.
 type Prepared struct {
-	Session     *openshell.Session
+	sess        *openshell.Session
 	mgr         *openshell.Manager
 	closeBridge func()
 	// prefix is the detach prefix key (sessions.attach.detach_key).
 	prefix openshell.PrefixKey
 }
+
+// Session is the prepared session.
+func (p *Prepared) Session() *openshell.Session { return p.sess }
 
 // Close stops counting the bridge. It is safe to call more than once.
 func (p *Prepared) Close() {
@@ -389,7 +392,7 @@ func Prepare(ctx context.Context, mgr *openshell.Manager, req Request) (_ *Prepa
 	if err != nil {
 		return nil, err //nolint:wrapcheck
 	}
-	return &Prepared{Session: s, mgr: mgr, closeBridge: closeBridge, prefix: PrefixKey(config.FromContext(ctx))}, nil
+	return &Prepared{sess: s, mgr: mgr, closeBridge: closeBridge, prefix: PrefixKey(config.FromContext(ctx))}, nil
 }
 
 // GitIdentity returns the git identity for sessions of the repository: the
@@ -427,20 +430,24 @@ func DetachHint(prefix openshell.PrefixKey) string {
 }
 
 // Attach bridges term to the session until the user detaches (the prefix
-// key then d, or osewa's ~.), the program exits, or ctx is done. It returns
+// key then d, or osewa's ~.), the program exits, or ctx is done; opts are
+// added to Bridge's (Switcher passes openshell.WithSwitching). It returns
 // the program's exit status when it exited with one other than 0,
-// openshell.ErrDetached (with 0) when the user detached with the prefix key,
-// and an error when the stream failed or ended without an exit status
-// (ErrSessionLost). Cancelling ctx is not an error.
-func (p *Prepared) Attach(ctx context.Context, term openshell.Terminal) (int, error) {
+// openshell.ErrDetached or a *openshell.SwitchRequest (with 0) when the user
+// detached or switched with the prefix key, and an error when the stream
+// failed or ended without an exit status (ErrSessionLost). Cancelling ctx is
+// not an error.
+func (p *Prepared) Attach(ctx context.Context, term openshell.Terminal, opts ...openshell.BridgeOption) (int, error) {
 	pty, _, _ := term.Pty()
-	is, err := p.mgr.Attach(ctx, p.Session, uint32(pty.Window.Width), uint32(pty.Window.Height)) //nolint:gosec
+	is, err := p.mgr.Attach(ctx, p.sess, uint32(pty.Window.Width), uint32(pty.Window.Height)) //nolint:gosec
 	if err != nil {
 		return 0, err //nolint:wrapcheck
 	}
 
-	code, err := openshell.Bridge(ctx, term, is, openshell.WithPrefixKey(p.prefix))
-	if errors.Is(err, openshell.ErrDetached) {
+	opts = append([]openshell.BridgeOption{openshell.WithPrefixKey(p.prefix)}, opts...)
+	code, err := openshell.Bridge(ctx, term, is, opts...)
+	var sw *openshell.SwitchRequest
+	if errors.Is(err, openshell.ErrDetached) || errors.As(err, &sw) {
 		return 0, err //nolint:wrapcheck
 	}
 	if code < 0 && ctx.Err() == nil {

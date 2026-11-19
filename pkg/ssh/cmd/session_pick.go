@@ -45,7 +45,7 @@ func pickSession(cmd *cobra.Command) (string, error) {
 	if _, _, ok := sess.Pty(); !ok {
 		return "", severalSessionsError(rows)
 	}
-	return promptSession(sess, rows)
+	return promptSession(sess, rows, "")
 }
 
 // severalSessionsError asks for a session name when there is no terminal to
@@ -59,18 +59,17 @@ func severalSessionsError(rows []sessionctl.Row) error {
 }
 
 // promptSession lists rows on the terminal, numbered, and returns the name
-// of the one the user picks. q, Ctrl-C, Ctrl-D or the end of the input
-// cancel (errPickCancelled).
-func promptSession(term io.ReadWriter, rows []sessionctl.Row) (string, error) {
-	var b strings.Builder
-	b.WriteString("Your sessions:\r\n")
-	for i, r := range rows {
-		fmt.Fprintf(&b, "%3d) %s  %s\r\n", i+1, signals.SessionLabel(r.Info.Name, r.Info.Repos), r.Label())
-	}
-	if _, err := io.WriteString(term, b.String()); err != nil {
+// of the one the user picks. current, when set, is marked: the picker then
+// switches from it. q, Esc, Ctrl-C, Ctrl-D or the end of the input cancel
+// (errPickCancelled).
+func promptSession(term io.ReadWriter, rows []sessionctl.Row, current string) (string, error) {
+	if _, err := io.WriteString(term, pickList(rows, current)); err != nil {
 		return "", err //nolint:wrapcheck
 	}
 	prompt := fmt.Sprintf("Attach to [1-%d, q cancels]: ", len(rows))
+	if current != "" {
+		prompt = fmt.Sprintf("Switch to [1-%d, q goes back]: ", len(rows))
+	}
 	for {
 		if _, err := io.WriteString(term, prompt); err != nil {
 			return "", err //nolint:wrapcheck
@@ -89,6 +88,20 @@ func promptSession(term io.ReadWriter, rows []sessionctl.Row) (string, error) {
 	}
 }
 
+// pickList renders the numbered list of rows, current marked with "*".
+func pickList(rows []sessionctl.Row, current string) string {
+	var b strings.Builder
+	b.WriteString("Your sessions:\r\n")
+	for i, r := range rows {
+		mark, suffix := " ", ""
+		if current != "" && r.Info.Name == current {
+			mark, suffix = "*", "  (current)"
+		}
+		fmt.Fprintf(&b, "%s%3d) %s  %s%s\r\n", mark, i+1, signals.SessionLabel(r.Info.Name, r.Info.Repos), r.Label(), suffix)
+	}
+	return b.String()
+}
+
 // readChoice reads a number up to Enter from a terminal in raw mode,
 // echoing it, as the SSH PTY has no line discipline.
 func readChoice(term io.ReadWriter) (string, error) {
@@ -102,7 +115,8 @@ func readChoice(term io.ReadWriter) (string, error) {
 		switch c := buf[0]; {
 		case c == '\r' || c == '\n':
 			return string(line), nil
-		case c == 'q' || c == 'Q' || c == 0x03 || c == 0x04:
+		case c == 'q' || c == 'Q' || c == 0x1b || c == 0x03 || c == 0x04:
+			// NOTE: an arrow key's ESC cancels too; the rest of its sequence is then typed into the session.
 			return "", errPickCancelled
 		case (c == 0x7f || c == '\b') && len(line) > 0:
 			line = line[:len(line)-1]

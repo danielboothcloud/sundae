@@ -1103,12 +1103,23 @@ type BridgeOption func(*bridgeOptions)
 
 type bridgeOptions struct {
 	prefix PrefixKey
+	// others reports whether there is another session to switch to; nil
+	// leaves the switch keys unbound.
+	others func() bool
 }
 
 // WithPrefixKey makes Bridge watch the input for k: k d detaches, k ? shows
 // help, k k sends k. Without it, or with none, input passes untouched.
 func WithPrefixKey(k PrefixKey) BridgeOption {
 	return func(o *bridgeOptions) { o.prefix = k }
+}
+
+// WithSwitching binds the prefix's switch keys: n and p (next and previous
+// session) and s (choose one) end Bridge with a *SwitchRequest. others is
+// asked on n and p: when it says there is no other session, Bridge says so
+// and stays attached. It does nothing without a prefix key.
+func WithSwitching(others func() bool) BridgeOption {
+	return func(o *bridgeOptions) { o.others = others }
 }
 
 // terminalReset undoes modes a detached program leaves set; kitty keyboard is
@@ -1120,7 +1131,8 @@ const terminalReset = "\x1b[<u\x1b[>4m\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?100
 // window changes, and returns the remote command's exit code.
 //
 // With WithPrefixKey, prefix then d detaches: Bridge returns 0, ErrDetached.
-// osewa's own ~. passes through either way.
+// With WithSwitching too, prefix then n, p or s ends it the same way and
+// returns 0 and a *SwitchRequest. osewa's own ~. passes through either way.
 //
 // Cancelling ctx (e.g. the SSH client disconnecting) aborts the stream. The
 // sandbox itself keeps running.
@@ -1160,8 +1172,8 @@ func Bridge(ctx context.Context, term Terminal, is InteractiveSession, opts ...B
 		}
 	}()
 
-	detached := make(chan struct{})
-	go forwardInput(term, is, o.prefix, out, detached)
+	ended := make(chan action, 1)
+	go forwardInput(term, is, o, out, ended)
 
 	outDone := make(chan struct{})
 	go func() {
@@ -1172,7 +1184,10 @@ func Bridge(ctx context.Context, term Terminal, is InteractiveSession, opts ...B
 	code, err := is.ExitCode()
 
 	select {
-	case <-detached:
+	case act := <-ended:
+		if dir := act.switchDir(); dir != 0 {
+			return 0, &SwitchRequest{Dir: dir}
+		}
 		return 0, ErrDetached
 	default:
 	}

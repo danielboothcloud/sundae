@@ -267,9 +267,9 @@ func TestPreparedAttachDetach(t *testing.T) {
 	cfg := config.DefaultConfig()
 	shell := &detachShell{done: make(chan struct{})}
 	p := &Prepared{
-		Session: &openshell.Session{Name: "main", Sandbox: "sb"},
-		mgr:     openshell.NewManager(&detachClient{is: shell}, nil, cfg),
-		prefix:  PrefixKey(cfg),
+		sess:   &openshell.Session{Name: "main", Sandbox: "sb"},
+		mgr:    openshell.NewManager(&detachClient{is: shell}, nil, cfg),
+		prefix: PrefixKey(cfg),
 	}
 	code, err := p.Attach(context.Background(), &detachTerm{in: strings.NewReader("ls\x1dd")})
 	if code != 0 || !errors.Is(err, openshell.ErrDetached) {

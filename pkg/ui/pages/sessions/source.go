@@ -90,17 +90,9 @@ type Feed interface {
 	Next(ctx context.Context) ([]signals.Signal, error)
 }
 
-// Attacher is a prepared session, ready to attach to.
-type Attacher interface {
-	// Session is the prepared session.
-	Session() *openshell.Session
-	// Attach bridges term to the session until the user detaches, the
-	// program exits or ctx is done; see sessionctl.Prepared.Attach.
-	Attach(ctx context.Context, term openshell.Terminal) (int, error)
-	// Close releases the session's bridge and client. It is safe to call
-	// more than once.
-	Close()
-}
+// Attacher is a prepared session, ready to attach to; see
+// sessionctl.Prepared.Attach. Close also releases its client.
+type Attacher = sessionctl.Attacher
 
 // Profile is a configured session profile.
 type Profile struct {
@@ -305,7 +297,7 @@ func (s *source) SyncRepos(ctx context.Context, name string, repos []string) ([]
 		return nil, err //nolint:wrapcheck
 	}
 	defer p.Close()
-	ups, err := mgr.UpdateCheckouts(ctx, p.Session.Sandbox, p.Session.Repos)
+	ups, err := mgr.UpdateCheckouts(ctx, p.Session().Sandbox, p.Session().Repos)
 	if err != nil {
 		return nil, err //nolint:wrapcheck
 	}
@@ -324,8 +316,6 @@ type attacher struct {
 	client openshell.Client
 	once   sync.Once
 }
-
-func (a *attacher) Session() *openshell.Session { return a.Prepared.Session }
 
 func (a *attacher) Close() {
 	a.once.Do(func() {

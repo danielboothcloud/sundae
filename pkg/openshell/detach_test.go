@@ -13,7 +13,14 @@ import (
 // runFilter feeds the reads to a filter as pumpInput does, stopping at a
 // detach, and returns what it forwarded and the actions in order.
 func runFilter(k PrefixKey, reads ...string) (string, []action) {
+	return runSwitchFilter(k, false, reads...)
+}
+
+// runSwitchFilter is runFilter with the switch keys bound or not; a switch
+// stops it as a detach does.
+func runSwitchFilter(k PrefixKey, switching bool, reads ...string) (string, []action) {
 	f := newPrefixFilter(k)
+	f.switching = switching
 	var out bytes.Buffer
 	var acts []action
 	for _, r := range reads {
@@ -23,7 +30,7 @@ func runFilter(k PrefixKey, reads ...string) (string, []action) {
 			out.Write(fwd)
 			if act != actionNone {
 				acts = append(acts, act)
-				if act == actionDetach {
+				if act != actionHelp {
 					return out.String(), acts
 				}
 			}
@@ -78,6 +85,99 @@ func TestPrefixFilter(t *testing.T) {
 				t.Fatalf("out %q acts %v, want %q %v", out, acts, tt.out, tt.acts)
 			}
 		})
+	}
+}
+
+func TestPrefixFilterSwitchKeys(t *testing.T) {
+	const ctrlBracket, csiU = "\x1d", "\x1b[93;5u"
+	tests := []struct {
+		name      string
+		switching bool
+		reads     []string
+		out       string
+		acts      []action
+	}{
+		{"n", true, []string{"a" + ctrlBracket + "nrest"}, "a", []action{actionNext}},
+		{"p", true, []string{ctrlBracket + "p"}, "", []action{actionPrev}},
+		{"s", true, []string{ctrlBracket, "s"}, "", []action{actionPick}},
+		{"csi-u n", true, []string{csiU + "\x1b[110u"}, "", []action{actionNext}},
+		{"csi-u p", true, []string{csiU + "\x1b[112;1:1u"}, "", []action{actionPrev}},
+		{"csi-u s", true, []string{csiU + "\x1b[115u"}, "", []action{actionPick}},
+		{"modifyOtherKeys s", true, []string{"\x1b[27;5;93~s"}, "", []action{actionPick}},
+		{"unbound without switching", false, []string{ctrlBracket + "n" + ctrlBracket + "s"}, ctrlBracket + "n" + ctrlBracket + "s", nil},
+		{"shifted N unbound", true, []string{ctrlBracket + "N"}, ctrlBracket + "N", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, acts := runSwitchFilter(DefaultPrefixKey, tt.switching, tt.reads...)
+			if out != tt.out || !equalActions(acts, tt.acts) {
+				t.Fatalf("out %q acts %v, want %q %v", out, acts, tt.out, tt.acts)
+			}
+		})
+	}
+}
+
+func TestBridgeSwitch(t *testing.T) {
+	for _, tt := range []struct {
+		key string
+		dir SwitchDir
+	}{{"n", SwitchNext}, {"p", SwitchPrev}, {"s", SwitchPick}} {
+		t.Run(tt.key, func(t *testing.T) {
+			term := newFakeTerm()
+			is := newFakeInteractive()
+			others := make(chan bool, 2)
+			others <- false
+			others <- true
+			done := make(chan error, 1)
+			go func() {
+				code, err := Bridge(context.Background(), term, is, WithPrefixKey(DefaultPrefixKey),
+					WithSwitching(func() bool { return <-others }))
+				if code != 0 {
+					err = errors.Join(err, errors.New("code not 0"))
+				}
+				done <- err
+			}()
+			if tt.dir != SwitchPick {
+				// No other session: say so and stay attached.
+				if _, err := term.inW.Write([]byte("a\x1d" + tt.key)); err != nil {
+					t.Fatal(err)
+				}
+				eventually(t, "notice", func() bool { return strings.Contains(term.output(), "[sundae] no other session") })
+			}
+			if _, err := term.inW.Write([]byte("b\x1d" + tt.key + "late")); err != nil {
+				t.Fatal(err)
+			}
+			var err error
+			select {
+			case err = <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("Bridge did not return after the switch")
+			}
+			var sw *SwitchRequest
+			if !errors.As(err, &sw) || sw.Dir != tt.dir || errors.Is(err, ErrDetached) {
+				t.Fatalf("err %v, want a switch %d", err, tt.dir)
+			}
+			in, _, closed := is.state()
+			want := "b"
+			if tt.dir != SwitchPick {
+				want = "ab"
+			}
+			if in != want || !closed || !is.isCancelled() {
+				t.Fatalf("input %q closed %v cancelled %v", in, closed, is.isCancelled())
+			}
+			if !strings.HasSuffix(term.output(), terminalReset) {
+				t.Fatalf("no terminal reset: %q", term.output())
+			}
+		})
+	}
+}
+
+func TestPrefixHelp(t *testing.T) {
+	if h := prefixHelp(DefaultPrefixKey, true); !strings.Contains(h, "Ctrl-] n/p next/previous session · Ctrl-] s choose a session") {
+		t.Fatalf("help %q", h)
+	}
+	if h := prefixHelp(DefaultPrefixKey, false); strings.Contains(h, "n/p") {
+		t.Fatalf("help %q", h)
 	}
 }
 

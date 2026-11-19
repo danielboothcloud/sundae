@@ -53,6 +53,10 @@ type fakeSource struct {
 	syncErr error
 	// gate, when set, holds Prepare after its progress lines.
 	gate chan struct{}
+	// attached are the sessions attached to, in order; attachErrs, when
+	// set, are returned by successive Attaches first.
+	attached   []string
+	attachErrs []error
 }
 
 func (f *fakeSource) List(context.Context) ([]sessionctl.Row, error) {
@@ -106,6 +110,11 @@ func (f *fakeSource) Prepare(_ context.Context, req sessionctl.Request) (Attache
 	if len(repos) == 0 && req.Repo != "" {
 		repos = []string{req.Repo}
 	}
+	for _, r := range f.rows {
+		if len(repos) == 0 && r.Info.Name == req.Name {
+			repos = []string{r.Info.Repo}
+		}
+	}
 	s := &openshell.Session{Name: req.Name, Repos: repos}
 	if len(repos) > 0 {
 		s.Repo = repos[0]
@@ -156,8 +165,20 @@ type fakeAttacher struct {
 }
 
 func (a *fakeAttacher) Session() *openshell.Session { return a.s }
-func (a *fakeAttacher) Attach(_ context.Context, term openshell.Terminal) (int, error) {
+func (a *fakeAttacher) Attach(_ context.Context, term openshell.Terminal, _ ...openshell.BridgeOption) (int, error) {
 	a.term = term
+	a.src.mu.Lock()
+	if a.s != nil {
+		a.src.attached = append(a.src.attached, a.s.Name)
+	}
+	var err error
+	if len(a.src.attachErrs) > 0 {
+		err, a.src.attachErrs = a.src.attachErrs[0], a.src.attachErrs[1:]
+	}
+	a.src.mu.Unlock()
+	if err != nil {
+		return 0, err
+	}
 	return a.code, a.err
 }
 
@@ -1048,6 +1069,51 @@ func TestAttachExec(t *testing.T) {
 	m.Update(attachDoneMsg{repos: []string{"infra"}, name: "claude-1", err: openshell.ErrDetached})
 	if v := view(m); !strings.Contains(v, "✓ Detached from infra / claude-1; it keeps running.") || strings.Contains(v, "✗") {
 		t.Fatalf("view:\n%s", v)
+	}
+}
+
+// switchExec runs an attach of infra / claude-1 with the tab's switcher;
+// its Attaches return results in order.
+func switchExec(t *testing.T, results ...error) (*Sessions, *fakeSource, attachDoneMsg) {
+	t.Helper()
+	src := newFakeSource()
+	src.attachErrs = results
+	m := loaded(t, 76, 30, src)
+	keys(m, "G") // the cursor away from the sessions involved
+	att := &fakeAttacher{src: src, s: &openshell.Session{Name: "claude-1", Repos: []string{"infra"}, Sandbox: "sb-infra-claude-1"}}
+	ex := &attachExec{ctx: context.Background(), att: att, sw: m.switcher(), term: nopTerm{}, release: func() {}}
+	if err := ex.Run(); err != nil {
+		t.Fatal(err)
+	}
+	return m, src, ex.doneMsg(nil, []string{"infra"}, "claude-1")
+}
+
+func TestAttachSwitchNextThenDetach(t *testing.T) {
+	m, src, msg := switchExec(t, &openshell.SwitchRequest{Dir: openshell.SwitchNext}, openshell.ErrDetached)
+	// Sessions by name: claude-1, forge-sync, main, shell, tui.
+	if strings.Join(src.attached, ",") != "claude-1,forge-sync" || len(src.prepared) != 1 || src.prepared[0].Name != "forge-sync" || src.closed != 2 {
+		t.Fatalf("attached %v prepared %+v closed %d", src.attached, src.prepared, src.closed)
+	}
+	m.Update(msg)
+	if v := view(m); !strings.Contains(v, "✓ Detached from sundae / forge-sync; it keeps running.") {
+		t.Fatalf("view:\n%s", v)
+	}
+	if r, ok := m.selected(); !ok || r.Info.Name != "forge-sync" {
+		t.Fatalf("selected %+v", r.Info)
+	}
+}
+
+func TestAttachSwitchPickReturnsToTab(t *testing.T) {
+	m, src, msg := switchExec(t, &openshell.SwitchRequest{Dir: openshell.SwitchPick})
+	if len(src.prepared) != 0 || src.closed != 1 {
+		t.Fatalf("prepared %+v closed %d", src.prepared, src.closed)
+	}
+	m.Update(msg)
+	if v := view(m); !strings.Contains(v, "Choose a session: enter attaches") || strings.Contains(v, "✗") {
+		t.Fatalf("view:\n%s", v)
+	}
+	if r, ok := m.selected(); !ok || r.Info.Sandbox != "sb-infra-claude-1" {
+		t.Fatalf("selected %+v", r.Info)
 	}
 }
 

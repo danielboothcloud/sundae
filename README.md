@@ -432,7 +432,21 @@ terminal, so pass `-t`. Detach with <kbd>Ctrl-]</kbd> then <kbd>d</kbd>, with
 only the bridge, and the program keeps running. After <kbd>Ctrl-]</kbd>,
 <kbd>Ctrl-]</kbd> again sends one <kbd>Ctrl-]</kbd> to the program,
 <kbd>?</kbd> shows this help, and any other key goes to the program with the
-<kbd>Ctrl-]</kbd> before it. The prefix also works when the program turns on
+<kbd>Ctrl-]</kbd> before it.
+
+**Switch sessions while attached.** One session is on screen at a time:
+<kbd>Ctrl-]</kbd> <kbd>n</kbd> and <kbd>Ctrl-]</kbd> <kbd>p</kbd> switch to
+the next and previous of your sessions by name (wrapping around; with only
+one, `[sundae] no other session` and you stay attached), and
+<kbd>Ctrl-]</kbd> <kbd>s</kbd> shows the numbered list of `session attach`,
+the current session marked with `*`; <kbd>q</kbd>, <kbd>Esc</kbd> or
+<kbd>Ctrl-C</kbd> go back to it. Switching leaves the current session as a
+detach does (its program keeps running), resumes the target if it is
+suspended (its progress shows), and prints `[sundae] switched to <session>.`;
+if the target cannot be attached, `[sundae] cannot switch to <session>: …` and
+the current one comes back. The final detach or exit is reported for the last
+session, and its exit status is the attach's. `~.` only detaches; with
+`detach_key: none` there is no switching. The prefix also works when the program turns on
 the kitty keyboard protocol or modifyOtherKeys; a <kbd>Ctrl-]</kbd> with no key
 after it waits for the next key. A detach resets the terminal modes programs
 commonly set (alternate screen, mouse, bracketed paste, kitty keyboard).
@@ -2092,7 +2106,11 @@ selected row; forges appear once the Forges tab has listed them. When OpenShell 
 **Sessions** tab lists your agent sessions, what needs you first, and the
 header counts the ones blocked, errored, done and working. In it:
 <kbd>enter</kbd> attaches (detach with <kbd>Ctrl-]</kbd> <kbd>d</kbd>, or
-<kbd>~.</kbd> after a newline, to come back to the same row), <kbd>n</kbd> starts a session (pick any number of repositories with
+<kbd>~.</kbd> after a newline, to come back to the row of the last session
+attached; <kbd>Ctrl-]</kbd> <kbd>n</kbd>/<kbd>p</kbd> switch to the
+next/previous session without leaving the attach, and <kbd>Ctrl-]</kbd>
+<kbd>s</kbd> comes back to the tab, the session's row selected, to choose
+another with <kbd>enter</kbd>), <kbd>n</kbd> starts a session (pick any number of repositories with
 <kbd>space</kbd>, a name and a profile), <kbd>A</kbd> and <kbd>R</kbd> add
 repositories to the highlighted session or remove some, <kbd>u</kbd> syncs it
 with its forges (see below), <kbd>d</kbd> deletes it, its sandbox and its

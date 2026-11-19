@@ -39,6 +39,33 @@ func (k PrefixKey) controlByte() byte { return byte(k) & 0x1f }
 // unshifted character.
 func (k PrefixKey) keyCode() int { return int(strings.ToLower(string(rune(k)))[0]) }
 
+// SwitchDir is the session a switch asks for.
+type SwitchDir int
+
+const (
+	// SwitchNext is the next session by name (prefix n).
+	SwitchNext SwitchDir = iota + 1
+	// SwitchPrev is the previous session by name (prefix p).
+	SwitchPrev
+	// SwitchPick is a session the user chooses (prefix s).
+	SwitchPick
+)
+
+// SwitchRequest is the error Bridge returns, with code 0, when the user asked
+// to switch sessions. As for a detach, the session's program keeps running.
+type SwitchRequest struct{ Dir SwitchDir }
+
+func (r *SwitchRequest) Error() string {
+	switch r.Dir {
+	case SwitchNext:
+		return "switch to the next session"
+	case SwitchPrev:
+		return "switch to the previous session"
+	default:
+		return "choose a session"
+	}
+}
+
 // action is what a key after the prefix asks the bridge to do.
 type action int
 
@@ -46,18 +73,46 @@ const (
 	actionNone action = iota
 	actionDetach
 	actionHelp
+	actionNext
+	actionPrev
+	actionPick
 )
 
-// prefixBindings maps the key typed after the prefix to its action.
-// NOTE: add session switching (n, p, s) here; Bridge handles each action.
+// switchDir returns the switch an action asks for; 0 for none.
+func (a action) switchDir() SwitchDir {
+	switch a {
+	case actionNext:
+		return SwitchNext
+	case actionPrev:
+		return SwitchPrev
+	case actionPick:
+		return SwitchPick
+	default:
+		return 0
+	}
+}
+
+// prefixBindings maps the key typed after the prefix to its action; Bridge
+// handles each action. The switch keys are bound only WithSwitching.
 var prefixBindings = map[rune]action{
 	'd': actionDetach,
 	'?': actionHelp,
+	'n': actionNext,
+	'p': actionPrev,
+	's': actionPick,
 }
 
+// noOtherSession is shown for prefix n or p when there is nothing to switch to.
+const noOtherSession = "\r\n[sundae] no other session\r\n"
+
 // prefixHelp is the help line shown for prefix ?.
-func prefixHelp(k PrefixKey) string {
-	return "\r\n[sundae] " + k.String() + " d detach · " + k.String() + " " + k.String() + " send " + k.String() + " · ~. (after a newline) detach\r\n"
+func prefixHelp(k PrefixKey, switching bool) string {
+	p := k.String()
+	help := "\r\n[sundae] " + p + " d detach · "
+	if switching {
+		help += p + " n/p next/previous session · " + p + " s choose a session · "
+	}
+	return help + p + " " + p + " send " + p + " · ~. (after a newline) detach\r\n"
 }
 
 // Modifier bits of the CSI-u and modifyOtherKeys encodings (the parameter
@@ -183,6 +238,8 @@ func modifyOtherKey(params []string) (key, bool) {
 // input. NOTE: a lone prefix waits, without timeout, for the next key.
 type prefixFilter struct {
 	prefix PrefixKey
+	// switching binds the switch keys (n, p, s).
+	switching bool
 	// held is the start of an escape sequence split across reads.
 	held []byte
 	// armed is the prefix as typed, while it waits for the command key.
@@ -235,7 +292,7 @@ func (f *prefixFilter) filter(p []byte) (out []byte, act action, rest []byte) {
 			out = append(out, raw...)
 			continue
 		}
-		if act := prefixBindings[k.char()]; act != actionNone {
+		if act := prefixBindings[k.char()]; act != actionNone && (f.switching || act.switchDir() == 0) {
 			return out, act, buf
 		}
 		out = append(append(out, prefix...), raw...)
@@ -243,27 +300,33 @@ func (f *prefixFilter) filter(p []byte) (out []byte, act action, rest []byte) {
 	return out, actionNone, nil
 }
 
-// forwardInput copies term's input to is; on a detach it resets the terminal,
-// closes detached and cancels the attach client as a ctx cancel does.
-func forwardInput(term io.Reader, is InteractiveSession, prefix PrefixKey, out *bridgeOutput, detached chan<- struct{}) {
-	if prefix.Enabled() && pumpInput(is, term, newPrefixFilter(prefix), out) {
-		// Mute first: output arriving after the detach must not undo the reset.
-		out.mute(terminalReset)
-		close(detached)
-		_ = sbx.CloseInput(is)
-		_ = sbx.Cancel(is)
-		return
-	}
-	if !prefix.Enabled() {
+// forwardInput copies term's input to is. When the user detaches or
+// switches, it reports the action on ended, resets the terminal, closes the
+// input and cancels the attach client as a ctx cancel does.
+func forwardInput(term io.Reader, is InteractiveSession, o bridgeOptions, out *bridgeOutput, ended chan<- action) {
+	if o.prefix.Enabled() {
+		f := newPrefixFilter(o.prefix)
+		f.switching = o.others != nil
+		if act := pumpInput(is, term, f, out, o.others); act != actionNone {
+			// Mute first: output arriving after the detach must not undo the reset.
+			out.mute(terminalReset)
+			ended <- act
+			_ = sbx.CloseInput(is)
+			_ = sbx.Cancel(is)
+			return
+		}
+	} else {
 		_, _ = io.Copy(is, term)
 	}
 	// The client closed its input; let the remote side see EOF.
 	_ = sbx.CloseInput(is)
 }
 
-// pumpInput copies src to dst through f until src ends or the user detaches,
-// which it reports. Help goes to out. Input after a detach is dropped.
-func pumpInput(dst io.Writer, src io.Reader, f *prefixFilter, out *bridgeOutput) (detached bool) {
+// pumpInput copies src to dst through f until src ends, or the user detaches
+// or switches, which it returns. Help goes to out; so does a switch by name
+// when others says there is no other session. Input after the action is
+// dropped.
+func pumpInput(dst io.Writer, src io.Reader, f *prefixFilter, out *bridgeOutput, others func() bool) action {
 	buf := make([]byte, 4096)
 	for {
 		n, err := src.Read(buf)
@@ -272,14 +335,20 @@ func pumpInput(dst io.Writer, src io.Reader, f *prefixFilter, out *bridgeOutput)
 			fwd, act, rest := f.filter(data)
 			if len(fwd) > 0 {
 				if _, werr := dst.Write(fwd); werr != nil {
-					return false
+					return actionNone
 				}
 			}
 			switch act {
-			case actionDetach:
-				return true
 			case actionHelp:
-				_, _ = io.WriteString(out, prefixHelp(f.prefix))
+				_, _ = io.WriteString(out, prefixHelp(f.prefix, f.switching))
+			case actionNext, actionPrev:
+				if !others() {
+					_, _ = io.WriteString(out, noOtherSession)
+					break
+				}
+				return act
+			case actionDetach, actionPick:
+				return act
 			case actionNone:
 			}
 			data = rest
@@ -288,7 +357,7 @@ func pumpInput(dst io.Writer, src io.Reader, f *prefixFilter, out *bridgeOutput)
 			if p := f.pending(); len(p) > 0 {
 				_, _ = dst.Write(p)
 			}
-			return false
+			return actionNone
 		}
 	}
 }

@@ -1523,6 +1523,8 @@ type fakeInteractive struct {
 	input    bytes.Buffer
 	resizes  [][2]uint32
 	inClosed bool
+	// cancelled reports Cancel was called.
+	cancelled bool
 }
 
 func newFakeInteractive() *fakeInteractive {
@@ -1558,8 +1560,17 @@ func (f *fakeInteractive) CloseWrite() error {
 }
 
 func (f *fakeInteractive) Cancel() error {
+	f.mu.Lock()
+	f.cancelled = true
+	f.mu.Unlock()
 	f.exit <- -1
 	return nil
+}
+
+func (f *fakeInteractive) isCancelled() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.cancelled
 }
 func (f *fakeInteractive) Close() error { return f.outR.Close() }
 

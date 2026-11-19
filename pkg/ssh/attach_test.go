@@ -104,13 +104,14 @@ type fakeAttacher struct {
 }
 
 func (a *fakeAttacher) Session() *openshell.Session {
-	return &openshell.Session{Repo: "r", Name: "main", Sandbox: "sb-r"}
+	return &openshell.Session{Repo: "r", Repos: []string{"r"}, Name: "main", Sandbox: "sb-r"}
 }
 
-func (a *fakeAttacher) Attach(ctx context.Context, term openshell.Terminal) (int, error) {
+func (a *fakeAttacher) Attach(ctx context.Context, term openshell.Terminal, opts ...openshell.BridgeOption) (int, error) {
 	pty, _, _ := term.Pty()
 	a.size = fmt.Sprintf("%dx%d", pty.Window.Width, pty.Window.Height)
-	return openshell.Bridge(ctx, term, a.shell, openshell.WithPrefixKey(a.prefix)) //nolint:wrapcheck
+	opts = append([]openshell.BridgeOption{openshell.WithPrefixKey(a.prefix)}, opts...)
+	return openshell.Bridge(ctx, term, a.shell, opts...) //nolint:wrapcheck
 }
 
 func (a *fakeAttacher) Close() { a.once.Do(func() { close(a.closed) }) }
