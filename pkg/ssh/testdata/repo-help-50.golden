@@ -3,7 +3,6 @@
   main · 0%   ▲ 1 blocked  ✓ 1 done  ● 2 working
   ‹ Readme ›
 
-
      sundae
 
     A git home and an agent cockpit.
@@ -15,9 +14,10 @@
     • note 5
     • note 6
     • note 7
+    • note 8
 
 
-   esc back    f/pgdn page down   …
-   H/L tabs    b/pgup page up
-   ?   less    d      ½ page down
-   q   quit    u      ½ page up
+   esc back    f/pgdn page down      ↓/j down
+   H/L tabs    b/pgup page up        ↑/k up
+   ?   less    d      ½ page down    g   top
+   q   quit    u      ½ page up      G   bottom

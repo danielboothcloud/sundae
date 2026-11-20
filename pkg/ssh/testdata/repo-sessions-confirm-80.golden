@@ -3,7 +3,6 @@
   about sundae                     1 of 2   ▲ 1 blocked  ✓ 1 done  ● 2 working
     Readme    Files    Commits    Bookmarks    Tags  • Sessions
 
-
                                                                    2 sessions
 
   ┃ ✓ forge-sync                                            done   5m  delete?
@@ -11,6 +10,7 @@
 
     ● tui                                                         working   5m
       Running go test ./pkg/ui/...
+
 
 
 

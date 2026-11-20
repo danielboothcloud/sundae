@@ -222,6 +222,8 @@ func DefaultStyles() *Styles {
 	highlightColor := lipgloss.Color("210")
 	highlightColorDim := lipgloss.Color("174")
 	selectorColor := lipgloss.Color("167")
+	// rowBarColor is the selected row's ┃, the same on every list.
+	rowBarColor := lipgloss.Color("176")
 	hashColor := lipgloss.Color("185")
 
 	s := new(Styles)
@@ -268,7 +270,7 @@ func DefaultStyles() *Styles {
 
 	s.RepoSelector.Active.Base = s.RepoSelector.Normal.Base.
 		BorderStyle(lipgloss.Border{Left: "┃"}).
-		BorderForeground(lipgloss.Color("176"))
+		BorderForeground(rowBarColor)
 
 	s.RepoSelector.Active.Title = s.RepoSelector.Normal.Title.
 		Foreground(lipgloss.Color("212"))
@@ -372,7 +374,7 @@ func DefaultStyles() *Styles {
 		Border(lipgloss.Border{
 			Left: "┃",
 		}, false, false, false, true).
-		BorderForeground(selectorColor)
+		BorderForeground(rowBarColor)
 
 	s.LogItem.Active.Hash = s.LogItem.Normal.Hash.
 		Foreground(hashColor)
@@ -429,8 +431,8 @@ func DefaultStyles() *Styles {
 	s.Ref.Normal.Item = lipgloss.NewStyle()
 
 	s.Ref.ItemSelector = lipgloss.NewStyle().
-		Foreground(selectorColor).
-		SetString("> ")
+		Foreground(rowBarColor).
+		SetString("┃ ")
 
 	s.Ref.Active.Item = lipgloss.NewStyle().
 		Foreground(highlightColorDim)
@@ -471,7 +473,7 @@ func DefaultStyles() *Styles {
 
 	s.Tree.Selector = s.Tree.Normal.FileName.
 		Width(1).
-		Foreground(selectorColor)
+		Foreground(rowBarColor)
 
 	s.Tree.Normal.FileName = lipgloss.NewStyle().
 		MarginLeft(1)
@@ -552,7 +554,7 @@ func DefaultStyles() *Styles {
 
 	s.Stash.Selector = lipgloss.NewStyle().
 		Width(1).
-		Foreground(selectorColor)
+		Foreground(rowBarColor)
 
 	// Prompts are read, not skimmed: every part is bright enough to read
 	// on a dark terminal. Labels and values are near white, details a

@@ -245,7 +245,8 @@ func TestRepoContextFits(t *testing.T) {
 // help line and opens the home full help with ?.
 func TestRepoTabsHelp(t *testing.T) {
 	ui := contentUI(t, 80)
-	want := []string{"j/k move", "j/k move • enter open", "j/k move • enter open", "j/k move • enter browse", "j/k move • enter browse", "j/k move • enter attach"}
+	// The repository has no tags: the empty tab lists no keys of its own.
+	want := []string{"j/k move", "j/k move • enter open", "j/k move • enter open", "j/k move • enter browse", "esc back", "j/k move • enter attach"}
 	for i, w := range want {
 		if i > 0 {
 			uiKey(ui, "tab")

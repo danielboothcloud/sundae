@@ -95,6 +95,10 @@ func (r *Refs) SetSize(width, height int) {
 
 // ShortHelp implements help.KeyMap.
 func (r *Refs) ShortHelp() []key.Binding {
+	if len(r.selector.Items()) == 0 {
+		// An empty tab has no ref to browse or copy.
+		return nil
+	}
 	copyKey := r.common.KeyMap.Copy
 	copyKey.SetHelp("c", "copy ref")
 	return []key.Binding{r.common.KeyMap.UpDown, r.browseKey(), copyKey}
@@ -104,20 +108,9 @@ func (r *Refs) ShortHelp() []key.Binding {
 func (r *Refs) FullHelp() [][]key.Binding {
 	copyKey := r.common.KeyMap.Copy
 	copyKey.SetHelp("c", "copy ref")
-	k := r.selector.KeyMap
 	return [][]key.Binding{
-		{r.browseKey(), r.common.KeyMap.SelectItem},
-		{
-			k.CursorUp,
-			k.CursorDown,
-			k.NextPage,
-			k.PrevPage,
-		},
-		{
-			k.GoToStart,
-			k.GoToEnd,
-			copyKey,
-		},
+		{r.browseKey(), r.common.KeyMap.SelectItem, copyKey},
+		listNav(r.common, r.selector.KeyMap),
 	}
 }
 
@@ -141,6 +134,9 @@ func (r *Refs) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 	case RepoMsg:
 		r.selector.Select(0)
 		r.repo = msg
+		// An empty tab says "No tags.", not "No items.".
+		name := strings.ToLower(r.TabName())
+		r.selector.SetStatusBarItemName(name, name)
 	case RefMsg:
 		r.ref = msg
 		cmds = append(cmds, r.Init())

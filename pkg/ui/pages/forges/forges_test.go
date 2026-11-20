@@ -521,6 +521,26 @@ func TestForgesPushConfirmAndRefusal(t *testing.T) {
 	}
 }
 
+// TestForgesConfirmRowGone checks a push confirm closes when its row is
+// no longer listed, as the Sessions tab's confirm does.
+func TestForgesConfirmRowGone(t *testing.T) {
+	src := newFakeSource()
+	m := started(t, 80, 20, src)
+	selectRow(t, m, "danielboothcloud/sundae")
+	run(m, keys(m, "p"), 1)
+	if m.confirm == nil {
+		t.Fatal("p did not ask")
+	}
+	src.mu.Lock()
+	src.repos["github"] = src.repos["github"][:3]
+	src.mu.Unlock()
+	_, cmd := m.Update(feedMsg{evs: []events.Event{events.ForgeEvent(1, events.ForgeOutcome{Kind: "discover", Forge: "github", OK: true})}})
+	run(m, cmd, 2)
+	if m.confirm != nil || m.Capturing() || strings.Contains(view(m), "push main") {
+		t.Fatalf("the confirm outlived its row:\n%s", view(m))
+	}
+}
+
 func TestForgesSyncAndOpen(t *testing.T) {
 	src := newFakeSource()
 	m := started(t, 116, 20, src)

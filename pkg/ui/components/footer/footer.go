@@ -1,6 +1,7 @@
 package footer
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -20,6 +21,8 @@ type Footer struct {
 	common common.Common
 	help   help.Model
 	keymap help.KeyMap
+	// fullHeight is the most lines the full help takes; 0: any.
+	fullHeight int
 }
 
 // NewHelp returns the help the footer renders keys with. Other lines that
@@ -153,6 +156,91 @@ func ShortView(c common.Common, kb []key.Binding, width int) string {
 	return strings.Join(items, separatorStyle(c).Render(" • "))
 }
 
+// fullGap is the space between the full help's columns.
+const fullGap = "    "
+
+// FullView renders groups as columns, wrapping to a band below rather than cutting at width; over
+// height lines the lowest-ranked keys (mostly on the action menu too) give way, never ? or q. <= 0: no limit.
+func FullView(h help.Model, groups [][]key.Binding, width, height int) string {
+	on := make([][]key.Binding, len(groups))
+	for i, g := range groups {
+		for _, b := range g {
+			if shown(b) {
+				on[i] = append(on[i], b)
+			}
+		}
+	}
+	for {
+		v := fullBands(h, on, width)
+		if height <= 0 || lipgloss.Height(v) <= height || !dropLowest(on) {
+			return v
+		}
+	}
+}
+
+// dropLowest removes the last of the lowest ranked keys that may give
+// way, reporting whether there was one.
+func dropLowest(groups [][]key.Binding) bool {
+	gi, bi, worst := -1, -1, RankMore
+	for i, g := range groups {
+		for j, b := range g {
+			if r := RankOf(b); r != RankQuit && r != RankMore && r >= worst {
+				gi, bi, worst = i, j, r
+			}
+		}
+	}
+	if gi < 0 {
+		return false
+	}
+	groups[gi] = slices.Delete(groups[gi], bi, bi+1)
+	return true
+}
+
+// fullBands lays out groups as columns, in bands at most width wide.
+func fullBands(h help.Model, groups [][]key.Binding, width int) string {
+	var cols []string
+	for _, g := range groups {
+		if len(g) == 0 {
+			continue
+		}
+		keys, descs := make([]string, len(g)), make([]string, len(g))
+		for i, b := range g {
+			keys[i], descs[i] = b.Help().Key, b.Help().Desc
+		}
+		cols = append(cols, lipgloss.JoinHorizontal(lipgloss.Top,
+			h.Styles.FullKey.Render(strings.Join(keys, "\n")), " ",
+			h.Styles.FullDesc.Render(strings.Join(descs, "\n"))))
+	}
+	gap := h.Styles.FullSeparator.Inline(true).Render(fullGap)
+	var bands, band []string
+	used := 0
+	for _, c := range cols {
+		w := lipgloss.Width(c)
+		if len(band) > 0 && width > 0 && used+len(fullGap)+w > width {
+			bands = append(bands, lipgloss.JoinHorizontal(lipgloss.Top, band...))
+			band, used = nil, 0
+		}
+		if len(band) > 0 {
+			band = append(band, gap)
+			used += len(fullGap)
+		}
+		band = append(band, c)
+		used += w
+	}
+	if len(band) > 0 {
+		bands = append(bands, lipgloss.JoinHorizontal(lipgloss.Top, band...))
+	}
+	lines := strings.Split(strings.Join(bands, "\n\n"), "\n")
+	for i, l := range lines {
+		// Only a column wider than the screen on its own is cut.
+		if width > 0 {
+			l = ansi.Truncate(l, width, "…")
+		}
+		lines[i] = strings.TrimRight(l, " ")
+	}
+	return strings.Join(lines, "\n")
+}
+
 // New creates a new Footer.
 func New(c common.Common, keymap help.KeyMap) *Footer {
 	f := &Footer{
@@ -170,6 +258,9 @@ func (f *Footer) SetSize(width, height int) {
 	f.help.SetWidth(width -
 		f.common.Styles.Footer.GetHorizontalFrameSize())
 }
+
+// SetFullHeight sets the most lines the full help takes; 0: any.
+func (f *Footer) SetFullHeight(n int) { f.fullHeight = n }
 
 // Init implements tea.Model.
 func (f *Footer) Init() tea.Cmd {
@@ -209,7 +300,7 @@ func (f *Footer) view(style lipgloss.Style) string {
 		return ""
 	}
 	s := style.Width(f.common.Width)
-	helpView := f.help.View(f.keymap)
+	helpView := FullView(f.help, f.keymap.FullHelp(), f.help.Width(), f.fullHeight)
 	if !f.help.ShowAll {
 		// The left-aligned keys take the right padding too: at 50 columns
 		// that cell is what lets n new stay next to the row's actions.

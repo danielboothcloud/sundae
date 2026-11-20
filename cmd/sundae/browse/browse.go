@@ -38,32 +38,33 @@ var Command = &cobra.Command{
 			return fmt.Errorf("failed to open repository: %w", err)
 		}
 
-		// Bubble Tea uses Termenv default output so we have to use the same
-		// thing here.
-		ctx := cmd.Context()
-		c := common.NewCommon(ctx, 0, 0)
-		c.HideCloneCmd = true
-		comps := []common.TabComponent{
-			repo.NewReadme(c),
-			repo.NewFiles(c),
-			repo.NewLog(c),
-		}
-		if !r.IsBare {
-			comps = append(comps, repo.NewStash(c))
-		}
-		comps = append(comps, repo.NewRefs(c, git.RefsHeads), repo.NewRefs(c, git.RefsTags))
-		m := &model{
-			model:  repo.New(c, comps...),
-			repo:   repository{r},
-			common: c,
-		}
-
-		m.footer = footer.New(c, m)
-		p := tea.NewProgram(m)
+		p := tea.NewProgram(newModel(common.NewCommon(cmd.Context(), 0, 0), r))
 
 		_, err = p.Run()
 		return err
 	},
+}
+
+// newModel returns the browser of r: the repository page and the footer
+// the server's TUI draws.
+func newModel(c common.Common, r *git.Repository) *model {
+	c.HideCloneCmd = true
+	comps := []common.TabComponent{
+		repo.NewReadme(c),
+		repo.NewFiles(c),
+		repo.NewLog(c),
+	}
+	if !r.IsBare {
+		comps = append(comps, repo.NewStash(c))
+	}
+	comps = append(comps, repo.NewRefs(c, git.RefsHeads), repo.NewRefs(c, git.RefsTags))
+	m := &model{
+		model:  repo.New(c, comps...),
+		repo:   repository{r},
+		common: c,
+	}
+	m.footer = footer.New(c, m)
+	return m
 }
 
 type state int
@@ -91,6 +92,8 @@ func (m *model) SetSize(w, h int) {
 	hm := style.GetVerticalFrameSize() + lipgloss.Height(m.footerView())
 
 	m.footer.SetSize(w-wm, h-hm)
+	// As the server's TUI: the page keeps half the screen while ? shows every key.
+	m.footer.SetFullHeight((h - style.GetVerticalFrameSize()) / 2)
 	m.model.SetSize(w-wm, h-hm)
 }
 

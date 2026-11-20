@@ -1,0 +1,23 @@
+
+    Sundae                                  ▲ 1 blocked  ✓ 1 done  ● 2 working
+
+    Repositories  • Sessions    Forges    About
+
+                                                                   5 sessions
+
+  ┃ ▲ infra / claude-1                                            blocked   5m
+  ┃   Apply 3 to add, 1 to change, 0 to destroy?
+
+
+
+   H/L/1-4 tabs        j/k  move            enter attach
+   space/. actions     pgdn next page       n     new
+   :       commands    pgup prev page       d     delete
+   ?       less        g    top / follow    z     suspend/resume
+   q       quit        G    bottom
+
+   A add repos          c   copy attach command
+   R remove repos       /   filter
+   u sync with forge    esc clear filter
+                        l   history
+                        r   refresh

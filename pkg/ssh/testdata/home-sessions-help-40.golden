@@ -1,0 +1,19 @@
+
+    Sundae      ▲1 blocked  ✓1 done +2
+
+  ‹ Sessions ›
+
+  ┃ ▲ infra / claude-1
+  ┃   blocked  5m
+  ┃   Apply 3 to add, 1 to change, 0 …
+
+
+   H/L/1-4 tabs        j/k  move
+   space/. actions     pgdn next page
+   :       commands    pgup prev page
+   ?       less
+   q       quit
+
+   enter attach    /   filter
+   n     new       esc clear filter
+                   l   history

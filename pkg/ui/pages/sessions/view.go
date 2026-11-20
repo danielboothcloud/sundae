@@ -546,11 +546,8 @@ func (m *Sessions) ShortHelp() []key.Binding {
 		return []key.Binding{m.keys.Apply, m.keys.Cancel}
 	}
 	if m.pane == signalsPane {
-		back := m.keys.Left
-		if m.sigQuery != "" {
-			back = m.keys.Clear
-		}
-		return []key.Binding{m.keys.Attach, m.keys.Attention, m.keys.Filter, back}
+		// esc ranks with the answers, so the way back survives a phone width.
+		return []key.Binding{m.keys.Attach, m.keys.Attention, m.keys.Filter, m.backKey()}
 	}
 	if m.listErr != nil {
 		retry := m.keys.Retry

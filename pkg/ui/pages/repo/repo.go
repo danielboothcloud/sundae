@@ -3,10 +3,12 @@ package repo
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -131,14 +133,22 @@ func (r *Repo) Path() string {
 	return r.panes[r.activeTab].Path()
 }
 
-// commonHelp is the page's own keys, after the tab's, as home ends its
-// help line with switching tabs.
-func (r *Repo) commonHelp() []key.Binding {
+// commonHelp is the page's keys after the tab's tabKeys, as home ends with switching tabs;
+// esc back is left to a tab that has its own (the signal history), so it shows once.
+func (r *Repo) commonHelp(tabKeys ...key.Binding) []key.Binding {
 	back := r.common.KeyMap.Back
 	back.SetHelp("esc", "back")
 	tab := r.common.KeyMap.Section
 	tab.SetHelp("H/L", "tabs")
+	if slices.ContainsFunc(tabKeys, func(b key.Binding) bool { return b.Enabled() && b.Help() == back.Help() }) {
+		return []key.Binding{tab}
+	}
 	return []key.Binding{back, tab}
+}
+
+// listNav is a list's moving keys, named as on the home tabs.
+func listNav(c common.Common, k list.KeyMap) []key.Binding {
+	return []key.Binding{c.KeyMap.UpDown, k.NextPage, k.PrevPage, c.KeyMap.GotoTop, c.KeyMap.GotoBottom}
 }
 
 // Capturing reports whether the active tab takes every key (the Sessions
@@ -172,15 +182,14 @@ func (r *Repo) ShortHelp() []key.Binding {
 	if r.Capturing() {
 		return r.panes[r.activeTab].(help.KeyMap).ShortHelp()
 	}
-	return append(r.panes[r.activeTab].(help.KeyMap).ShortHelp(), r.commonHelp()...)
+	kb := r.panes[r.activeTab].(help.KeyMap).ShortHelp()
+	return append(kb, r.commonHelp(kb...)...)
 }
 
 // FullHelp implements help.KeyMap.
 func (r *Repo) FullHelp() [][]key.Binding {
-	b := make([][]key.Binding, 0)
-	b = append(b, r.commonHelp())
-	b = append(b, r.panes[r.activeTab].(help.KeyMap).FullHelp()...)
-	return b
+	tab := r.panes[r.activeTab].(help.KeyMap).FullHelp()
+	return append([][]key.Binding{r.commonHelp(slices.Concat(tab...)...)}, tab...)
 }
 
 // Init implements tea.View.

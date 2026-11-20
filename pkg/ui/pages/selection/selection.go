@@ -146,7 +146,7 @@ func New(c common.Common) *Selection {
 
 	readme := code.New(c, "", "")
 	readme.UseGlamour = true
-	readme.NoContentStyle = c.Styles.NoContent.
+	readme.NoContentStyle = c.Styles.NoContent.UnsetMarginTop().
 		SetString(defaultNoContent)
 	sel.delegate = NewItemDelegate(&c, &sel.activePane, sel.badges)
 	sel.delegate.confirm = func(id string) *prompt.Confirm {
@@ -161,6 +161,7 @@ func New(c common.Common) *Selection {
 	selector.SetShowTitle(false)
 	selector.SetShowHelp(false)
 	selector.SetShowStatusBar(false)
+	selector.SetStatusBarItemName("repository", "repositories")
 	selector.DisableQuitKeybindings()
 	// The list's own paging keys include d, u, h and l, which mean delete,
 	// sync and in/out here.
@@ -197,7 +198,7 @@ func (s *Selection) SetSize(width, height int) {
 	wm, hm := s.getMargins()
 	s.tabs.SetSize(width, height-hm)
 	s.selector.SetSize(width-wm, height-hm)
-	s.readme.SetSize(width-wm, height-hm-1) // -1 for readme status line
+	s.readme.SetSize(width-wm, height-hm-1) // -1 for the blank line under the tabs
 	if s.sessions != nil {
 		s.sessions.SetSize(width-wm, height-hm)
 	}
@@ -271,6 +272,23 @@ func (s *Selection) Summary(width int) string {
 		return ""
 	}
 	return s.sessions.Summary(width)
+}
+
+// HeaderRight is the home header's right end in at most width cells: the attention
+// summary, after the readme's position on About, as the repository page's header shows it.
+func (s *Selection) HeaderRight(width int) string {
+	if s.activePane != readmePane {
+		return s.Summary(width)
+	}
+	at := s.common.Styles.Repo.HeaderContext.Render(common.ScrollPercent(s.readme.ScrollPosition()))
+	room := width - lipgloss.Width(at) - 3
+	if room < 0 {
+		return ""
+	}
+	if sum := s.Summary(room); sum != "" {
+		return at + "   " + sum
+	}
+	return at
 }
 
 // Message implements common.Messenger: the active tab's message.
@@ -354,13 +372,17 @@ func (s *Selection) ShortHelp() []key.Binding {
 	case selectorPane:
 		open := s.common.KeyMap.Select
 		open.SetHelp("enter", "open")
-		kb = []key.Binding{open}
+		// Without a row, enter and s have nothing to act on.
+		row := s.SelectedRepo() != ""
+		if row {
+			kb = []key.Binding{open}
+		}
 		if s.canCreate() {
 			n := s.newRepo
 			n.SetHelp("n", "new")
 			kb = append(kb, n)
 		}
-		if s.sessions != nil {
+		if s.sessions != nil && row {
 			ns := s.newSession
 			ns.SetHelp("s", "session")
 			kb = append(kb, ns)
@@ -441,10 +463,12 @@ func (s *Selection) FullHelp() [][]key.Binding {
 	case selectorPane:
 		copyKey := s.common.KeyMap.Copy
 		copyKey.SetHelp("c", "copy command")
+		open := s.common.KeyMap.Select
+		open.SetHelp("enter", "open")
 		k := s.selector.KeyMap
 		if s.FilterState() != list.Filtering {
 			b[0] = append(b[0],
-				s.common.KeyMap.Select,
+				open,
 				copyKey,
 			)
 			if s.sessions != nil {
@@ -457,15 +481,14 @@ func (s *Selection) FullHelp() [][]key.Binding {
 				b[0] = append(b[0], s.deleteRepo)
 			}
 		}
+		// Named as on the other tabs; the list's own bindings have the same keys.
+		km := s.common.KeyMap
 		b = append(b, []key.Binding{
-			k.CursorUp,
-			k.CursorDown,
-		})
-		b = append(b, []key.Binding{
+			km.UpDown,
 			k.NextPage,
 			k.PrevPage,
-			k.GoToStart,
-			k.GoToEnd,
+			km.GotoTop,
+			km.GotoBottom,
 		})
 		b = append(b, []key.Binding{
 			k.Filter,
@@ -760,18 +783,11 @@ func (s *Selection) View() string {
 	case forgesPane:
 		view = s.forges.View()
 	case readmePane:
-		rs := lipgloss.NewStyle().
-			Height(s.common.Height - hm)
-		status := fmt.Sprintf("☰ %.f%%", s.readme.ScrollPercent()*100)
-		readmeStatus := lipgloss.NewStyle().
-			Align(lipgloss.Right).
-			Width(s.common.Width - wm).
-			Foreground(s.common.Styles.InactiveBorderColor).
-			Render(status)
-		view = rs.Render(lipgloss.JoinVertical(lipgloss.Left,
-			s.readme.View(),
-			readmeStatus,
-		))
+		// A blank line under the tabs, as the other tabs leave; the
+		// position is in the header (HeaderRight).
+		view = lipgloss.NewStyle().
+			Height(s.common.Height - hm).
+			Render("\n" + s.readme.View())
 	}
 	if s.menu != nil {
 		w, h := s.common.Width-wm, s.common.Height-hm

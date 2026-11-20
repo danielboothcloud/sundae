@@ -10,6 +10,7 @@ import (
 	gansi "charm.land/glamour/v2/ansi"
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/danielboothcloud/sundae/pkg/ui/common"
 	vp "github.com/danielboothcloud/sundae/pkg/ui/components/viewport"
 )
@@ -83,7 +84,9 @@ func (r *Code) Init() tea.Cmd {
 	w := r.common.Width - r.common.Styles.App.GetHorizontalFrameSize()
 	content := r.content
 	if content == "" {
-		r.Viewport.Model.SetContent(r.NoContentStyle.String())
+		// Wrapped, as the viewport cuts long lines.
+		st := r.NoContentStyle
+		r.Viewport.Model.SetContent(st.Width(max(w-st.GetHorizontalMargins(), 1)).String())
 		return nil
 	}
 
@@ -97,7 +100,8 @@ func (r *Code) Init() tea.Cmd {
 		if err != nil {
 			return common.ErrorCmd(err)
 		}
-		content = md
+		// Glamour opens with a blank line; the page already leaves one under its tabs.
+		content = trimLeadingBlankLines(md)
 	} else {
 		f, err := r.renderFile(r.extension, content)
 		if err != nil {
@@ -236,4 +240,15 @@ func (r *Code) renderFile(path, content string) (string, error) {
 	}
 
 	return s.String(), nil
+}
+
+// trimLeadingBlankLines drops the lines at the start of s that show nothing.
+func trimLeadingBlankLines(s string) string {
+	for {
+		line, rest, ok := strings.Cut(s, "\n")
+		if !ok || strings.TrimSpace(ansi.Strip(line)) != "" {
+			return s
+		}
+		s = rest
+	}
 }

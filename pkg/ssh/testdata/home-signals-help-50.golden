@@ -1,0 +1,23 @@
+
+    Sundae    ▲ 1 blocked  ✓ 1 done  ● 2 working
+
+  ‹ Sessions ›
+
+   ‹ Signal history ›        following · 0 kept
+
+   No signals yet. Sessions report here as they
+   work.
+
+
+
+
+   H/L/1-4 tabs        j/k  move
+   :       commands    pgdn next page
+   ?       less        pgup prev page
+   q       quit        g    top / follow
+                       G    bottom
+
+   enter attach            /   filter
+   esc   back              esc clear filter
+   h     sessions          r   refresh
+   a     attention only

@@ -1,10 +1,13 @@
 package selection
 
 import (
+	"slices"
+
 	tea "charm.land/bubbletea/v2"
 	"github.com/danielboothcloud/sundae/pkg/access"
 	"github.com/danielboothcloud/sundae/pkg/proto"
 	"github.com/danielboothcloud/sundae/pkg/ui/components/prompt"
+	"github.com/danielboothcloud/sundae/pkg/ui/components/selector"
 )
 
 // repoDeletedMsg is the outcome of deleting a repository.
@@ -35,6 +38,15 @@ func (s *Selection) openDelete(repo string) {
 	}
 	s.deleteTarget = repo
 	s.deleting = prompt.NewConfirm(s.common, "delete", "delete?", "loses history, collaborators, webhooks")
+}
+
+// setRepoItems lists items on the Repositories tab. A delete confirm whose
+// repository is gone (deleted elsewhere) closes: nothing is left to ask about.
+func (s *Selection) setRepoItems(items []selector.IdentifiableItem) tea.Cmd {
+	if s.deleting != nil && !slices.ContainsFunc(items, func(it selector.IdentifiableItem) bool { return it.ID() == s.deleteTarget }) {
+		s.deleting, s.deleteTarget = nil, ""
+	}
+	return s.selector.SetItems(items)
 }
 
 // onDeleteKey answers the delete confirm: y deletes in the background.

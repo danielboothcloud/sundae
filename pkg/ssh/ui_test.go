@@ -215,7 +215,7 @@ func TestHomeFrame(t *testing.T) {
 				t.Fatalf("3 did not open About:\n%s", s)
 			}
 			uiKey(ui, "1")
-			if s := screenText(ui); !strings.Contains(s, "No items") && !strings.Contains(s, "• Repositories") && !strings.Contains(s, "‹ Repositories ›") {
+			if s := screenText(ui); !strings.Contains(s, "No repositories.") && !strings.Contains(s, "• Repositories") && !strings.Contains(s, "‹ Repositories ›") {
 				t.Fatalf("1 did not open Repositories:\n%s", s)
 			}
 		})

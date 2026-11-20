@@ -3,7 +3,6 @@
      1 of 2   ▲ 1 blocked  ✓ 1 done  ● 2 working
   ‹ Sessions ›
 
-
   ┃ ✓ forge-sync                         delete?
   ┃   done  5m
   ┃   loses sandbox, storage, unpushed work
@@ -12,6 +11,7 @@
     ● tui
       working  5m
       Running go test ./pkg/ui/...
+
 
 
 

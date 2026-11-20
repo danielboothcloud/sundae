@@ -130,23 +130,9 @@ func (l *Log) FullHelp() [][]key.Binding {
 	case logViewCommits:
 		copyKey := l.common.KeyMap.Copy
 		copyKey.SetHelp("c", "copy hash")
-		b = append(b, []key.Binding{
-			openKey(l.common),
-			l.common.KeyMap.SelectItem,
-		})
-		b = append(b, [][]key.Binding{
-			{
-				copyKey,
-				k.CursorUp,
-				k.CursorDown,
-			},
-			{
-				k.NextPage,
-				k.PrevPage,
-				k.GoToStart,
-				k.GoToEnd,
-			},
-		}...)
+		b = append(b,
+			[]key.Binding{openKey(l.common), l.common.KeyMap.SelectItem, copyKey},
+			listNav(l.common, k))
 	case logViewDiff:
 		copyKey := l.common.KeyMap.Copy
 		copyKey.SetHelp("c", "copy diff")

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/danielboothcloud/sundae/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/ui/pages/forges"
 )
 
 // checkConfirmRow checks the confirm is drawn in the selected row: the
@@ -128,5 +129,21 @@ func TestConfirmIgnoresOtherKeys(t *testing.T) {
 	uiKey(ui, "esc")
 	if s := screenText(ui); !strings.Contains(s, "Not pushed.") {
 		t.Fatalf("esc:\n%s", s)
+	}
+}
+
+// TestConfirmRowGone checks a delete confirm closes when its repository is
+// deleted elsewhere, as the Sessions and Forges tabs' confirms do.
+func TestConfirmRowGone(t *testing.T) {
+	ui := deleteRepoUI(t, 80)
+	uiKey(ui, "d")
+	waitScreen(t, ui, "delete?")
+	if err := ui.common.Backend().DeleteRepository(ui.common.Context(), "mine"); err != nil {
+		t.Fatal(err)
+	}
+	_, cmd := ui.Update(forges.ReposChangedMsg{})
+	runUI(ui, cmd, 2)
+	if s := screenText(ui); strings.Contains(s, "delete?") || ui.capturing() || !strings.Contains(helpLine(s), "? more") {
+		t.Fatalf("the confirm outlived its row:\n%s", s)
 	}
 }

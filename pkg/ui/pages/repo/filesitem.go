@@ -118,7 +118,7 @@ func (d FileItemDelegate) Render(w io.Writer, m list.Model, index int, listItem 
 		nameStyle = s.Active.FileName
 		sizeStyle = s.Active.FileSize
 		modeStyle = s.Active.FileMode
-		fmt.Fprint(w, s.Selector.Render(">")) //nolint:errcheck
+		fmt.Fprint(w, s.Selector.Render("┃")) //nolint:errcheck
 	} else {
 		nameStyle = s.Normal.FileName
 		sizeStyle = s.Normal.FileSize

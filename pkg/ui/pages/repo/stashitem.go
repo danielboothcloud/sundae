@@ -87,7 +87,7 @@ func (d StashItemDelegate) Render(w io.Writer, m list.Model, index int, listItem
 	st := s.Normal.Message
 	selector := " "
 	if index == m.Index() {
-		selector = "> "
+		selector = "┃"
 		st = s.Active.Message
 	}
 

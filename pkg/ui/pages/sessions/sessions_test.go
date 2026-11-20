@@ -816,7 +816,8 @@ func TestPaneSwitch(t *testing.T) {
 	if m.pane != signalsPane || !strings.Contains(view(m), "‹ Signal history ›") {
 		t.Fatal("l did not open the signal history")
 	}
-	if h := m.ShortHelp(); h[3].Help().Key != "h" || h[3].Help().Desc != "sessions" {
+	// esc is the way back the help line keeps at any width; ? lists h too.
+	if h := m.ShortHelp(); h[3].Help().Key != "esc" || h[3].Help().Desc != "back" || footer.RankOf(h[3]) != footer.RankPrimary {
 		t.Fatalf("help %v", h[3].Help())
 	}
 	keys(m, "esc")

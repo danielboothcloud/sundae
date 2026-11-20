@@ -1388,27 +1388,6 @@ func (m *Sessions) defaultName(repos []string) string {
 	}
 }
 
-// sessionNameBase makes a profile name usable in a session name.
-func sessionNameBase(profile string) string {
-	var b strings.Builder
-	for _, r := range strings.ToLower(profile) {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			b.WriteRune(r)
-		case b.Len() > 0 && !strings.HasSuffix(b.String(), "-"):
-			b.WriteByte('-')
-		}
-	}
-	s := strings.Trim(b.String(), "-")
-	if len(s) > 24 {
-		s = strings.TrimRight(s[:24], "-")
-	}
-	if s == "" {
-		return "session"
-	}
-	return s
-}
-
 // Summary renders the attention summary of the header in at most width
 // cells (width <= 0: no limit): how many sessions are blocked, errored, done
 // and working; "" when there are none. A glyph never shows without its

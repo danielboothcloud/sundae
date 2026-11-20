@@ -54,3 +54,23 @@ func TestPromptTextIsBright(t *testing.T) {
 		}
 	}
 }
+
+// TestRowBarIsOneColour checks every list marks its selected row with the
+// same ┃ in the same colour: home rows, commits, files, refs and stashes.
+func TestRowBarIsOneColour(t *testing.T) {
+	s := DefaultStyles()
+	want := s.RepoSelector.Active.Base.GetBorderLeftForeground()
+	for name, got := range map[string]any{
+		"commits": s.LogItem.Active.Base.GetBorderLeftForeground(),
+		"files":   s.Tree.Selector.GetForeground(),
+		"refs":    s.Ref.ItemSelector.GetForeground(),
+		"stashes": s.Stash.Selector.GetForeground(),
+	} {
+		if got != want {
+			t.Errorf("%s bar colour %v, want %v", name, got, want)
+		}
+	}
+	if s.RepoSelector.Active.Base.GetBorderStyle().Left != "┃" || s.LogItem.Active.Base.GetBorderStyle().Left != "┃" || s.Ref.ItemSelector.Value() != "┃ " {
+		t.Error("a list marks its selected row without ┃")
+	}
+}

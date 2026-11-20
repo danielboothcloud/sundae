@@ -111,8 +111,8 @@ func DefaultKeyMap() *KeyMap {
 			"g",
 		),
 		key.WithHelp(
-			"g/home",
-			"goto top",
+			"g",
+			"top",
 		),
 	)
 
@@ -122,8 +122,8 @@ func DefaultKeyMap() *KeyMap {
 			"G",
 		),
 		key.WithHelp(
-			"G/end",
-			"goto bottom",
+			"G",
+			"bottom",
 		),
 	)
 

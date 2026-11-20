@@ -480,10 +480,16 @@ func (m *Forges) selected() (item, bool) {
 func (m *Forges) restoreCursor() {
 	its := m.items()
 	m.cursor = clamp(m.cursor, 0, len(its)-1)
+	asked := false
 	for i, it := range its {
 		if m.key(it) == m.selKey {
 			m.cursor = i
 		}
+		asked = asked || m.key(it) == m.confirmKey
+	}
+	if m.confirm != nil && !asked {
+		// Its row is gone (unlisted or deleted elsewhere): nothing is left to ask about.
+		m.confirm, m.onYes, m.confirmKey, m.kept = nil, nil, "", notice{}
 	}
 	m.syncSel()
 }

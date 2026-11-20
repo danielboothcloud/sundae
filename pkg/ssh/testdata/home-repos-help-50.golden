@@ -1,0 +1,23 @@
+
+    Sundae    ▲ 1 blocked  ✓ 1 done  ● 2 working
+
+  ‹ Repositories ›
+
+  ┃ sundae              ✓ 2 sessions   github ↑3
+  ┃ about sundae
+  ┃ jj git clone ssh://localhost:23231/sundae.g…
+
+
+    •••
+
+
+   H/L/1-4 tabs            j/k  move
+   space/. actions         pgdn next page
+   :       commands        pgup prev page
+   enter   open            g    top
+   c       copy command    G    bottom
+   s       new session
+   ?       less
+   q       quit
+
+   / filter

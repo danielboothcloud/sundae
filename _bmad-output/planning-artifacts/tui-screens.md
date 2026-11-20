@@ -14,7 +14,7 @@ Read from `pkg/ssh/ui.go`, `pkg/ui/pages/selection/`, `pkg/ui/pages/repo/`, `pkg
 | R4 | No prompt, confirm or text-input component exists. The only input is the list filter. | New session and end session need one small shared prompt. |
 | R5 | Nothing ticks or subscribes. Lists load once at start. | Sessions and Signals need events delivered as messages (roadmap H1, H4). |
 | R6 | Any error replaces the whole screen ("Bummer"). | A gateway outage must stay inside its tab as one line. |
-| R7 | The server-name header shows on home only; the repo page has its own header and a status bar. | The attention summary has a place on home. In a repo it needs the status bar. |
+| R7 | The server-name header shows on home only; the repo page has its own two-line header. | The attention summary ends the home header and, in a repo, the header's context line. Both pages share one footer: message slot, then help. |
 | R8 | The TUI runs inside the SSH session on an emulated PTY. | Attaching from the TUI means handing the terminal to the bridge with `tea.Exec` (present in bubbletea v2.0.8) and taking it back on detach. Not yet tried through the emulated PTY. The line-feed rewrite (roadmap F5) applies too. |
 | R9 | Keys already taken: `q` `?` `/` `esc` `enter` `tab` `c` `g` `G` `h` `j` `k` `l` `f` `d` `b` `u`; in the Files tab also `p` `b` `l`. | One meaning per key on every tab and in a repository (section 10, 2026-11-20): `d` delete, `r` refresh, `u` sync with forge, `l`/`h` in/out; lists no longer page on `d`/`u`, and the file view's toggles moved to `#` and `v`. |
 | R10 | Anonymous and keyless users can browse. | Sessions and Forges show only to an authenticated user. |
@@ -187,10 +187,9 @@ What limits "every signal": with status collected by polling (roadmap D5a) the f
 Added after Tags. The same rows as section 5 without the repo prefix, and the same keys, including `l` for that repo's signals.
 
 ```
- sundae
- Git hub + dev server
-
- Readme   Files   Commits   Bookmarks   Tags   • Sessions
+ sundae                         jj git clone ssh://localhost:23231/sundae.git
+ Git hub + dev server     main · 1 of 2   ▲ 1 blocked  ✓ 1 done  ● 2 working
+   Readme    Files    Commits    Bookmarks    Tags  • Sessions
 
  ✓ forge-sync                                                       done   12m
    Implemented GitHub discovery; 14 tests pass
@@ -198,10 +197,10 @@ Added after Tags. The same rows as section 5 without the repo prefix, and the sa
  ● tui                                                       working 40%   now
    Running go test ./pkg/ui/...
 
- Sessions  forge-sync                                     1 of 2   ▲1 ✓1 ●2
+ j/k move • enter attach • n new • / filter • esc back • H/L tabs • ? more
 ```
 
-The status bar's right end carries the attention summary while in a repo (R7).
+The header's context line ends with the attention summary while in a repo (R7); the footer is home's.
 
 ## 9. Narrow terminals (phone, under 60 columns)
 
@@ -269,7 +268,7 @@ Where the build differs from the screens above (sections 4, 6, 8, 9, 10).
 - **Forge keys**: `r` on a repository that is not imported syncs its forge, as on the header. `c` copies an imported repository's clone command. `I` counts per forge in its confirm: `Import 3 repositories (github 2, gitlab 1)?`. The push confirm reads `Push main of <repo> to <forge>?  Fast-forward only, no force.`; `--force-with-lease` stays CLI-only.
 - **Origin badge** shows only when forges are configured (otherwise every repository would read `local`), to anyone who can see the repository. Only non-zero arrows show: `github ↑3`, `github ↓2`, `github ↑1 ↓4`.
 - **Session badge** is read from the Monitor (never the gateway) whenever the Repositories tab is drawn, so it follows status changes as they arrive. Every row drops the same badges so the columns line up: first `Updated …`, then the origin, then the session badge's word (`▲1`), then the badge. A title longer than half the row drops more on its own row only.
-- **In-repo Sessions tab** shows the home Sessions tab's model narrowed to the repository; each scope (home, each repository) keeps its own cursor, pane and filters, and Signals follows again after a switch. Its end-session confirm shows inside the tab (the repository page's footer is the help). `esc` first closes a form or confirm, clears the filter or cancels a start, and only then leaves the repository. Status bar: `<repo>  <session>  1 of 2  *  ? Help  ▲1 ✓1 ●2`, the summary always in its narrow form.
+- **In-repo Sessions tab** shows the home Sessions tab's model narrowed to the repository; each scope (home, each repository) keeps its own cursor, pane and filters, and Signals follows again after a switch. Its end-session confirm shows inside the tab (the repository page's footer is the help). `esc` first closes a form or confirm, clears the filter or cancels a start, and only then leaves the repository. Its context (`1 of 2`) and the summary are on the header's second line; the help line is home's.
 - **Narrow repository page**: its tabs collapse to `‹ Sessions ›` whenever they do not fit, not only under 60 columns (at 50 columns the old tab strip already hid Sessions).
 - `forge ls --json` gains `list_error` and `syncing`, which the tab reads.
 

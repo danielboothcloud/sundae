@@ -186,6 +186,8 @@ func (ui *UI) SetSize(width, height int) {
 	wm, hm := ui.getMargins()
 	ui.header.SetSize(width-wm, height-hm)
 	ui.footer.SetSize(width-wm, height-hm)
+	// The page keeps half the screen while ? shows every key.
+	ui.footer.SetFullHeight((height - ui.common.Styles.App.GetVerticalFrameSize()) / 2)
 	for _, p := range ui.pages {
 		if p != nil {
 			p.SetSize(width-wm, height-hm)
@@ -356,7 +358,7 @@ func (ui *UI) View() tea.View {
 	}
 	if ui.activePage == selectionPage {
 		if s := ui.selection(); s != nil {
-			ui.header.SetRight(s.Summary)
+			ui.header.SetRight(s.HeaderRight)
 		}
 		view = lipgloss.JoinVertical(lipgloss.Left, ui.header.View(), view)
 	}

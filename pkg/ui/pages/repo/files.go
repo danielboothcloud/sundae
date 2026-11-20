@@ -151,23 +151,9 @@ func (f *Files) FullHelp() [][]key.Binding {
 	case filesViewFiles:
 		copyKey.SetHelp("c", "copy name")
 		k := f.selector.KeyMap
-		b = append(b, [][]key.Binding{
-			{
-				openKey(f.common),
-				f.common.KeyMap.SelectItem,
-				f.common.KeyMap.BackItem,
-			},
-			{
-				k.CursorUp,
-				k.CursorDown,
-				k.NextPage,
-				k.PrevPage,
-			},
-			{
-				k.GoToStart,
-				k.GoToEnd,
-			},
-		}...)
+		b = append(b,
+			[]key.Binding{openKey(f.common), f.common.KeyMap.SelectItem, f.common.KeyMap.BackItem},
+			listNav(f.common, k))
 	case filesViewContent:
 		if !f.code.UseGlamour {
 			actionKeys = append(actionKeys, lineNo)

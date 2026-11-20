@@ -32,7 +32,8 @@ type Readme struct {
 // NewReadme creates a new readme model.
 func NewReadme(common common.Common) *Readme {
 	readme := code.New(common, "", "")
-	readme.NoContentStyle = readme.NoContentStyle.SetString("No readme found.")
+	// The page's body margin is the gap under the tabs.
+	readme.NoContentStyle = readme.NoContentStyle.UnsetMarginTop().SetString("No readme found.")
 	readme.UseGlamour = true
 	s := spinner.New(spinner.WithSpinner(spinner.Dot),
 		spinner.WithStyle(common.Styles.Spinner))

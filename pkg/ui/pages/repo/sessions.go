@@ -1,6 +1,8 @@
 package repo
 
 import (
+	"strings"
+
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"github.com/danielboothcloud/sundae/pkg/proto"
@@ -32,7 +34,9 @@ func (s *Sessions) bind() {
 	if s.repo != nil {
 		name = s.repo.Name()
 	}
-	s.model.SetSize(s.common.Width, s.common.Height)
+	// One line taller: View drops the model's top blank line, which the
+	// page's body margin already draws.
+	s.model.SetSize(s.common.Width, s.common.Height+1)
 	s.model.SetScope(name)
 }
 
@@ -64,7 +68,8 @@ func (s *Sessions) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 // View implements tea.Model.
 func (s *Sessions) View() string {
 	s.bind()
-	return s.model.View()
+	_, v, _ := strings.Cut(s.model.View(), "\n")
+	return v
 }
 
 // Message implements common.Messenger: the shared model's notice.

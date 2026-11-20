@@ -201,7 +201,7 @@ func (s *Selection) reloadRepos(selected string) tea.Cmd {
 		return nil
 	}
 	s.selector.ResetFilter()
-	cmd := s.selector.SetItems(items)
+	cmd := s.setRepoItems(items)
 	for i, it := range items {
 		if it.ID() == selected {
 			s.selector.Select(i)
@@ -220,7 +220,7 @@ func (s *Selection) refreshRepos() tea.Cmd {
 		return nil
 	}
 	selected := s.SelectedRepo()
-	cmd := s.selector.SetItems(items)
+	cmd := s.setRepoItems(items)
 	if s.FilterState() == list.Unfiltered {
 		for i, it := range items {
 			if it.ID() == selected {

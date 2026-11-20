@@ -1,0 +1,23 @@
+
+  sundae                         jj git clone ssh://localhost:23231/sundae.git
+  about sundae              main · 1 of 2   ▲ 1 blocked  ✓ 1 done  ● 2 working
+    Readme    Files    Commits    Bookmarks    Tags  • Sessions
+
+                                                                   2 sessions
+
+  ┃ ✓ forge-sync                                                     done   5m
+  ┃   Implemented GitHub discovery
+
+
+
+   esc back    j/k  move            enter attach            A add repos
+   H/L tabs    pgdn next page       n     new               R remove repos
+   ?   less    pgup prev page       d     delete            u sync with forge
+   q   quit    g    top / follow    z     suspend/resume
+               G    bottom
+
+   c   copy attach command
+   /   filter
+   esc clear filter
+   l   history
+   r   refresh
