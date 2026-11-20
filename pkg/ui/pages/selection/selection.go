@@ -162,6 +162,10 @@ func New(c common.Common) *Selection {
 	selector.SetShowHelp(false)
 	selector.SetShowStatusBar(false)
 	selector.DisableQuitKeybindings()
+	// The list's own paging keys include d, u, h and l, which mean delete,
+	// sync and in/out here.
+	selector.KeyMap.NextPage = c.KeyMap.NextPage
+	selector.KeyMap.PrevPage = c.KeyMap.PrevPage
 	sel.selector = selector
 	sel.readme = readme
 	if f, ok := c.Context().Value(sessions.FocusKey).(sessions.Focus); ok && sel.sessions != nil {
@@ -260,19 +264,13 @@ func (s *Selection) capturingHelp() []key.Binding {
 	return s.sessions.ShortHelp()
 }
 
-// Summary is the attention summary for the header (section 3): "" when the
-// user has no sessions, or sessions are off.
-func (s *Selection) Summary(narrow bool) string {
+// Summary is the attention summary for the header (section 3) in at most
+// width cells: "" when the user has no sessions, or sessions are off.
+func (s *Selection) Summary(width int) string {
 	if s.sessions == nil {
 		return ""
 	}
-	return s.sessions.Summary(narrow)
-}
-
-// notice is a one-line message for the frame's message slot.
-type notice struct {
-	text string
-	kind common.MessageKind
+	return s.sessions.Summary(width)
 }
 
 // Message implements common.Messenger: the active tab's message.
@@ -280,7 +278,8 @@ func (s *Selection) Message() (string, common.MessageKind) {
 	switch s.activePane {
 	case selectorPane:
 		if s.creating != "" {
-			return "Creating " + s.creating, common.MessageBusy
+			n := creatingNotice(s.creating)
+			return n.text, n.kind
 		}
 		return s.repoNotice.text, s.repoNotice.kind
 	case sessionsPane:

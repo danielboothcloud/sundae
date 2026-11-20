@@ -160,11 +160,11 @@ func DefaultKeyMap() *KeyMap {
 		),
 	)
 
+	// NOTE: no u or d: they sync and delete on every tab (README key table).
 	km.PrevPage = key.NewBinding(
 		key.WithKeys(
 			"pgup",
 			"b",
-			"u",
 		),
 		key.WithHelp(
 			"pgup",
@@ -176,7 +176,6 @@ func DefaultKeyMap() *KeyMap {
 		key.WithKeys(
 			"pgdown",
 			"f",
-			"d",
 		),
 		key.WithHelp(
 			"pgdn",

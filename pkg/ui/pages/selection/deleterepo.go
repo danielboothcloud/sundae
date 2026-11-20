@@ -4,7 +4,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/danielboothcloud/sundae/pkg/access"
 	"github.com/danielboothcloud/sundae/pkg/proto"
-	"github.com/danielboothcloud/sundae/pkg/ui/common"
 	"github.com/danielboothcloud/sundae/pkg/ui/components/prompt"
 )
 
@@ -25,12 +24,12 @@ func (s *Selection) canDelete(repo string) bool {
 	return be.AccessLevelForUser(ctx, repo, proto.UserFromContext(ctx)) >= access.ReadWriteAccess
 }
 
-// openDelete asks to delete repo (the Repositories tab's D key).
+// openDelete asks to delete repo (the Repositories tab's d key).
 func (s *Selection) openDelete(repo string) {
 	s.repoNotice = notice{}
 	if !s.canDelete(repo) {
 		if repo != "" {
-			s.repoNotice = notice{repo + ": " + proto.ErrUnauthorized.Error(), common.MessageError}
+			s.repoNotice = unauthorizedNotice(repo)
 		}
 		return
 	}
@@ -48,13 +47,13 @@ func (s *Selection) onDeleteKey(msg tea.KeyPressMsg) tea.Cmd {
 	repo := s.deleteTarget
 	s.deleteTarget = ""
 	if res != prompt.Submitted {
-		s.repoNotice = notice{"Kept " + repo + ".", common.MessageInfo}
+		s.repoNotice = keptNotice(repo)
 		return nil
 	}
 	ctx := s.common.Context()
 	be := s.common.Backend()
 	user := proto.UserFromContext(ctx)
-	s.repoNotice = notice{"Deleting " + repo, common.MessageBusy}
+	s.repoNotice = deletingNotice(repo)
 	return func() tea.Msg {
 		// Checked again: access may have changed since the confirm opened.
 		if be.AccessLevelForUser(ctx, repo, user) < access.ReadWriteAccess {
@@ -67,9 +66,10 @@ func (s *Selection) onDeleteKey(msg tea.KeyPressMsg) tea.Cmd {
 // onRepoDeleted reports the outcome and lists the repositories again.
 func (s *Selection) onRepoDeleted(msg repoDeletedMsg) tea.Cmd {
 	if msg.err != nil {
-		s.repoNotice = notice{msg.repo + ": " + msg.err.Error(), common.MessageError}
+		s.common.Logger.Info("selection: cannot delete repository", "repo", msg.repo, "err", msg.err)
+		s.repoNotice = failedNotice(msg.repo, msg.err)
 		return nil
 	}
-	s.repoNotice = notice{"Deleted " + msg.repo + ".", common.MessageSuccess}
+	s.repoNotice = deletedNotice(msg.repo)
 	return s.reloadRepos("")
 }

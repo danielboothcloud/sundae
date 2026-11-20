@@ -2,11 +2,13 @@ package sessions
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/danielboothcloud/sundae/pkg/config"
 	"github.com/danielboothcloud/sundae/pkg/events"
 	"github.com/danielboothcloud/sundae/pkg/openshell"
 	"github.com/danielboothcloud/sundae/pkg/sessionctl"
@@ -27,10 +29,6 @@ const (
 	ageWidth         = 5
 )
 
-// gatewayDown is the line that replaces the session list when the
-// gateway cannot be reached (section 5).
-const gatewayDown = "OpenShell gateway unreachable (r to retry)"
-
 // stateStyle returns the colour of a state (section 2).
 func stateStyle(st *styles.Styles, s events.State) lipgloss.Style {
 	switch s {
@@ -46,6 +44,23 @@ func stateStyle(st *styles.Styles, s events.State) lipgloss.Style {
 		return st.State.Idle
 	}
 	return st.State.None
+}
+
+// listFailure names what failed when the sessions cannot be listed: the
+// OpenShell gateway only when every session runs there.
+func (m *Sessions) listFailure() string {
+	cfg := config.FromContext(m.common.Context())
+	if cfg != nil && slices.Equal(cfg.RuntimesInUse(), []string{config.RuntimeOpenShell}) {
+		return "OpenShell gateway unreachable"
+	}
+	return "Cannot list sessions"
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return fmt.Sprintf("%d %s", n, many)
 }
 
 // narrow reports whether the tab uses its narrow layout.
@@ -81,8 +96,8 @@ func (m *Sessions) View() string {
 	case m.op != nil:
 		lines = append([]string{""}, m.opView(w)...)
 	default:
-		if m.collapsed() && m.pane == sessionsPane && !m.typing {
-			// The collapsed tabs name the pane; keep the lines for rows.
+		if (m.collapsed() || m.paneInfo() == "") && m.pane == sessionsPane && !m.typing {
+			// The tabs name the pane; with no count either, keep the lines for rows.
 			lines = append(lines, "")
 		} else {
 			lines = append(lines, "", m.paneHeader(w), "")
@@ -128,8 +143,8 @@ func (m *Sessions) opView(w int) []string {
 	return lines
 }
 
-// paneHeader is the line naming the two panes, the active one in ‹ ›,
-// with what the active pane shows on the right; the filter input while
+// paneHeader is the line above the active pane: ‹ Signal history › in the
+// history, and on the right what the pane shows; the filter input while
 // the filter is typed.
 func (m *Sessions) paneHeader(w int) string {
 	st := m.common.Styles
@@ -137,13 +152,10 @@ func (m *Sessions) paneHeader(w int) string {
 		m.filter.SetWidth(max(w-4, 8))
 		return " " + m.filter.View()
 	}
+	// The tabs above already name the Sessions pane.
 	left := " "
-	switch {
-	case m.pane == signalsPane:
+	if m.pane == signalsPane {
 		left += st.TopLevelActiveTab.UnsetMarginRight().Render("‹ Signal history ›")
-	case !m.collapsed():
-		// The collapsed tabs already read ‹ Sessions ›.
-		left += st.TopLevelActiveTab.UnsetMarginRight().Render("Sessions")
 	}
 	right := m.paneInfo()
 	gap := w - lipgloss.Width(left) - lipgloss.Width(right) - 1
@@ -277,7 +289,7 @@ func (m *Sessions) stackedView(w, h int) []string {
 	}
 	title := " " + st.TopLevelActiveTab.UnsetMarginRight().Render(common.TruncateString("Signals · "+name, w-4))
 	if n := len(sigs); n > 0 {
-		info := fmt.Sprintf("e full history · %d", n)
+		info := plural(n, "signal", "signals") + " · l history"
 		if gap := w - lipgloss.Width(title) - len(info) - 1; gap >= 2 {
 			title += strings.Repeat(" ", gap) + desc.Render(info)
 		}
@@ -312,27 +324,22 @@ func (m *Sessions) sigStyle(s signals.Signal) lipgloss.Style {
 
 func (m *Sessions) sessionsView(w, h int) []string {
 	st := m.common.Styles
+	desc := st.RepoSelector.Normal.Desc
 	switch {
 	case m.listErr != nil:
-		line := gatewayDown
-		cause := signals.Sanitize(m.listErr.Error(), 0)
-		out := " " + st.Prompt.Error.Render("✗ "+common.TruncateString(line, w-3))
-		if room := w - 3 - lipgloss.Width(line) - 4; room > 8 {
-			out += st.RepoSelector.Normal.Desc.Render("  · " + common.TruncateString(cause, room))
-		}
-		return []string{out}
+		return common.ErrorState(m.common, m.listFailure(), m.listErr, "r retry", w)
 	case !m.loaded:
-		return []string{" " + st.RepoSelector.Normal.Desc.Render("Loading sessions…")}
+		return common.StateLines(desc, common.Busy("Loading sessions"), w)
 	case len(m.scopedRows()) == 0:
-		text := "No sessions. Press n to start one."
+		text := "No sessions yet · n new session"
 		if m.scope != "" {
-			text = "No sessions of this repository. Press n to start one."
+			text = "No sessions of this repository · n new session"
 		}
-		return []string{" " + st.NoContent.UnsetMargins().UnsetPadding().Render(common.TruncateString(text, w-1))}
+		return common.StateLines(st.NoContent.UnsetMargins().UnsetPadding(), text, w)
 	}
 	vis := m.visibleRows()
 	if len(vis) == 0 {
-		return []string{" " + st.RepoSelector.Normal.Desc.Render("No sessions match “"+m.rowQuery+"”.")}
+		return common.StateLines(desc, "No sessions match “"+m.rowQuery+"”.", w)
 	}
 	// The confirm's extra lines take the room of rows, so its row stays shown.
 	per := max((h+1-m.confirmExtra(w))/m.sessionRowHeight(), 1)
@@ -351,7 +358,7 @@ func (m *Sessions) sessionsView(w, h int) []string {
 // place of the lifecycle.
 func (m *Sessions) words(r sessionctl.Row) string {
 	if b := m.busy[r.Info.Sandbox]; b != "" {
-		return signals.RecordWords(r.Record()) + " · " + b
+		return signals.RecordWords(r.Record()) + " · " + common.Busy(b)
 	}
 	return r.Words()
 }
@@ -446,7 +453,7 @@ func (m *Sessions) signalsView(w, h int) []string {
 		if len(m.sigs) > 0 {
 			text = "No signals match."
 		}
-		return []string{" " + st.RepoSelector.Normal.Desc.Render(text)}
+		return common.StateLines(st.RepoSelector.Normal.Desc, text, w)
 	}
 	per := max(h/m.signalRowHeight(), 1)
 	start := (m.sigCursor / per) * per
@@ -568,12 +575,10 @@ func (m *Sessions) FullHelp() [][]key.Binding {
 	}
 	km := m.common.KeyMap
 	nav := []key.Binding{km.UpDown, km.NextPage, km.PrevPage, m.keys.Follow, m.keys.Bottom}
-	pane := m.keys.Pane
 	if m.pane == signalsPane {
-		pane.SetHelp("e", "sessions")
 		return [][]key.Binding{
 			nav,
-			{m.keys.Attach, m.backKey(), pane, m.keys.Attention},
+			{m.keys.Attach, m.backKey(), m.keys.Left, m.keys.Attention},
 			{m.keys.Filter, m.keys.Clear, m.keys.Retry},
 		}
 	}
@@ -581,7 +586,7 @@ func (m *Sessions) FullHelp() [][]key.Binding {
 		nav,
 		{m.keys.Attach, m.keys.New, m.keys.Delete, m.keys.Suspend},
 		{m.keys.AddRepo, m.keys.DropRepo, m.keys.Sync},
-		{m.keys.Copy, m.keys.Filter, m.keys.Clear, pane, m.keys.Retry},
+		{m.keys.Copy, m.keys.Filter, m.keys.Clear, m.keys.Right, m.keys.Retry},
 	}
 }
 

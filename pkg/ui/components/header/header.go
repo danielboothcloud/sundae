@@ -12,12 +12,13 @@ import (
 type Header struct {
 	common common.Common
 	text   string
-	right  string
+	right  func(width int) string
 }
 
 // SetRight sets what the header shows at its right end, e.g. the
-// attention summary; "" shows nothing.
-func (h *Header) SetRight(s string) { h.right = s }
+// attention summary, rendered in at most width cells; nil or "" shows
+// nothing.
+func (h *Header) SetRight(fit func(width int) string) { h.right = fit }
 
 // New creates a new header component.
 func New(c common.Common, text string) *Header {
@@ -45,16 +46,15 @@ func (h *Header) Update(_ tea.Msg) (common.Model, tea.Cmd) {
 // View implements tea.Model.
 func (h *Header) View() string {
 	st := h.common.Styles.ServerName
-	if h.right == "" {
+	name := st.UnsetMarginBottom().Render(strings.TrimSpace(h.text))
+	right := ""
+	if room := h.common.Width - lipgloss.Width(name) - 1; h.right != nil && room > 0 {
+		right = h.right(room)
+	}
+	if right == "" {
 		return st.Render(strings.TrimSpace(h.text))
 	}
-	name := st.UnsetMarginBottom().Render(strings.TrimSpace(h.text))
-	right := h.right
-	gap := h.common.Width - lipgloss.Width(name) - lipgloss.Width(right)
-	if gap < 1 {
-		right = ""
-		gap = 0
-	}
+	gap := max(h.common.Width-lipgloss.Width(name)-lipgloss.Width(right), 1)
 	return lipgloss.NewStyle().
 		MarginBottom(st.GetMarginBottom()).
 		Render(name + strings.Repeat(" ", gap) + right)

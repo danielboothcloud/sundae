@@ -216,7 +216,7 @@ func TestFormView(t *testing.T) {
 		"New session" + strings.Repeat(" ", 60-11-8) + " NORMAL ",
 		"",
 		"  Repository   sundae",
-		"▸ Name         claude-1   / to edit",
+		"▸ Name         claude-1   / edit",
 		"  Profile      ‹ codex ›   img-codex · codex",
 		"  Attach       yes",
 	}, "\n")
@@ -225,7 +225,7 @@ func TestFormView(t *testing.T) {
 	}
 	f.Update(press("/"))
 	got = ansi.Strip(f.View(60))
-	if !strings.Contains(got, "TYPING") || !strings.Contains(got, "▸ Name         claude-1 ") || strings.Contains(got, "/ to edit") {
+	if !strings.Contains(got, "TYPING") || !strings.Contains(got, "▸ Name         claude-1 ") || strings.Contains(got, "/ edit") {
 		t.Fatalf("typing view:\n%s", got)
 	}
 	f.Update(press("esc"))
@@ -419,7 +419,7 @@ func TestMultiField(t *testing.T) {
 	}
 	// Picked first, then the rest; the cursor starts on the top row.
 	view := ansi.Strip(f.View(80))
-	for _, want := range []string{"▸ Repositories   / to filter", "1 of 4 picked", "▸ [x] lib", "  [ ] app", "  [ ] infra", "  [ ] gone"} {
+	for _, want := range []string{"▸ Repositories   / filter", "1 of 4 picked", "▸ [x] lib", "  [ ] app", "  [ ] infra", "  [ ] gone"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("no %q in:\n%s", want, view)
 		}

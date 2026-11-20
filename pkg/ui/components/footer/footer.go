@@ -48,7 +48,8 @@ type Rank int
 const (
 	// RankMore is "? more", the way to every key that was dropped.
 	RankMore Rank = iota
-	// RankPrimary is the context's answer: enter, y, esc.
+	// RankPrimary is the context's answer: enter, y, esc, and r retry when
+	// the tab failed.
 	RankPrimary
 	// RankRow is what to do with the selected row next: space actions, n new.
 	RankRow
@@ -70,7 +71,7 @@ func RankOf(b key.Binding) Rank {
 		return RankMore
 	case h.Desc == "quit":
 		return RankQuit
-	case common.KindOf(b) == common.ActionPrimary || h.Key == "esc" || h.Key == "y":
+	case common.KindOf(b) == common.ActionPrimary || h.Key == "esc" || h.Key == "y" || h.Desc == "retry":
 		return RankPrimary
 	case h.Desc == "actions" || h.Desc == "new" || strings.HasPrefix(h.Desc, "new "):
 		return RankRow

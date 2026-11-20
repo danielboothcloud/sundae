@@ -68,7 +68,7 @@ func (d LogItemDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd {
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, d.common.KeyMap.Copy):
-			return copyCmd(item.Hash(), "Commit hash copied to clipboard")
+			return copyCmd(item.Hash(), copiedHash)
 		}
 	}
 	return nil

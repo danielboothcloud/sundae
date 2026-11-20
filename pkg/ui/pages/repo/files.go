@@ -31,18 +31,20 @@ var (
 	errInvalidFile    = errors.New("invalid file")
 )
 
+// The file view's toggles keep off l and p, which mean "in" and push
+// elsewhere (README key table).
 var (
 	lineNo = key.NewBinding(
-		key.WithKeys("l"),
-		key.WithHelp("l", "toggle line numbers"),
+		key.WithKeys("#"),
+		key.WithHelp("#", "toggle line numbers"),
 	)
 	blameView = key.NewBinding(
 		key.WithKeys("b"),
 		key.WithHelp("b", "toggle blame view"),
 	)
 	preview = key.NewBinding(
-		key.WithKeys("p"),
-		key.WithHelp("p", "toggle preview"),
+		key.WithKeys("v"),
+		key.WithHelp("v", "toggle preview"),
 	)
 )
 
@@ -273,7 +275,7 @@ func (f *Files) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 			case key.Matches(msg, f.common.KeyMap.BackItem):
 				cmds = append(cmds, f.deselectItemCmd())
 			case key.Matches(msg, f.common.KeyMap.Copy):
-				cmds = append(cmds, copyCmd(f.currentContent.content, "File contents copied to clipboard"))
+				cmds = append(cmds, copyCmd(f.currentContent.content, copiedContents))
 			case key.Matches(msg, lineNo) && !f.code.UseGlamour:
 				f.lineNumber = !f.lineNumber
 				f.code.ShowLineNumber = f.lineNumber

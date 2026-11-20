@@ -222,6 +222,9 @@ func TestRepoPageFooterIsHome(t *testing.T) {
 	}
 }
 
+// glyphAlone matches a status glyph shown without its word.
+var glyphAlone = regexp.MustCompile(`[▲✗✓●○] ?\d+(?: [^a-z]|$)`)
+
 // TestRepoContextFits checks the header's context gives way in order: the
 // summary keeps its words where the tab's context can shrink instead.
 func TestRepoContextFits(t *testing.T) {
@@ -230,9 +233,10 @@ func TestRepoContextFits(t *testing.T) {
 	if !strings.Contains(header, "▲ 1 blocked") || !strings.Contains(header, "0%") {
 		t.Fatalf("50 columns: %q", header)
 	}
+	// Narrower, the summary keeps a word with every glyph (PRODUCT.md).
 	ui = contentUI(t, 40)
 	header = strings.Split(screenText(ui), "\n")[2]
-	if !strings.Contains(header, "▲1 ✓1 ●2") || !strings.Contains(header, "0%") || ansi.StringWidth(header) > 40 {
+	if !strings.Contains(header, "▲1 blocked") || glyphAlone.MatchString(header) || !strings.Contains(header, "0%") || ansi.StringWidth(header) > 40 {
 		t.Fatalf("40 columns: %q", header)
 	}
 }

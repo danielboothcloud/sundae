@@ -304,7 +304,7 @@ func TestNewRepoFormStartsSession(t *testing.T) {
 	// The Sessions tab shows it; without a terminal to hand over it is
 	// started detached, and says why.
 	waitScreen(t, ui, "• Sessions")
-	waitScreen(t, ui, "attaching needs the SSH terminal")
+	waitScreen(t, ui, "Needs ssh -t to attach")
 }
 
 func TestNewRepoFormErrorKeepsForm(t *testing.T) {

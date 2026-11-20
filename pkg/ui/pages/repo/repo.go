@@ -60,9 +60,8 @@ type Repo struct {
 	// notice is the page's own message (what was copied), until the next
 	// key or click.
 	notice string
-	// summary is the attention summary with words; summaryNarrow, with
-	// glyphs only, for a narrow terminal where the words do not fit.
-	summary, summaryNarrow string
+	// summary renders the attention summary in at most the cells given.
+	summary func(width int) string
 }
 
 // New returns a new Repo.
@@ -152,17 +151,15 @@ func (r *Repo) Capturing() bool {
 	return false
 }
 
-// SetSummary sets the attention summary at the header's right end
-// (tui-screens.md R7), with words and with glyphs only; "" for none.
-func (r *Repo) SetSummary(words, glyphs string) {
-	r.summary, r.summaryNarrow = words, glyphs
-}
+// SetSummary sets what renders the attention summary at the header's right
+// end (tui-screens.md R7) in at most the cells given; nil for none.
+func (r *Repo) SetSummary(fit func(width int) string) { r.summary = fit }
 
-// Message implements common.Messenger: the page's notice, else the
-// active tab's message.
+// Message implements common.Messenger: the page's notice (what was
+// copied), else the active tab's message.
 func (r *Repo) Message() (string, common.MessageKind) {
 	if r.notice != "" {
-		return r.notice, common.MessageInfo
+		return r.notice, common.MessageSuccess
 	}
 	if m, ok := r.panes[r.activeTab].(common.Messenger); ok {
 		return m.Message()
@@ -237,7 +234,7 @@ func (r *Repo) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 			urlID := fmt.Sprintf("%s-url", r.selectedRepo.Name())
 			cmd := r.common.CloneCmd(r.common.Config().SSH.PublicURL, r.selectedRepo.Name(), r.selectedRepo.Vcs())
 			if msg, ok := msg.(tea.MouseMsg); ok && r.common.Zone.Get(urlID).InBounds(msg) {
-				cmds = append(cmds, copyCmd(cmd, "Command copied to clipboard"))
+				cmds = append(cmds, copyCmd(cmd, copiedCloneCmd))
 			}
 		}
 		switch msg := msg.(type) {
@@ -335,7 +332,7 @@ func (r *Repo) View() string {
 	var main string
 	switch r.state {
 	case loadingState:
-		main = fmt.Sprintf("%s loading…", r.spinner.View())
+		main = r.spinner.View() + " " + common.Busy("loading")
 	case readyState:
 		main = r.panes[r.activeTab].View()
 	}
@@ -406,8 +403,8 @@ func (r *Repo) contextLine(width int) string {
 // reads as noise, so it is left out instead.
 const minCut = 8
 
-// contextView is the ref, the tab's item and position, then the summary. The item
-// gives way first, then the ref; the words go only when narrow and nothing else can.
+// contextView is the ref, the tab's item and position, then the summary. The
+// item gives way first, then the ref; then the summary shortens to fit.
 func (r *Repo) contextView(width int) string {
 	var ref, item, at string
 	if r.ref != nil {
@@ -416,28 +413,39 @@ func (r *Repo) contextView(width int) string {
 	if r.state == readyState {
 		item, at = r.panes[r.activeTab].Position()
 	}
-	sums := []string{r.summary}
-	if width < sessions.NarrowWidth && r.summaryNarrow != r.summary {
-		sums = append(sums, r.summaryNarrow)
-	}
-	for _, sum := range sums {
-		for _, ref := range []string{ref, ""} {
-			if item == "" {
-				break
-			}
-			// Paths keep their end, the file's name.
-			without := lipgloss.Width(r.renderContext(sum, ref, "x", at)) - 1
-			if room := width - without; room >= min(lipgloss.Width(item), minCut) {
-				return r.renderContext(sum, ref, cutLeft(item, room), at)
-			}
+	sum := r.fitSummary(0)
+	for _, ref := range []string{ref, ""} {
+		if item == "" {
+			break
 		}
-		for _, parts := range [][]string{{ref, at}, {at}} {
-			if v := r.renderContext(sum, parts...); lipgloss.Width(v) <= width {
-				return v
-			}
+		// Paths keep their end, the file's name.
+		without := lipgloss.Width(r.renderContext(sum, ref, "x", at)) - 1
+		if room := width - without; room >= min(lipgloss.Width(item), minCut) {
+			return r.renderContext(sum, ref, cutLeft(item, room), at)
 		}
 	}
-	return ansi.Truncate(r.renderContext(sums[len(sums)-1], at), width, "…")
+	for _, parts := range [][]string{{ref, at}, {at}} {
+		if v := r.renderContext(sum, parts...); lipgloss.Width(v) <= width {
+			return v
+		}
+	}
+	room := width
+	if at != "" {
+		room -= lipgloss.Width(at) + 3
+	}
+	sum = ""
+	if room > 0 {
+		sum = r.fitSummary(room)
+	}
+	return ansi.Truncate(r.renderContext(sum, at), width, "…")
+}
+
+// fitSummary is the attention summary in at most width cells (0: any).
+func (r *Repo) fitSummary(width int) string {
+	if r.summary == nil {
+		return ""
+	}
+	return r.summary(width)
 }
 
 // renderContext joins the parts that are not empty with " · ", then the
@@ -509,6 +517,19 @@ func (r *Repo) updateModels(msg tea.Msg) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// What the page says it copied: one success notice each, within
+// common.NoticeWidth.
+const (
+	copiedCloneCmd     = "Copied the clone command."
+	copiedRef          = "Copied the reference name."
+	copiedDiff         = "Copied the commit diff."
+	copiedHash         = "Copied the commit hash."
+	copiedContents     = "Copied the file contents."
+	copiedFileName     = "Copied the file name."
+	copiedStashMessage = "Copied the stash message."
+	copiedStashPatch   = "Copied the stash patch."
+)
+
 func copyCmd(text, msg string) tea.Cmd {
 	return func() tea.Msg {
 		return CopyMsg{
@@ -536,7 +557,7 @@ func switchTabCmd(m common.TabComponent) tea.Cmd {
 }
 
 func renderLoading(c common.Common, s spinner.Model) string {
-	msg := fmt.Sprintf("%s loading…", s.View())
+	msg := s.View() + " " + common.Busy("loading")
 	return c.Styles.SpinnerContainer.
 		Height(c.Height).
 		Render(msg)

@@ -811,7 +811,7 @@ func (e *choiceError) Error() string { return "choose a " + strings.ToLower(e.la
 type multiError struct{ label string }
 
 func (e *multiError) Error() string {
-	return "pick at least one of " + strings.ToLower(e.label) + " (space toggles)"
+	return "pick at least one of " + strings.ToLower(e.label) + " · space pick"
 }
 
 // View renders the form in width columns, with the shared prompt styles:
@@ -850,7 +850,7 @@ func (f *Form) View(width int) string {
 				value = valueStyle.Render(fd.input.Value())
 			}
 			if focused && !f.typing {
-				extra = append(extra, "/ to edit")
+				extra = append(extra, "/ edit")
 			}
 		case Choice:
 			o, ok := fd.Selected()
@@ -870,7 +870,7 @@ func (f *Form) View(width int) string {
 				extra = append(extra, o.Detail)
 			}
 			if focused && !f.typing && fd.filterable && fd.filter == "" {
-				extra = append(extra, "/ to filter")
+				extra = append(extra, "/ filter")
 			}
 		case Multi:
 			if focused {
@@ -1048,7 +1048,7 @@ func (f *Field) multiView(st *styles.Styles, label string, labelW, width int, ty
 	case f.filter != "":
 		filter = ps.Detail.Render("filter: ") + ps.ActiveValue.Render(f.filter)
 	default:
-		filter = ps.Detail.Render("/ to filter")
+		filter = ps.Detail.Render("/ filter")
 	}
 	head := label + filter
 	count := ps.Detail.Render(itoa(len(f.picked)) + " of " + itoa(len(f.options)) + " picked")

@@ -14,7 +14,6 @@ import (
 	"github.com/danielboothcloud/sundae/pkg/config"
 	"github.com/danielboothcloud/sundae/pkg/proto"
 	"github.com/danielboothcloud/sundae/pkg/signals"
-	"github.com/danielboothcloud/sundae/pkg/ui/common"
 	"github.com/danielboothcloud/sundae/pkg/ui/components/prompt"
 	"github.com/danielboothcloud/sundae/pkg/utils"
 )
@@ -179,11 +178,12 @@ func (s *Selection) onRepoCreated(msg repoCreatedMsg) tea.Cmd {
 			s.repoForm.SetError(msg.err)
 			return nil
 		}
-		s.repoNotice = notice{msg.repo + ": " + msg.err.Error(), common.MessageError}
+		s.common.Logger.Info("selection: cannot create repository", "repo", msg.repo, "err", msg.err)
+		s.repoNotice = failedNotice(msg.repo, msg.err)
 		return nil
 	}
 	s.repoForm = nil
-	s.repoNotice = notice{"Created " + msg.repo + ".", common.MessageSuccess}
+	s.repoNotice = createdNotice(msg.repo)
 	cmd := s.reloadRepos(msg.repo)
 	if msg.start && s.sessions != nil {
 		start := s.selectPane(sessionsPane)

@@ -72,7 +72,7 @@ func TestPaletteSyncForge(t *testing.T) {
 	waitScreen(t, ui, "me/sundae")
 	uiKey(ui, "1", ":")
 	paletteType(ui, "sync github")
-	if got := paletteEntries(ui); !strings.Contains(got, "Forges › Sync forge github  r") {
+	if got := paletteEntries(ui); !strings.Contains(got, "Forges › Sync forge github  u") {
 		t.Fatalf("entries:\n%s", got)
 	}
 }

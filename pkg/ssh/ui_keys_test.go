@@ -85,7 +85,7 @@ func TestPaletteNamesTargets(t *testing.T) {
 		"Repositories › Open sundae  enter",
 		"Sessions › Delete infra / claude-1  d",
 		"Forges › Push me/sundae  p",
-		"Forges › Sync forge github  r",
+		"Forges › Sync forge github  u",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("no %q in\n%s", want, got)

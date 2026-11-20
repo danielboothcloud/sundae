@@ -251,7 +251,7 @@ func (l *Log) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 					l.goBack()
 				case key.Matches(kmsg, l.common.KeyMap.Copy):
 					if l.currentDiff != nil {
-						cmds = append(cmds, copyCmd(l.currentDiff.Patch(), "Commit diff copied to clipboard"))
+						cmds = append(cmds, copyCmd(l.currentDiff.Patch(), copiedDiff))
 					}
 				}
 			}

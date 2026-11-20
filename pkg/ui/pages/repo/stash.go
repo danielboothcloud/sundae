@@ -159,7 +159,7 @@ func (s *Stash) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 			case key.Matches(msg, s.common.KeyMap.BackItem):
 				cmds = append(cmds, goBackCmd)
 			case key.Matches(msg, s.common.KeyMap.Copy):
-				cmds = append(cmds, copyCmd(s.list.SelectedItem().(StashItem).Title(), "Stash message copied to clipboard"))
+				cmds = append(cmds, copyCmd(s.list.SelectedItem().(StashItem).Title(), copiedStashMessage))
 			}
 		case stashStatePatch:
 			switch {
@@ -168,7 +168,7 @@ func (s *Stash) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 			case key.Matches(msg, s.common.KeyMap.Copy):
 				if s.currentPatch.Diff != nil {
 					patch := s.currentPatch.Diff
-					cmds = append(cmds, copyCmd(patch.Patch(), "Stash patch copied to clipboard"))
+					cmds = append(cmds, copyCmd(patch.Patch(), copiedStashPatch))
 				}
 			}
 		}

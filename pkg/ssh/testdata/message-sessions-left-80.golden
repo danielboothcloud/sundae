@@ -3,7 +3,7 @@
 
     Repositories  • Sessions    About
 
-   Sessions                                                        5 sessions
+                                                                   5 sessions
 
   ┃ ▲ infra / claude-1                                            blocked   5m
   ┃   Apply 3 to add, 1 to change, 0 to destroy?
@@ -19,5 +19,5 @@
    Signals · infra / claude-1
      No signals from this session yet.
 
-   Left infra / claude-1; it keeps running. enter goes back.
+   Left infra / claude-1; it keeps running.
    j/k move • enter attach • space actions • n new • H/L tabs • ? more

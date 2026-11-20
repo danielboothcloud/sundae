@@ -1,9 +1,9 @@
 
-  github · github.com                        syncing… 1 of 2 · synced 3m ago
-┃     danielboothcloud/dotfiles                not imported  importing…
-    ✓ danielboothcloud/pi-aio                  ↑0 ↓2         ✓ synced
-      danielboothcloud/quartermaster           not imported
-    ✓ danielboothcloud/sundae                  ↑3 ↓0         synced 3m
+  github · github.com                       syncing … 1 of 2 · synced 3m ago
+┃     danielboothcloud/dotfiles              not imported    importing …
+      danielboothcloud/pi-aio                imported ↑0 ↓2  ✓ synced
+      danielboothcloud/quartermaster         not imported
+      danielboothcloud/sundae                imported ↑3 ↓0  synced 3m
 
   gitlab · gitlab.com             ✗ sync failed: discover: 401 token expired
-    ✓ ops/infra                                ↑0 ↓0         ✗ sync failed
+      ops/infra                              imported ↑0 ↓0  ✗ sync failed

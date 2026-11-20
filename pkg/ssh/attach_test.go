@@ -322,7 +322,7 @@ func TestTUIAttachRoundTrip(t *testing.T) {
 	// Detach; the TUI comes back on the same row.
 	mark = out.len()
 	send("\r~.")
-	out.waitFor(t, mark, "Left r / main. enter goes back.")
+	out.waitFor(t, mark, "Left r / main.")
 	select {
 	case <-att.closed:
 	case <-time.After(5 * time.Second):
@@ -383,7 +383,7 @@ func TestTUIAttachHomeKey(t *testing.T) {
 	out.waitFor(t, 0, "idle")
 	mark := out.len()
 	send("\r")
-	out.waitFor(t, mark, "Attaching to r / main …  Ctrl-] comes back here.")
+	out.waitFor(t, mark, "Attaching to r / main … · Ctrl-] back")
 	out.waitFor(t, mark, "REMOTE READY")
 	out.waitFor(t, mark, " r / main ")
 	out.waitFor(t, mark, " Ctrl-] sessions ")
@@ -396,7 +396,7 @@ func TestTUIAttachHomeKey(t *testing.T) {
 
 	mark = out.len()
 	send("abc\x1dd")
-	out.waitFor(t, mark, "Left r / main; it keeps running. enter goes back.")
+	out.waitFor(t, mark, "Left r / main; it keeps running.")
 	select {
 	case <-att.closed:
 	case <-time.After(5 * time.Second):
@@ -457,7 +457,7 @@ func TestCLIHomeKeyOpensSessionsScreen(t *testing.T) {
 	out.waitFor(t, 0, " r / tool ")
 	mark := out.len()
 	send("x\x1b[93;5u")
-	out.waitFor(t, mark, "Left r / tool; it keeps running. enter goes back.")
+	out.waitFor(t, mark, "Left r / tool; it keeps running.")
 	out.waitFor(t, mark, "enter attach")
 	// q quit ranks lowest; at 80 columns ? lists it.
 	out.waitFor(t, mark, "? more")

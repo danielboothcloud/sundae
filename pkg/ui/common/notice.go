@@ -1,6 +1,9 @@
 package common
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // MessageKind is what a message in the frame's message slot reports, for
 // its mark and colour.
@@ -17,31 +20,14 @@ const (
 	MessageBusy
 )
 
+// NoticeWidth is the most cells a message takes with a typical label, so
+// it fits a 50-column terminal after the frame's margins.
+const NoticeWidth = 44
+
 // Messenger is a page or tab with a message for the frame's message slot,
 // the line above the help; "" for none.
 type Messenger interface {
 	Message() (string, MessageKind)
-}
-
-// doneVerbs are the first words of notices that report a finished action.
-var doneVerbs = map[string]bool{
-	"started": true, "suspended": true, "resumed": true,
-	"added": true, "removed": true, "imported": true, "created": true,
-	"deleted": true, "copied": true, "synced": true, "pushed": true,
-	"detached": true, "pruned": true,
-}
-
-// NoticeKind returns the kind of a notice text: an error when isErr or it
-// starts with ✗, a success when it starts with ✓ or a done verb, else info.
-func NoticeKind(text string, isErr bool) MessageKind {
-	first, _, _ := strings.Cut(strings.ToLower(text), " ")
-	switch {
-	case isErr || strings.HasPrefix(text, "✗"):
-		return MessageError
-	case strings.HasPrefix(text, "✓") || doneVerbs[strings.TrimRight(first, ".,:")]:
-		return MessageSuccess
-	}
-	return MessageInfo
 }
 
 // NoticeView renders a message on one line of at most width cells, cut with
@@ -49,7 +35,6 @@ func NoticeKind(text string, isErr bool) MessageKind {
 func (c *Common) NoticeView(text string, kind MessageKind, width int) string {
 	ps := c.Styles.Prompt
 	text = strings.Join(strings.Fields(text), " ")
-	text = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(text, "✗"), "✓"))
 	style := ps.Notice
 	switch kind {
 	case MessageError:
@@ -57,7 +42,49 @@ func (c *Common) NoticeView(text string, kind MessageKind, width int) string {
 	case MessageSuccess:
 		style, text = ps.Success, "✓ "+text
 	case MessageBusy:
-		text = strings.TrimSpace(strings.TrimSuffix(text, "…")) + " …"
+		text = Busy(strings.TrimSuffix(text, "…"))
+	case MessageInfo:
 	}
 	return style.Render(TruncateString(text, max(width, 1)))
+}
+
+// Busy marks text as still running, as every busy word and message is
+// marked: "importing …".
+func Busy(text string) string { return strings.TrimSpace(text) + " …" }
+
+// requestPrefix is the `Get "https://…": ` or `GET /path: ` an HTTP error
+// starts with.
+var requestPrefix = regexp.MustCompile(`(?:GET|POST|HEAD|Get|Post|Head) (?:"[^"]*"|\S+): `)
+
+// transportErrors map the end of a network error to a few words; the
+// address and call chain before it only matter in the log.
+var transportErrors = []struct{ match, short string }{
+	{"connection refused", "connection refused"},
+	{"connection reset", "connection reset"},
+	{"no such host", "host not found"},
+	{"i/o timeout", "timed out"},
+	{"deadline exceeded", "timed out"},
+	{"Client.Timeout", "timed out"},
+	{"no route to host", "unreachable"},
+	{"network is unreachable", "unreachable"},
+}
+
+// ShortError shortens an error for a message: one line, without the request
+// it made, and a transport failure as a few words. Log the full error.
+func ShortError(err error) string {
+	if err == nil {
+		return ""
+	}
+	return ShortErrorText(err.Error())
+}
+
+// ShortErrorText is ShortError of an error's text.
+func ShortErrorText(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	for _, t := range transportErrors {
+		if strings.Contains(s, t.match) {
+			return t.short
+		}
+	}
+	return requestPrefix.ReplaceAllString(s, "")
 }

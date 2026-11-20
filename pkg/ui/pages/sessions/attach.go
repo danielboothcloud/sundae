@@ -29,9 +29,6 @@ type Handoff interface {
 // HandoffKey is the key of the Handoff in the context of common.Common.
 var HandoffKey = &struct{ string }{"sessions-handoff"}
 
-// errNoTerminal is shown when there is no terminal to hand over.
-var errNoTerminal = errors.New("attaching needs the SSH terminal; use the attach command (c copies it)")
-
 // operation is a session being started or resumed for attaching: Prepare
 // runs in the background, reporting progress lines, and its Attacher is
 // handed to the TUI when it is done. When the TUI goes away first (quit,

@@ -3,7 +3,6 @@ package forges
 import (
 	"fmt"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -17,8 +16,8 @@ import (
 
 // Repository row columns (wide layout).
 const (
-	aheadWidth = 12 // "not imported"
-	lastWidth  = 15 // "✗ import failed"
+	importWidth = 14 // "imported ↑3 ↓0"
+	lastWidth   = 15 // "✗ import failed"
 )
 
 // View implements tea.Model.
@@ -64,7 +63,7 @@ func (m *Forges) View() string {
 // selected row, so why a row failed shows without another key.
 func (m *Forges) Message() (string, common.MessageKind) {
 	if m.notice.text != "" {
-		return m.notice.text, common.NoticeKind(m.notice.text, m.notice.err)
+		return m.notice.text, m.notice.kind
 	}
 	it, ok := m.selected()
 	if !ok {
@@ -74,16 +73,16 @@ func (m *Forges) Message() (string, common.MessageKind) {
 	if it.kind == headerRow {
 		// The whole of what went wrong with the forge.
 		if text, ok := m.forgeError(g.status); ok {
-			return oneLine(g.status.Name + ": " + text), common.MessageError
+			return withFix(g.status.Name + ": " + text), common.MessageError
 		}
 		return "", common.MessageInfo
 	}
 	r := g.repos[it.r]
 	if res, ok := m.results[rowKey(g.status.Name, r.Path)]; ok && res.err {
-		return oneLine(res.detail), common.MessageError
+		return withFix(res.detail), common.MessageError
 	}
 	if r.LastError != "" && m.busy[rowKey(g.status.Name, r.Path)] == "" {
-		return oneLine("Last sync failed: " + r.LastError), common.MessageError
+		return withFix("Last sync failed: " + common.ShortErrorText(r.LastError)), common.MessageError
 	}
 	return "", common.MessageInfo
 }
@@ -93,9 +92,9 @@ func (m *Forges) listView(w, h int) []string {
 	desc := st.RepoSelector.Normal.Desc
 	switch {
 	case m.statusErr != nil:
-		return []string{" " + st.Prompt.Error.Render(common.TruncateString("✗ Cannot read the forges (r to retry): "+oneLine(m.statusErr.Error()), w-1))}
+		return common.ErrorState(m.common, "Cannot read the forges", m.statusErr, "r retry", w)
 	case !m.loaded:
-		return []string{" " + desc.Render("Loading forges…")}
+		return []string{" " + desc.Render(common.Busy("Loading forges"))}
 	case len(m.groups) == 0:
 		return []string{" " + desc.Render("No forges are configured.")}
 	}
@@ -154,15 +153,15 @@ func (m *Forges) headerRow(g group, selected bool, w int) []string {
 	hk := headerKey(s.Name)
 	switch {
 	case m.busy[hk] != "":
-		doing = m.busy[hk] + "…"
+		doing = common.Busy(m.busy[hk])
 		if p := m.progress[s.Name]; p != nil && p.total > 0 {
 			doing += fmt.Sprintf(" %d of %d", min(p.done, p.total), p.total)
 		}
 		doing = sel.Updated.Render(doing)
 	case s.Syncing:
-		doing = sel.Updated.Render("syncing…")
+		doing = sel.Updated.Render(common.Busy("syncing"))
 	case m.listing[s.Name]:
-		doing = sel.Updated.Render("listing…")
+		doing = sel.Updated.Render(common.Busy("listing"))
 	}
 	if s.Matching != nil {
 		n := plural(*s.Matching, "repo", "repos")
@@ -211,7 +210,8 @@ func (m *Forges) headerRow(g group, selected bool, w int) []string {
 	return strings.Split(base.Render(strings.Join(lines, "\n")), "\n")
 }
 
-// groupNote says why a forge shows no repositories.
+// groupNote says why a forge shows no repositories. A failed listing has
+// none: the header already says what went wrong.
 func (m *Forges) groupNote(g group, cw int) []string {
 	st := m.common.Styles
 	if m.query != "" {
@@ -221,26 +221,27 @@ func (m *Forges) groupNote(g group, cw int) []string {
 	style := st.RepoSelector.Normal.Desc
 	switch {
 	case g.err != nil:
-		text, style = "✗ Cannot read its repositories: "+oneLine(g.err.Error()), st.Prompt.Error
+		text, style = "✗ Cannot read its repositories: "+common.ShortError(g.err), st.Prompt.Error
 	case !g.loaded:
-		text = "Loading…"
+		text = common.Busy("Loading")
 	case len(g.repos) > 0:
 		return nil
 	case m.listing[g.status.Name]:
-		text = "Listing repositories…"
+		text = common.Busy("Listing repositories")
 	case g.status.ListError != "":
-		text = "Cannot list its repositories (r to sync and retry)."
+		return nil
 	case g.status.Listed == nil:
-		text = "Not listed yet (r to sync)."
+		text = "Not listed yet · u sync"
 	default:
 		text = "No repositories match its include and exclude patterns."
 	}
 	return []string{"  " + style.Render(common.TruncateString(text, cw-2))}
 }
 
-// repoRow renders one of a forge's repositories: imported mark, path,
-// ahead/behind of the default branch, and the last sync or what the tab
-// is doing to it; two lines when narrow.
+// repoRow renders one of a forge's repositories: path, imported or not
+// imported (a word, as the status glyphs always have), ahead/behind of the
+// default branch, and the last sync or what the tab is doing to it; two
+// lines when narrow.
 func (m *Forges) repoRow(g group, r forge.RepoStatus, selected bool, w int) []string {
 	st := m.common.Styles
 	sel := st.RepoSelector.Normal
@@ -251,22 +252,18 @@ func (m *Forges) repoRow(g group, r forge.RepoStatus, selected bool, w int) []st
 	cw := max(w-base.GetHorizontalFrameSize(), 10)
 	rk := rowKey(g.status.Name, r.Path)
 
-	mark := " "
-	if r.Imported {
-		mark = sel.Updated.Render("✓")
-	}
 	path := r.Path
 	if r.Imported && !r.Listed && g.status.Listed != nil {
 		path += " (no longer listed)"
 	}
-	var ab string
+	imported, ab := sel.Desc.Render("not imported"), ""
+	// ↑ commits on Sundae the forge lacks, ↓ the reverse.
 	switch {
 	case !r.Imported:
-		ab = sel.Desc.Render("not imported")
 	case r.Ahead != nil && r.Behind != nil:
-		ab = fmt.Sprintf("↑%d ↓%d", *r.Ahead, *r.Behind)
+		imported, ab = sel.Updated.Render("imported"), fmt.Sprintf("↑%d ↓%d", *r.Ahead, *r.Behind)
 	default:
-		ab = sel.Desc.Render("↑- ↓-")
+		imported, ab = sel.Updated.Render("imported"), sel.Desc.Render("↑- ↓-")
 	}
 	var last string
 	switch res, ok := m.results[rk]; {
@@ -293,16 +290,20 @@ func (m *Forges) repoRow(g group, r forge.RepoStatus, selected bool, w int) []st
 		lw -= confirm.AskWidth()
 	}
 	var lines []string
+	state := imported
+	if ab != "" {
+		state += " " + ab
+	}
 	if m.narrow() {
 		lines = []string{
-			"  " + mark + " " + sel.Title.Render(common.TruncateString(path, lw-4)),
-			strings.TrimRight("    "+ab+"  "+last, " "),
+			"    " + sel.Title.Render(common.TruncateString(path, lw-4)),
+			strings.TrimRight("    "+state+"  "+last, " "),
 		}
 	} else {
-		pathW := max(lw-4-2-aheadWidth-2-lastWidth, 10)
+		pathW := max(lw-4-2-importWidth-2-lastWidth, 10)
 		lines = []string{
-			"  " + mark + " " + sel.Title.Render(pad(common.TruncateString(path, pathW), pathW)) +
-				"  " + pad(ab, aheadWidth) + "  " + last,
+			"    " + sel.Title.Render(pad(common.TruncateString(path, pathW), pathW)) +
+				"  " + pad(state, importWidth) + "  " + last,
 		}
 	}
 	if confirm != nil {
@@ -342,16 +343,11 @@ func (m *Forges) forgeError(s forge.ForgeStatus) (string, bool) {
 	return "", false
 }
 
-// requestPrefix is the `Get "https://…": ` an HTTP client error starts
-// with.
-var requestPrefix = regexp.MustCompile(`(?:Get|Post|Head) "[^"]*": `)
-
-// tidyError shortens an error for a one-line display: the forge's name
-// and the request URL go, what went wrong stays.
+// tidyError shortens an error for a one-line display: the forge's name,
+// the request and transport details go, what went wrong stays.
 func tidyError(forgeName, s string) string {
-	s = oneLine(s)
-	s = strings.TrimPrefix(s, "forge "+forgeName+": ")
-	return requestPrefix.ReplaceAllString(s, "")
+	s = common.ShortErrorText(s)
+	return strings.TrimPrefix(s, "forge "+forgeName+": ")
 }
 
 // oneLine joins the lines of a message.

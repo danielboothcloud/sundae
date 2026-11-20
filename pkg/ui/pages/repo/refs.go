@@ -49,6 +49,8 @@ func NewRefs(common common.Common, refPrefix string) *Refs {
 	s.SetShowTitle(false)
 	s.SetFilteringEnabled(false)
 	s.DisableQuitKeybindings()
+	s.KeyMap.NextPage = common.KeyMap.NextPage
+	s.KeyMap.PrevPage = common.KeyMap.PrevPage
 	r.selector = s
 	sp := spinner.New(spinner.WithSpinner(spinner.Dot),
 		spinner.WithStyle(common.Styles.Spinner))

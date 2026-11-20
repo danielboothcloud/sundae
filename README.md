@@ -2067,10 +2067,9 @@ directory, a commit or the history. The help line reads the same on every
 tab: move, the main action, the tab's keys, filter, tabs, `? more`. Keys
 are colour-coded: the main action's key (<kbd>enter</kbd>) in pink, keys
 that delete something, and their words, in red, the rest in blue.
-Above the help, the **action bar** names the highlighted row and what you can
-do with it (`▸ infra / claude-1  z suspend • A add repos … • space
-more`). Results show as a notice under the list: `✓ Deleted infra / claude-1.`
-in green, `✗ …` in red.
+Results show on the line above the help, on every page: `✓ Deleted infra /
+claude-1.` in green, `✗ …` in red, `Deleting me/dotfiles …` while it runs.
+A key inside a message reads as on the help line (`r retry`, `u sync`).
 
 **Forms are modal.** The new-session, new-repository and import forms open in
 NORMAL mode (the badge at the top right): <kbd>j</kbd>/<kbd>k</kbd> move
@@ -2084,9 +2083,29 @@ keys go to the field until <kbd>enter</kbd> or <kbd>esc</kbd> ends it, and
 opens from the Sessions tab; <kbd>s</kbd> on a repository picks it.
 
 The home page has tabs; while a form or filter is open, the keys stay with
-it. Keys mean the same on every tab: <kbd>n</kbd> new,
-<kbd>enter</kbd> open/attach, <kbd>d</kbd> delete (always confirmed),
-<kbd>r</kbd> refresh/sync, <kbd>c</kbd> copy a command, <kbd>/</kbd> filter.
+it. A key means one thing on every tab and in a repository:
+
+| Key | Meaning |
+| --- | --- |
+| <kbd>enter</kbd> | open, or attach to a session |
+| <kbd>n</kbd> / <kbd>s</kbd> | new (repository, session) / new session for the highlighted repository |
+| <kbd>d</kbd> | delete, after a confirm |
+| <kbd>r</kbd> | refresh: read the tab again (`r retry` after a failure) |
+| <kbd>u</kbd> | sync with the forge: a forge, a repository, or a session's checkouts |
+| <kbd>p</kbd> | push to the forge, after a confirm |
+| <kbd>i</kbd> / <kbd>I</kbd> | import / import all shown |
+| <kbd>A</kbd> / <kbd>R</kbd> | add / remove a session's repositories |
+| <kbd>z</kbd> | suspend or resume a session |
+| <kbd>c</kbd> | copy (a command, a name, the content) |
+| <kbd>l</kbd> / <kbd>h</kbd> | in / out: the Signal history, a directory, a change; back |
+| <kbd>a</kbd> | attention only, in the Signal history |
+| <kbd>/</kbd> / <kbd>esc</kbd> | filter / clear it, cancel, back |
+| <kbd>space</kbd> / <kbd>:</kbd> | the row's actions / every action |
+
+Paging is <kbd>pgup</kbd>/<kbd>pgdn</kbd> (or <kbd>b</kbd>/<kbd>f</kbd>);
+<kbd>d</kbd> and <kbd>u</kbd> scroll half a page only in text (a README, a
+file, a diff), where nothing is deleted or synced. A file view toggles line numbers with <kbd>#</kbd>,
+blame with <kbd>b</kbd> and the Markdown preview with <kbd>v</kbd>.
 On a Repositories, Sessions or Forges row, <kbd>space</kbd> or <kbd>.</kbd>
 opens a menu of what you can do with it, each with its key, showing only the
 actions allowed for that row: <kbd>↑</kbd>/<kbd>↓</kbd> (or <kbd>j</kbd>/<kbd>k</kbd>)
@@ -2114,12 +2133,13 @@ storage after a confirm, <kbd>z</kbd> suspends or resumes it, <kbd>c</kbd>
 copies its `session attach` command, and <kbd>/</kbd> filters. Below the list, **Signals · *session***
 shows the highlighted session's latest signals, newest first, and follows the
 cursor (on short or narrow terminals, just its latest signal on one line).
-<kbd>l</kbd> (or <kbd>e</kbd>) opens the full **Signal history**: the
+<kbd>l</kbd> opens the full **Signal history**: the
 `session signals` feed, live, newest first (<kbd>/</kbd> filters,
 <kbd>a</kbd> shows only what needs you, <kbd>g</kbd> goes back to the top
 and follows new signals); <kbd>h</kbd> or <kbd>esc</kbd> goes back.
-When the OpenShell gateway is unreachable the tab says so and <kbd>r</kbd>
-retries; the other tabs keep working.
+When the sessions cannot be listed (with OpenShell: its gateway is
+unreachable) the tab says so with the cause, and <kbd>r</kbd> retries; the
+other tabs keep working.
 
 <kbd>u</kbd> (**Sync with forge**, also in the action menu) brings a
 session's checkouts up to date without attaching. For a server admin, it
@@ -2149,11 +2169,14 @@ the same keys, and the status bar ends with the attention summary.
 
 When forges are configured, server admins (the same people who may run
 `forge import` and `forge sync`) get a **Forges** tab: every forge with its
-repositories, imported (`✓`, with ahead/behind and last sync) or not.
+repositories, each `imported` (with ahead/behind and last sync) or `not
+imported`. A forge that cannot be listed says why once, in its header; a
+rejected token points at `forges[].token_file`.
 <kbd>i</kbd> imports the highlighted repository, <kbd>I</kbd> imports all
 shown (the <kbd>/</kbd> filter narrows them); both ask whether to import
 them as jj or git repositories,
-<kbd>r</kbd> syncs the forge on its header or the repository on its row,
+<kbd>u</kbd> syncs the forge on its header or the repository on its row
+(<kbd>r</kbd> only reads the tab again),
 <kbd>p</kbd> pushes the repository's branch to the forge after a confirm
 naming it (fast-forward only; a refusal says why), and <kbd>enter</kbd> opens
 the imported repository. Imports, syncs and pushes run in the background with

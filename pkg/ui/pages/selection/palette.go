@@ -59,7 +59,7 @@ func (s *Selection) commands() []command {
 	if s.forges != nil {
 		for _, name := range s.forges.ForgeNames() {
 			name := name
-			b := key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "Forges › Sync forge "+name))
+			b := key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "Forges › Sync forge "+name))
 			cs = append(cs, command{pane: forgesPane, binding: b, run: func() tea.Cmd { return s.forges.SyncForge(name) }})
 		}
 	}

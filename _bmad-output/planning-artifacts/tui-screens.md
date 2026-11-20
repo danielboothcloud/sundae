@@ -16,7 +16,7 @@ Read from `pkg/ssh/ui.go`, `pkg/ui/pages/selection/`, `pkg/ui/pages/repo/`, `pkg
 | R6 | Any error replaces the whole screen ("Bummer"). | A gateway outage must stay inside its tab as one line. |
 | R7 | The server-name header shows on home only; the repo page has its own header and a status bar. | The attention summary has a place on home. In a repo it needs the status bar. |
 | R8 | The TUI runs inside the SSH session on an emulated PTY. | Attaching from the TUI means handing the terminal to the bridge with `tea.Exec` (present in bubbletea v2.0.8) and taking it back on detach. Not yet tried through the emulated PTY. The line-feed rewrite (roadmap F5) applies too. |
-| R9 | Keys already taken: `q` `?` `/` `esc` `enter` `tab` `c` `g` `G` `h` `j` `k` `l` `f` `d` `b` `u`; in the Files tab also `p` `b` `l`. | New keys chosen from what is free: `n` `x` `s` `i` `r` `p` `1`–`5`. `p` is push on Forges only. |
+| R9 | Keys already taken: `q` `?` `/` `esc` `enter` `tab` `c` `g` `G` `h` `j` `k` `l` `f` `d` `b` `u`; in the Files tab also `p` `b` `l`. | One meaning per key on every tab and in a repository (section 10, 2026-11-20): `d` delete, `r` refresh, `u` sync with forge, `l`/`h` in/out; lists no longer page on `d`/`u`, and the file view's toggles moved to `#` and `v`. |
 | R10 | Anonymous and keyless users can browse. | Sessions and Forges show only to an authenticated user. |
 
 ## 2. Status vocabulary
@@ -45,7 +45,7 @@ Sort order everywhere: blocked, error, done, working, idle, none. What needs me 
 
  (tab content)
 
- ↑↓ navigate • 1-4 tab • enter attach • n new • x end • / filter • ? help
+ ↑↓ navigate • 1-4 tab • enter attach • n new • d delete • / filter • ? help
 ```
 
 - Header: server name as today. Right side is the attention summary, counted over all my sessions. Zero counts are left out; nothing shows when there are no sessions.
@@ -96,9 +96,9 @@ Today's row, plus two badges on the title line.
 - Line 1: glyph, repo / session name, state (kind, progress, lifecycle), time since the status last changed.
 - Line 2: the agent's `msg`; when there is none, the `app` or the command.
 - Selected row gets today's left border and highlight.
-- Keys: `enter` attach, `n` new, `x` end, `z` park or resume now, `e` switch to the Signals pane, `c` copy the attach command, `/` filter.
-- Empty: `No sessions. Press n to start one.`
-- Gateway down: the list is replaced by one line, `OpenShell gateway unreachable (r to retry)`. Other tabs keep working.
+- Keys: `enter` attach, `n` new, `d` delete, `z` park or resume now, `u` sync with forge, `l` the Signal history, `c` copy the attach command, `/` filter.
+- Empty: `No sessions yet · n new session`
+- Gateway down: the list is replaced by `✗ OpenShell gateway unreachable · r retry` (`Cannot list sessions` when not every runtime is OpenShell) and the short cause under it. Other tabs keep working.
 
 ### 5a. New session (`n`, or `s` on a repository)
 
@@ -118,7 +118,7 @@ Today's row, plus two badges on the title line.
 - No free-text image field: images come from profiles. `session start --image` stays on the CLI.
 - After `enter`: `Starting sandbox… Cloning… ` progress lines in place, then attach if chosen.
 
-### 5b. End session (`x`)
+### 5b. End session (`d`, delete)
 
 ```
  End infra / claude-1?  The sandbox and any unpushed work are deleted.   y / N
@@ -149,12 +149,12 @@ One flat list grouped by forge. Forges are declared in the config file, so there
    ✓ infra                               ↑0 ↓0          synced 2h
 ```
 
-- `✓` imported. `↑n` commits on Sundae not on the forge, `↓n` the reverse.
-- Keys: `i` import, `I` import all shown (respects the filter), `r` sync now, `p` push to the forge (asks `y / N`, names the branch), `enter` open the imported repo.
+- `imported` or `not imported`, as words (as built: `✓` is the done state only). `↑n` commits on Sundae not on the forge, `↓n` the reverse.
+- Keys: `i` import, `I` import all shown (respects the filter), `u` sync now, `r` refresh, `p` push to the forge (asks `y / N`, names the branch), `enter` open the imported repo.
 
 ## 7. Signals pane (inside Sessions)
 
-The second pane of the Sessions tab, toggled with `e`. Sessions shows where each session is now; Signals shows every OSC 7501 report as it arrived, newest first, across all my sessions.
+The second pane of the Sessions tab, opened with `l` (`h` or `esc` back). Sessions shows where each session is now; Signals shows every OSC 7501 report as it arrived, newest first, across all my sessions.
 
 ```
  Repositories   • Sessions   Forges   About
@@ -169,7 +169,7 @@ The second pane of the Sessions tab, toggled with `e`. Sessions shows where each
  13:12:00  ○ dotfiles / main          idle · parked         after 30m idle
  12:50:19  + sundae / tui             created               profile claude
 
- ↑↓ navigate • enter attach • e sessions • a attention only • / filter • ? help
+ ↑↓ navigate • enter attach • h sessions • a attention only • / filter • ? help
 ```
 
 - One row per report: time, glyph, repo / session, state (kind, progress), message. A child record shows its id after the session name (`tui/lint`).
@@ -184,7 +184,7 @@ What limits "every signal": with status collected by polling (roadmap D5a) the f
 
 ## 8. Inside a repository: Sessions tab
 
-Added after Tags. The same rows as section 5 without the repo prefix, and the same keys, including `e` for that repo's signals.
+Added after Tags. The same rows as section 5 without the repo prefix, and the same keys, including `l` for that repo's signals.
 
 ```
  sundae
@@ -219,24 +219,32 @@ The status bar's right end carries the attention summary while in a repo (R7).
    Implemented GitHub disco…
 ```
 
-- Tabs collapse to the active one. Summary drops its words. Rows wrap state onto a second line.
+- Tabs collapse to the active one. Rows wrap state onto a second line. The summary keeps a word with every glyph (`▲1 blocked  ✓1 done`): the least urgent states give way to `+N` sessions first, down to `▲1 blocked +3`.
 
 ## 10. Keys
 
+One meaning per key, on every home tab and in a repository (as built, 2026-11-20; README.md has the same table).
+
 | Key | Where | Action |
 |-----|-------|--------|
-| `1`–`4` | home | jump to tab |
-| `enter` | Repositories / Sessions / Signals / Forges | open / attach / attach to that signal's session / open |
-| `e` | Sessions tab | switch between the Sessions and Signals panes |
-| `a` | Signals | attention only: blocked, error, done |
+| `1`–`4`, `H`/`L`, `tab` | home, repository | jump to / switch tab |
+| `enter` | every list | open / attach / attach to that signal's session |
+| `n` | Repositories, Sessions | new repository / new session |
 | `s` | Repositories | new session for the selected repo |
-| `n` | Sessions | new session |
-| `x` | Sessions | end session (confirm) |
-| `z` | Sessions | park or resume |
-| `i` / `I` | Forges | import one / all shown |
-| `r` | Forges, or any tab showing an error | sync now / retry |
+| `d` | Repositories, Sessions | delete (confirm in the row) |
+| `r` | Sessions, Forges, Changes | refresh: read the view again; `r retry` after a failure |
+| `u` | Forges (header or row), Sessions | sync with the forge |
 | `p` | Forges | push to forge (confirm) |
-| `c` | any list | copy the row's command |
+| `i` / `I` | Forges | import one / all shown |
+| `A` / `R` | Sessions | add / remove repositories |
+| `z` | Sessions | suspend or resume |
+| `c` | any list | copy the row's command, name or content |
+| `l` / `h` | Sessions, Files, Changes | in (Signal history, directory, change) / back |
+| `a` | Signal history | attention only: blocked, error, done |
+| `/`, `esc` | any list | filter; clear, cancel, back |
+| `space`, `:` | home | the row's actions; every action |
+
+A key inside a message reads as on the help line, `key verb`: `r retry`, `u sync`, `n new session`. Every busy word ends in ` …` (`importing …`).
 
 ## 11. Open questions
 

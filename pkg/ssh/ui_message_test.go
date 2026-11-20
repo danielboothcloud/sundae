@@ -80,7 +80,7 @@ func TestMessageSlot(t *testing.T) {
 			// Sessions: back from an attached session.
 			before := screenLines(focusUI(t, w, ""))
 			ui := focusUI(t, w, "infra / claude-1")
-			checkSlot(t, ui, before, cut("Left infra / claude-1; it keeps running. enter goes back."))
+			checkSlot(t, ui, before, cut("Left infra / claude-1; it keeps running."))
 			goldenFile(t, fmt.Sprintf("message-sessions-left-%d", w), screenText(ui))
 
 			// Forges: an error, and a selected row's last error.
@@ -89,7 +89,7 @@ func TestMessageSlot(t *testing.T) {
 			uiKey(ui, "3", "j", "j")
 			before = screenLines(ui)
 			uiKey(ui, "p")
-			checkSlot(t, ui, before, cut("✗ Cannot push sundae: HEAD is detached"))
+			checkSlot(t, ui, before, cut("✗ Cannot push: HEAD is detached"))
 			goldenFile(t, fmt.Sprintf("message-forges-error-%d", w), screenText(ui))
 
 			// Repositories: kept, deleted, creating.

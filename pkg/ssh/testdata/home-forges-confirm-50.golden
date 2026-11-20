@@ -1,5 +1,5 @@
 
-    Sundae                              ▲1 ✓1 ●2
+    Sundae    ▲ 1 blocked  ✓ 1 done  ● 2 working
 
   ‹ Forges ›
 
@@ -7,8 +7,8 @@
       2 repos · 1 imported · synced 3m ago
         me/dotfiles
         not imported
-  ┃   ✓ me/sundae            push main → github?
-  ┃     ↑3 ↓0  synced 3m
+  ┃     me/sundae            push main → github?
+  ┃     imported ↑3 ↓0  synced 3m
   ┃     fast-forward only, no force
   ┃                          y push • esc cancel
 

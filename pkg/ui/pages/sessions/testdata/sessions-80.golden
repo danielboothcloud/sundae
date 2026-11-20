@@ -1,5 +1,5 @@
 
- Sessions                                                        6 sessions
+                                                                 6 sessions
 
 ┃ ▲ infra / claude-1                               blocked · permission   4m
 ┃   Apply 3 to add, 1 to change, 0 to destroy?
@@ -17,6 +17,6 @@
     bash
 
 
- Signals · infra / claude-1                             e full history · 2
+ Signals · infra / claude-1                          2 signals · l history
    14:02:11  ▲ blocked · permission  Apply 3 to add, 1 to change, 0 to des…
    14:02:03  ● working               Planning

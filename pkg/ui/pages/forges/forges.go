@@ -33,6 +33,7 @@ type KeyMap struct {
 	Import    key.Binding
 	ImportAll key.Binding
 	Sync      key.Binding
+	Refresh   key.Binding
 	Push      key.Binding
 	Copy      key.Binding
 	Filter    key.Binding
@@ -43,14 +44,15 @@ type KeyMap struct {
 	Cancel    key.Binding
 }
 
-// DefaultKeyMap returns the tab's keys. None clashes with the frame's:
-// q, ?, tab, 1-9 and esc (tui-screens.md section 10).
+// DefaultKeyMap returns the tab's keys, as the key table in README.md and
+// tui-screens.md section 10 lists them; none clashes with the frame's.
 func DefaultKeyMap() KeyMap {
 	return KeyMap{
 		Open:      key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
 		Import:    key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "import")),
 		ImportAll: key.NewBinding(key.WithKeys("I"), key.WithHelp("I", "import all shown")),
-		Sync:      key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "sync")),
+		Sync:      key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "sync")),
+		Refresh:   key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 		Push:      key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "push")),
 		Copy:      key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "copy clone command")),
 		Filter:    key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
@@ -113,12 +115,6 @@ func IsMsg(msg tea.Msg) bool {
 		return true
 	}
 	return false
-}
-
-// notice is a one-line message the frame shows in its message slot.
-type notice struct {
-	text string
-	err  bool
 }
 
 // result is the outcome of an operation on a row: a few words shown in
@@ -196,7 +192,8 @@ type Forges struct {
 	onYes   func() tea.Cmd
 	// confirmKey is the row the confirm is drawn in, kept the notice of
 	// a no.
-	confirmKey, kept string
+	confirmKey string
+	kept       notice
 
 	// importForm asks how to import (jj or git) while it is open;
 	// onImport imports with the VCS chosen.
@@ -415,13 +412,13 @@ func (m *Forges) onEvents(evs []events.Event) tea.Cmd {
 		case forge.EventSync:
 			if p != nil && p.verb == "syncing" {
 				p.done++
-				m.results[rk] = outcome("synced", "sync failed", o)
+				m.results[rk] = outcome("synced", syncFailed, o)
 			}
 		case forge.EventImport:
 			if p != nil && p.verb == "importing" && m.busy[rk] != "" {
 				p.done++
 				delete(m.busy, rk)
-				m.results[rk] = outcome("imported", "import failed", o)
+				m.results[rk] = outcome("imported", importFailed, o)
 			}
 		case forge.EventPush, forge.EventDiscover:
 		}
@@ -433,11 +430,11 @@ func (m *Forges) onEvents(evs []events.Event) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-func outcome(ok, failed string, o *events.ForgeOutcome) result {
+func outcome(ok string, failed func(errText string) result, o *events.ForgeOutcome) result {
 	if o.OK {
 		return result{short: "✓ " + ok}
 	}
-	return result{short: "✗ " + failed, detail: o.Path + ": " + failed + ": " + o.Error, err: true}
+	return failed(o.Error)
 }
 
 // items returns the rows the filter selects: each forge's header, then
@@ -518,11 +515,11 @@ func (m *Forges) onKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		m.confirm = nil
 		yes, kept := m.onYes, m.kept
-		m.onYes, m.confirmKey, m.kept = nil, "", ""
+		m.onYes, m.confirmKey, m.kept = nil, "", notice{}
 		if res == prompt.Submitted && yes != nil {
 			return yes()
 		}
-		m.notice = notice{text: kept}
+		m.notice = kept
 		return nil
 	case m.importForm != nil:
 		res, cmd := m.importForm.Update(msg)
@@ -573,11 +570,10 @@ func (m *Forges) onKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case key.Matches(msg, m.keys.ImportAll):
 		return m.importAll()
+	case key.Matches(msg, m.keys.Refresh):
+		return m.loadCmd("")
 	}
 	if m.statusErr != nil || !m.loaded {
-		if key.Matches(msg, m.keys.Sync) {
-			return m.loadCmd("")
-		}
 		return nil
 	}
 	it, ok := m.selected()
@@ -591,7 +587,7 @@ func (m *Forges) onKey(msg tea.KeyPressMsg) tea.Cmd {
 		case key.Matches(msg, m.keys.Sync):
 			return m.syncForge(name)
 		case key.Matches(msg, m.keys.Import, m.keys.Push, m.keys.Open, m.keys.Copy):
-			m.notice = notice{text: "Select a repository of " + name + " (I imports all shown, r syncs the forge)."}
+			m.notice = selectRepoNotice()
 		}
 		return nil
 	}
@@ -600,22 +596,22 @@ func (m *Forges) onKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch {
 	case key.Matches(msg, m.keys.Open):
 		if !r.Imported {
-			m.notice = notice{text: r.Path + " is not imported; press i to import it."}
+			m.notice = notImportedNotice(r.Path)
 			return nil
 		}
 		repo := r.Repo
 		return func() tea.Msg { return OpenRepoMsg{Repo: repo} }
 	case key.Matches(msg, m.keys.Copy):
 		if !r.Imported {
-			m.notice = notice{text: r.Path + " is not imported; press i to import it."}
+			m.notice = notImportedNotice(r.Path)
 			return nil
 		}
 		cmd := m.src.CloneCommand(r.Repo)
-		m.notice = notice{text: "Copied to the clipboard: " + cmd}
+		m.notice = copiedNotice()
 		return tea.SetClipboard(cmd)
 	case key.Matches(msg, m.keys.Import):
 		if r.Imported {
-			m.notice = notice{text: r.Path + " is already imported as " + r.Repo + "."}
+			m.notice = alreadyImportedNotice(r.Repo)
 			return nil
 		}
 		if m.busy[rk] != "" {
@@ -632,7 +628,7 @@ func (m *Forges) onKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.syncRepo(name, r)
 	case key.Matches(msg, m.keys.Push):
 		if !r.Imported {
-			m.notice = notice{text: r.Path + " is not imported; there is nothing to push."}
+			m.notice = notImportedNotice(r.Path)
 			return nil
 		}
 		if m.busy[rk] != "" {
@@ -689,7 +685,7 @@ func (m *Forges) importAll() tea.Cmd {
 		n++
 	}
 	if n == 0 {
-		m.notice = notice{text: "Nothing to import: every repository shown is imported."}
+		m.notice = allImportedNotice()
 		return nil
 	}
 	q := fmt.Sprintf("Import %s", plural(n, "repository", "repositories"))
@@ -738,7 +734,7 @@ func (m *Forges) importCmd(forgeName string, repos []forge.RepoStatus, vcs proto
 	var keys, paths []string
 	for _, r := range repos {
 		rk := rowKey(forgeName, r.Path)
-		m.busy[rk] = "importing…"
+		m.busy[rk] = common.Busy("importing")
 		delete(m.results, rk)
 		keys = append(keys, rk)
 		paths = append(paths, r.Path)
@@ -749,7 +745,7 @@ func (m *Forges) importCmd(forgeName string, repos []forge.RepoStatus, vcs proto
 		m.progress[forgeName] = &progress{verb: "importing", total: len(repos)}
 		keys = append(keys, hk)
 	}
-	ctx, src := m.ctx, m.src
+	ctx, src, logger := m.ctx, m.src, m.common.Logger
 	return func() tea.Msg {
 		results, err := src.Import(ctx, forgeName, paths, vcs)
 		if ctx.Err() != nil {
@@ -758,9 +754,10 @@ func (m *Forges) importCmd(forgeName string, repos []forge.RepoStatus, vcs proto
 		out := opMsg{keys: keys, forge: forgeName, rows: map[string]result{}}
 		if err != nil {
 			for _, k := range keys {
-				out.rows[k] = result{short: "✗ import failed", detail: err.Error(), err: true}
+				out.rows[k] = importFailed(err.Error())
 			}
-			out.notice = notice{text: "✗ Import from " + forgeName + " failed: " + err.Error(), err: true}
+			logger.Info("forges: import failed", "forge", forgeName, "err", err)
+			out.notice = importFailedNotice(forgeName, err)
 			return out
 		}
 		failed := 0
@@ -774,18 +771,19 @@ func (m *Forges) importCmd(forgeName string, repos []forge.RepoStatus, vcs proto
 				out.rows[rk] = result{short: "✓ imported", detail: r.Path + " is already imported as " + r.Repo}
 			default:
 				failed++
-				out.rows[rk] = result{short: "✗ import failed", detail: r.Path + ": " + r.Error, err: true}
+				out.rows[rk] = importFailed(r.Error)
+				logger.Info("forges: import failed", "forge", forgeName, "path", r.Path, "err", r.Error)
 			}
 		}
 		switch {
 		case len(results) == 1 && failed == 1:
-			out.notice = notice{text: "✗ Cannot import " + results[0].Path + ": " + results[0].Error, err: true}
+			out.notice = noticeOf(out.rows[rowKey(forgeName, results[0].Path)])
 		case len(results) == 1:
-			out.notice = notice{text: "Imported " + results[0].Path + " as " + results[0].Repo + "."}
+			out.notice = importedNotice(results[0].Repo)
 		case failed > 0:
-			out.notice = notice{text: fmt.Sprintf("✗ Imported %d of %d from %s; %d failed (select a row for why).", len(results)-failed, len(results), forgeName, failed), err: true}
+			out.notice = someFailedNotice(failed, len(results), "imports")
 		default:
-			out.notice = notice{text: fmt.Sprintf("Imported %s from %s.", plural(len(results), "repository", "repositories"), forgeName)}
+			out.notice = importedAllNotice(len(results), forgeName)
 		}
 		return out
 	}
@@ -806,7 +804,7 @@ func (m *Forges) syncForge(forgeName string) tea.Cmd {
 	}
 	m.busy[hk] = "syncing"
 	m.progress[forgeName] = &progress{verb: "syncing", total: total}
-	ctx, src := m.ctx, m.src
+	ctx, src, logger := m.ctx, m.src, m.common.Logger
 	return func() tea.Msg {
 		results, err := src.SyncForge(ctx, forgeName)
 		if ctx.Err() != nil {
@@ -814,11 +812,11 @@ func (m *Forges) syncForge(forgeName string) tea.Cmd {
 		}
 		out := opMsg{keys: []string{hk}, forge: forgeName, rows: map[string]result{}}
 		if err != nil {
-			text := err.Error()
+			logger.Info("forges: sync failed", "forge", forgeName, "err", err)
+			out.notice = syncFailedNotice(forgeName, err)
 			if errors.Is(err, forge.ErrSyncRunning) {
-				text = "a sync of " + forgeName + " is already running"
+				out.notice = syncRunningNotice(forgeName)
 			}
-			out.notice = notice{text: "✗ " + text, err: true}
 			return out
 		}
 		failed := 0
@@ -826,18 +824,19 @@ func (m *Forges) syncForge(forgeName string) tea.Cmd {
 			rk := rowKey(forgeName, r.Path)
 			if r.Error != "" {
 				failed++
-				out.rows[rk] = result{short: "✗ sync failed", detail: r.Path + ": sync failed: " + r.Error, err: true}
+				out.rows[rk] = syncFailed(r.Error)
+				logger.Info("forges: sync failed", "forge", forgeName, "path", r.Path, "err", r.Error)
 				continue
 			}
-			out.rows[rk] = result{short: "✓ synced", detail: r.Path + ": " + r.Sync.Summary()}
+			out.rows[rk] = result{short: "✓ synced", detail: "Synced: " + r.Sync.Summary() + "."}
 		}
 		switch {
 		case len(results) == 0:
-			out.notice = notice{text: "Listed " + forgeName + "; no imported repositories to sync."}
+			out.notice = nothingToSyncNotice(forgeName)
 		case failed > 0:
-			out.notice = notice{text: fmt.Sprintf("✗ Synced %s: %d of %d failed (select a row for why).", forgeName, failed, len(results)), err: true}
+			out.notice = someFailedNotice(failed, len(results), "syncs")
 		default:
-			out.notice = notice{text: fmt.Sprintf("Synced %s: %s.", forgeName, plural(len(results), "repository", "repositories"))}
+			out.notice = syncedAllNotice(len(results), forgeName)
 		}
 		return out
 	}
@@ -849,9 +848,9 @@ func (m *Forges) syncRepo(forgeName string, r forge.RepoStatus) tea.Cmd {
 	if m.busy[rk] != "" {
 		return nil
 	}
-	m.busy[rk] = "syncing…"
+	m.busy[rk] = common.Busy("syncing")
 	delete(m.results, rk)
-	ctx, src := m.ctx, m.src
+	ctx, src, logger := m.ctx, m.src, m.common.Logger
 	return func() tea.Msg {
 		res, err := src.SyncRepo(ctx, forgeName, r.Repo)
 		if ctx.Err() != nil {
@@ -862,12 +861,13 @@ func (m *Forges) syncRepo(forgeName string, r forge.RepoStatus) tea.Cmd {
 			err = errors.New(res.Error)
 		}
 		if err != nil {
-			out.rows[rk] = result{short: "✗ sync failed", detail: r.Path + ": sync failed: " + err.Error(), err: true}
-			out.notice = notice{text: "✗ " + out.rows[rk].detail, err: true}
+			out.rows[rk] = syncFailed(err.Error())
+			logger.Info("forges: sync failed", "forge", forgeName, "path", r.Path, "err", err)
+			out.notice = noticeOf(out.rows[rk])
 			return out
 		}
-		out.rows[rk] = result{short: "✓ synced", detail: r.Path + ": " + res.Sync.Summary()}
-		out.notice = notice{text: "Synced " + r.Repo + ": " + res.Sync.Summary() + "."}
+		out.rows[rk] = result{short: "✓ synced", detail: "Synced: " + res.Sync.Summary() + "."}
+		out.notice = syncedNotice(res.Sync)
 		return out
 	}
 }
@@ -882,16 +882,18 @@ func (m *Forges) branchCmd(forgeName string, r forge.RepoStatus) tea.Cmd {
 }
 
 func (m *Forges) onBranch(msg branchMsg) tea.Cmd {
-	if msg.err != nil || msg.branch == "" {
-		err := msg.err
-		if err == nil {
-			err = errors.New("no branch to push: HEAD is detached and the forge's default branch is unknown")
-		}
-		m.notice = notice{text: "✗ Cannot push " + msg.repo + ": " + err.Error(), err: true}
+	switch {
+	case msg.err != nil:
+		m.common.Logger.Info("forges: cannot find the branch to push", "repo", msg.repo, "err", msg.err)
+		m.notice = cannotPushNotice(msg.err)
+		return nil
+	case msg.branch == "":
+		// HEAD is detached and the forge's default branch is unknown.
+		m.notice = noBranchNotice()
 		return nil
 	}
 	m.confirm = prompt.NewConfirm(m.common, "push", "push "+msg.branch+" → "+msg.forge+"?", "fast-forward only, no force")
-	m.confirmKey, m.kept = rowKey(msg.forge, msg.path), "Not pushed."
+	m.confirmKey, m.kept = rowKey(msg.forge, msg.path), notPushedNotice()
 	m.onYes = func() tea.Cmd { return m.pushCmd(msg.forge, msg.path, msg.repo, msg.branch) }
 	// The lookup is async: the cursor may have moved since p.
 	m.selKey = m.confirmKey
@@ -902,31 +904,19 @@ func (m *Forges) onBranch(msg branchMsg) tea.Cmd {
 // pushCmd pushes a branch in the background. A refused push says why.
 func (m *Forges) pushCmd(forgeName, path, repo, branch string) tea.Cmd {
 	rk := rowKey(forgeName, path)
-	m.busy[rk] = "pushing…"
+	m.busy[rk] = common.Busy("pushing")
 	delete(m.results, rk)
-	ctx, src := m.ctx, m.src
+	ctx, src, logger := m.ctx, m.src, m.common.Logger
 	return func() tea.Msg {
 		res, err := src.Push(ctx, repo, branch)
 		if ctx.Err() != nil {
 			return nil
 		}
-		out := opMsg{keys: []string{rk}, forge: forgeName, rows: map[string]result{}}
-		var ahead *forge.UpstreamAheadError
-		switch {
-		case errors.As(err, &ahead):
-			out.rows[rk] = result{short: "✗ push refused", detail: "Push refused: " + err.Error(), err: true}
-		case err != nil:
-			out.rows[rk] = result{short: "✗ push failed", detail: "Push failed: " + err.Error(), err: true}
-		case res.UpToDate:
-			out.rows[rk] = result{short: "✓ up to date", detail: fmt.Sprintf("%s is already up to date on %s.", branch, forgeName)}
-		default:
-			out.rows[rk] = result{short: "✓ pushed", detail: fmt.Sprintf("Pushed %s of %s to %s: %s..%s.", branch, repo, forgeName, short(res.Old), short(res.New))}
+		if err != nil {
+			logger.Info("forges: push failed", "repo", repo, "branch", branch, "err", err)
 		}
-		r := out.rows[rk]
-		out.notice = notice{text: r.detail, err: r.err}
-		if r.err {
-			out.notice.text = "✗ " + r.detail
-		}
+		out := opMsg{keys: []string{rk}, forge: forgeName, rows: map[string]result{rk: pushOutcome(err, res, branch, forgeName)}}
+		out.notice = noticeOf(out.rows[rk])
 		return out
 	}
 }
@@ -981,7 +971,7 @@ func (m *Forges) ShortHelp() []key.Binding {
 	case m.typing:
 		return []key.Binding{m.keys.Apply, m.keys.Cancel}
 	case m.statusErr != nil:
-		retry := m.keys.Sync
+		retry := m.keys.Refresh
 		retry.SetHelp("r", "retry")
 		return []key.Binding{retry}
 	}
@@ -998,7 +988,7 @@ func (m *Forges) FullHelp() [][]key.Binding {
 		{km.UpDown, km.NextPage, km.PrevPage, m.keys.Top, m.keys.Bottom},
 		{m.keys.Open, m.keys.Import, m.keys.ImportAll},
 		{m.keys.Sync, m.keys.Push, m.keys.Copy},
-		{m.keys.Filter, m.keys.Clear},
+		{m.keys.Filter, m.keys.Clear, m.keys.Refresh},
 	}
 }
 
@@ -1016,13 +1006,13 @@ func (m *Forges) Actions() []key.Binding {
 	g := m.groups[it.g]
 	sync := m.keys.Sync
 	if it.kind == headerRow {
-		sync.SetHelp("r", "sync forge")
+		sync.SetHelp("u", "sync forge")
 		return []key.Binding{sync, m.keys.ImportAll}
 	}
 	r := g.repos[it.r]
 	busy := m.busy[rowKey(g.status.Name, r.Path)] != ""
 	if !r.Imported {
-		sync.SetHelp("r", "sync forge")
+		sync.SetHelp("u", "sync forge")
 		if busy {
 			return []key.Binding{sync}
 		}
@@ -1061,7 +1051,7 @@ func (m *Forges) ForgeNames() []string {
 	return names
 }
 
-// SyncForge syncs every repository imported from the named forge, as r
+// SyncForge syncs every repository imported from the named forge, as u
 // on its header row does.
 func (m *Forges) SyncForge(name string) tea.Cmd {
 	if m.src == nil || m.Capturing() {

@@ -68,7 +68,7 @@ func (d StashItemDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd {
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, d.common.KeyMap.Copy):
-			return copyCmd(item.Title(), fmt.Sprintf("Stash message %q copied to clipboard", item.Title()))
+			return copyCmd(item.Title(), copiedStashMessage)
 		}
 	}
 

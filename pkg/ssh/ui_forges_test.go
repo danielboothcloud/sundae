@@ -31,6 +31,8 @@ type fakeForges struct {
 	feed    *chanFeed
 	// branchErr is what PushBranch fails with; nil for main.
 	branchErr error
+	// listErr, when set, adds a gitlab forge whose listing failed with it.
+	listErr string
 }
 
 func newFakeForges() *fakeForges {
@@ -42,10 +44,17 @@ func newFakeForges() *fakeForges {
 
 func (f *fakeForges) Status(context.Context) ([]forge.ForgeStatus, error) {
 	synced := time.Now().Add(-3 * time.Minute)
-	return []forge.ForgeStatus{{Name: "github", Kind: "github", URL: "https://github.com", Imported: 1, Listed: intp(2), Matching: intp(2), LastSync: &synced}}, nil
+	out := []forge.ForgeStatus{{Name: "github", Kind: "github", URL: "https://github.com", Imported: 1, Listed: intp(2), Matching: intp(2), LastSync: &synced}}
+	if f.listErr != "" {
+		out = append(out, forge.ForgeStatus{Name: "gitlab", Kind: "gitlab", URL: "https://gitlab.com", ListError: f.listErr})
+	}
+	return out, nil
 }
 
-func (f *fakeForges) Repos(context.Context, string) ([]forge.RepoStatus, error) {
+func (f *fakeForges) Repos(_ context.Context, name string) ([]forge.RepoStatus, error) {
+	if name == "gitlab" {
+		return nil, nil
+	}
 	synced := time.Now().Add(-3 * time.Minute)
 	return []forge.RepoStatus{
 		{Path: "me/dotfiles", Repo: "github/me/dotfiles", Listed: true},
@@ -249,6 +258,29 @@ func TestRepositoriesNewSessionKey(t *testing.T) {
 	}
 }
 
+// TestHomeForgesErrorOnce: a forge that cannot be listed says so once, in
+// its header; the message slot adds it (with where to fix a rejected
+// token) only while the header is selected.
+func TestHomeForgesErrorOnce(t *testing.T) {
+	for _, w := range []int{80, 50} {
+		t.Run(fmt.Sprint(w), func(t *testing.T) {
+			ui, _, ff := richHomeUI(t, w, 24)
+			ff.listErr = "forge gitlab: GET /api/v4/projects: 401 Unauthorized"
+			uiKey(ui, "3")
+			waitScreen(t, ui, "gitlab")
+			if s := screenText(ui); strings.Count(s, "401") != 1 {
+				t.Fatalf("the error is not shown once:\n%s", s)
+			}
+			uiKey(ui, "G")
+			s := screenText(ui)
+			if strings.Count(s, "401") != 1 || !strings.Contains(s, "✗ Token rejected; check forges[].token_file") {
+				t.Fatalf("selected header:\n%s", s)
+			}
+			goldenFile(t, fmt.Sprintf("home-forges-error-%d", w), s)
+		})
+	}
+}
+
 func TestHomeForgesTab(t *testing.T) {
 	for _, w := range []int{80, 50} {
 		t.Run(fmt.Sprint(w), func(t *testing.T) {
@@ -365,8 +397,8 @@ func TestRepoSessionsKeys(t *testing.T) {
 	if s := screenText(ui); !strings.Contains(s, "Kept sundae / forge-sync.") || ui.activePage != repoPage {
 		t.Fatalf("esc:\n%s", s)
 	}
-	// e shows the repository's signals.
-	uiKey(ui, "e")
+	// l shows the repository's signals.
+	uiKey(ui, "l")
 	if s := screenText(ui); !strings.Contains(s, "‹ Signal history ›") {
 		t.Fatalf("signals:\n%s", s)
 	}

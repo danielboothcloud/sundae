@@ -17,7 +17,6 @@ import (
 	"github.com/danielboothcloud/sundae/pkg/ui/pages/forges"
 	"github.com/danielboothcloud/sundae/pkg/ui/pages/repo"
 	"github.com/danielboothcloud/sundae/pkg/ui/pages/selection"
-	"github.com/danielboothcloud/sundae/pkg/ui/pages/sessions"
 )
 
 type page int
@@ -334,11 +333,11 @@ func (ui *UI) View() tea.View {
 	wm, hm := ui.getMargins()
 	if r, s := ui.repo(), ui.selection(); ui.activePage == repoPage && r != nil && s != nil {
 		// The attention summary stays in view in a repository (R7), in its header.
-		r.SetSummary(s.Summary(false), s.Summary(true))
+		r.SetSummary(s.Summary)
 	}
 	switch ui.state {
 	case loadingState:
-		view = "Loading..."
+		view = common.Busy("Loading")
 	case errorState:
 		err := ui.common.Styles.ErrorTitle.Render("Bummer")
 		err += ui.common.Styles.ErrorBody.Render(ui.error.Error())
@@ -357,7 +356,7 @@ func (ui *UI) View() tea.View {
 	}
 	if ui.activePage == selectionPage {
 		if s := ui.selection(); s != nil {
-			ui.header.SetRight(s.Summary(ui.common.Width-wm < sessions.NarrowWidth))
+			ui.header.SetRight(s.Summary)
 		}
 		view = lipgloss.JoinVertical(lipgloss.Left, ui.header.View(), view)
 	}

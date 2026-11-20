@@ -1,8 +1,8 @@
-// Package sessions is the home page's Sessions tab: the user's OpenShell
-// agent sessions, with what their agents last reported, the selected
-// session's latest signals below them, and, on e, the full signal history.
-// It starts, attaches to, suspends, resumes and deletes sessions, as the `session` commands do, and follows the signals History
-// for live updates. See _bmad-output/planning-artifacts/tui-screens.md,
+// Package sessions is the home page's Sessions tab: the user's agent
+// sessions, with what their agents last reported, the selected session's
+// latest signals below them, and, on l, the full signal history. It
+// starts, attaches to, suspends, resumes and deletes sessions, as the
+// `session` commands do, and follows the signals History for live updates. See _bmad-output/planning-artifacts/tui-screens.md,
 // sections 5 and 7.
 package sessions
 
@@ -11,7 +11,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path"
 	"slices"
 	"strings"
 	"time"
@@ -59,7 +58,6 @@ type KeyMap struct {
 	Copy      key.Binding
 	Filter    key.Binding
 	Clear     key.Binding
-	Pane      key.Binding
 	Right     key.Binding
 	Left      key.Binding
 	Back      key.Binding
@@ -71,8 +69,8 @@ type KeyMap struct {
 	Cancel    key.Binding
 }
 
-// DefaultKeyMap returns the tab's keys. None clashes with the frame's:
-// q, ?, tab, 1-9 and esc (tui-screens.md R9).
+// DefaultKeyMap returns the tab's keys, as the key table in README.md and
+// tui-screens.md section 10 lists them; none clashes with the frame's.
 func DefaultKeyMap() KeyMap {
 	return KeyMap{
 		Attach:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "attach")),
@@ -85,7 +83,6 @@ func DefaultKeyMap() KeyMap {
 		Copy:      key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "copy attach command")),
 		Filter:    key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
 		Clear:     key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear filter")),
-		Pane:      key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "signal history")),
 		Right:     key.NewBinding(key.WithKeys("l", "right"), key.WithHelp("l", "history")),
 		Left:      key.NewBinding(key.WithKeys("h", "left"), key.WithHelp("h", "sessions")),
 		Back:      key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
@@ -98,15 +95,9 @@ func DefaultKeyMap() KeyMap {
 	}
 }
 
-// notice is a one-line message the frame shows in its message slot.
-type notice struct {
-	text string
-	err  bool
-}
-
 // Message implements common.Messenger: the tab's notice.
 func (m *Sessions) Message() (string, common.MessageKind) {
-	return m.notice.text, common.NoticeKind(m.notice.text, m.notice.err)
+	return m.notice.text, m.notice.kind
 }
 
 // Messages.
@@ -215,7 +206,7 @@ type Sessions struct {
 	confirm *prompt.Confirm
 	// onYes is what a yes to the confirm does, kept the notice of a no.
 	onYes func() tea.Cmd
-	kept  string
+	kept  notice
 	// target is the row the confirm is drawn in.
 	target  sessionctl.Row
 	op      *operation
@@ -451,7 +442,8 @@ func (m *Sessions) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 		return m, tea.Batch(cmd, m.tickCmd())
 	case reposMsg:
 		if msg.err != nil {
-			m.notice = notice{text: "Cannot list repositories: " + msg.err.Error(), err: true}
+			m.common.Logger.Info("sessions: cannot list repositories", "err", msg.err)
+			m.notice = reposFailedNotice(msg.err)
 			return m, nil
 		}
 		if msg.pre.edit != "" {
@@ -459,7 +451,7 @@ func (m *Sessions) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 			return m, nil
 		}
 		if len(msg.repos) == 0 && !msg.pre.fixed {
-			m.notice = notice{text: "No repository to start a session for.", err: true}
+			m.notice = noReposNotice()
 			return m, nil
 		}
 		m.form = m.newSessionForm(msg.repos, msg.pre)
@@ -512,7 +504,7 @@ func (m *Sessions) setRows(rows []sessionctl.Row) {
 	}
 	if m.confirm != nil && m.rowIndex(m.target.Info.Sandbox) < 0 {
 		// Its row is gone (deleted elsewhere): nothing is left to ask about.
-		m.confirm, m.onYes, m.kept = nil, nil, ""
+		m.confirm, m.onYes, m.kept = nil, nil, notice{}
 	}
 	m.sortRows()
 }
@@ -726,11 +718,11 @@ func (m *Sessions) onKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		m.confirm = nil
 		yes, kept := m.onYes, m.kept
-		m.onYes, m.kept = nil, ""
+		m.onYes, m.kept = nil, notice{}
 		if res == prompt.Submitted && yes != nil {
 			return yes()
 		}
-		m.notice = notice{text: kept}
+		m.notice = kept
 		return nil
 	case m.form != nil:
 		res, cmd := m.form.Update(msg)
@@ -752,7 +744,7 @@ func (m *Sessions) onKey(msg tea.KeyPressMsg) tea.Cmd {
 		if key.Matches(msg, m.keys.Cancel) {
 			m.op.abandon()
 			m.op = nil
-			m.notice = notice{text: "Cancelled."}
+			m.notice = cancelledNotice()
 		}
 		return nil
 	case m.typing:
@@ -764,9 +756,6 @@ func (m *Sessions) onKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	km := m.common.KeyMap
 	switch {
-	case key.Matches(msg, m.keys.Pane):
-		m.pane = 1 - m.pane
-		return nil
 	case m.pane == sessionsPane && key.Matches(msg, m.keys.Right):
 		// l moves right, to the signal history; h back to the sessions.
 		m.pane = signalsPane
@@ -799,12 +788,10 @@ func (m *Sessions) onKey(msg tea.KeyPressMsg) tea.Cmd {
 	case key.Matches(msg, km.Down):
 		m.move(1)
 		return nil
-	case key.Matches(msg, km.PrevPage) && (m.pane == signalsPane || !key.Matches(msg, m.keys.Sync)):
-		// u syncs a session here, so it does not page (pgup and b do).
+	case key.Matches(msg, km.PrevPage):
 		m.move(-m.perPage())
 		return nil
-	case key.Matches(msg, km.NextPage) && !key.Matches(msg, m.keys.Delete):
-		// d deletes a session here, so it does not page.
+	case key.Matches(msg, km.NextPage):
 		m.move(m.perPage())
 		return nil
 	case key.Matches(msg, m.keys.Follow):
@@ -896,7 +883,7 @@ func (m *Sessions) onSessionsKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		if len(rowRepos(r)) < 2 {
-			m.notice = notice{text: label + " has one repository; a session keeps at least one (d deletes it)."}
+			m.notice = onlyRepoNotice()
 			return nil
 		}
 		m.form = m.editReposForm(nil, prefill{edit: "remove", target: r})
@@ -908,7 +895,7 @@ func (m *Sessions) onSessionsKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.syncCmd(r)
 	case key.Matches(msg, m.keys.Delete):
 		m.ask(r, prompt.NewConfirm(m.common, "delete", "delete?", "loses sandbox, storage, unpushed work"),
-			"Kept "+label+".", func() tea.Cmd { return m.deleteCmd(r) })
+			keptNotice(label), func() tea.Cmd { return m.deleteCmd(r) })
 		return nil
 	case key.Matches(msg, m.keys.Suspend):
 		if m.busy[r.Info.Sandbox] != "" {
@@ -958,7 +945,7 @@ func (m *Sessions) launch(s signals.Signal) tea.Cmd {
 		return m.attachCmd(rowRepos(r), r.Info.Name, r.Info.Sandbox, r.Suspended())
 	}
 	if m.listErr != nil || !m.loaded {
-		m.notice = notice{text: "Cannot tell whether " + sessionLabel(sess.Name, sess.AllRepos()) + " is running: the session list is not loaded.", err: true}
+		m.notice = notLoadedNotice()
 		return nil
 	}
 	return m.reposCmd(prefill{repos: sess.AllRepos(), profile: m.profiles[sess.Sandbox]})
@@ -968,7 +955,7 @@ func (m *Sessions) launch(s signals.Signal) tea.Cmd {
 // attaches to it.
 func (m *Sessions) attachCmd(repos []string, name, key string, suspended bool) tea.Cmd {
 	if m.handoff == nil {
-		m.notice = notice{text: errNoTerminal.Error(), err: true}
+		m.notice = noTerminalNotice()
 		return nil
 	}
 	title := "Attaching to " + sessionLabel(name, repos) + " …" + m.homeHint()
@@ -976,7 +963,7 @@ func (m *Sessions) attachCmd(repos []string, name, key string, suspended bool) t
 	op.key = key
 	m.op, m.opLines = op, nil
 	if suspended {
-		m.opLines = []string{"Resuming…"}
+		m.opLines = []string{resumingLine}
 	}
 	return op.run(ctx, m.src, sessionctl.Request{Name: name, Term: m.term()})
 }
@@ -1013,7 +1000,7 @@ func (m *Sessions) startCmd(f *prompt.Form) tea.Cmd {
 func (m *Sessions) start(repos []string, name, profile string, attach bool) tea.Cmd {
 	if attach && m.handoff == nil {
 		attach = false
-		m.notice = notice{text: errNoTerminal.Error(), err: true}
+		m.notice = noTerminalNotice()
 	}
 	title := "Starting " + sessionLabel(name, repos) + " …"
 	op, ctx := newOperation(m.ctx, title, repos, name, attach)
@@ -1021,13 +1008,16 @@ func (m *Sessions) start(repos []string, name, profile string, attach bool) tea.
 	return op.run(ctx, m.src, sessionctl.Request{Repos: repos, Name: name, Profile: profile, Create: true, Term: m.term()})
 }
 
+// resumingLine is the first progress line while a suspended session resumes.
+const resumingLine = "Resuming …"
+
 // homeHint says how to come back here from the session; "" without a key.
 func (m *Sessions) homeHint() string {
 	k := sessionctl.HomeKey(config.FromContext(m.common.Context()))
 	if !k.Enabled() {
 		return ""
 	}
-	return "  " + k.String() + " comes back here."
+	return " · " + k.String() + " back"
 }
 
 // term is the TERM given to the attach client.
@@ -1049,8 +1039,8 @@ func (m *Sessions) onOp(op *operation) tea.Cmd {
 		return nil
 	}
 	lines, done, att, err := op.state()
-	if len(m.opLines) > 0 && m.opLines[0] == "Resuming…" {
-		lines = append([]string{"Resuming…"}, lines...)
+	if len(m.opLines) > 0 && m.opLines[0] == resumingLine {
+		lines = append([]string{resumingLine}, lines...)
 	}
 	m.opLines = lines
 	if !done {
@@ -1060,14 +1050,15 @@ func (m *Sessions) onOp(op *operation) tea.Cmd {
 	label := sessionLabel(op.name, op.repos)
 	if err != nil {
 		op.cancel()
-		m.notice = notice{text: "✗ " + label + ": " + err.Error(), err: true}
+		m.common.Logger.Info("sessions: start or attach failed", "session", label, "err", err)
+		m.notice = failedNotice(label, err)
 		return m.listCmd()
 	}
 	if !op.attach || m.handoff == nil {
 		op.cancel()
 		att.Close()
 		if m.notice.text == "" {
-			m.notice = notice{text: "Started " + label + "."}
+			m.notice = startedNotice(label)
 		}
 		return m.listCmd()
 	}
@@ -1092,14 +1083,15 @@ func (m *Sessions) onAttachDone(msg attachDoneMsg) tea.Cmd {
 	switch {
 	case errors.Is(msg.err, openshell.ErrHome):
 		m.pane = sessionsPane
-		m.notice = notice{text: "Left " + label + "; it keeps running. enter goes back."}
+		m.notice = leftNotice(label, true)
 		show = func() tea.Msg { return ShowMsg{} }
 	case msg.err != nil:
-		m.notice = notice{text: "✗ " + label + ": " + msg.err.Error(), err: true}
+		m.common.Logger.Info("sessions: attach failed", "session", label, "err", msg.err)
+		m.notice = failedNotice(label, msg.err)
 	case msg.code > 0:
-		m.notice = notice{text: fmt.Sprintf("%s: the program exited with status %d.", label, msg.code)}
+		m.notice = exitedNotice(label, msg.code)
 	default:
-		m.notice = notice{text: "Left " + label + ". enter goes back."}
+		m.notice = leftNotice(label, false)
 	}
 	return tea.Batch(show, m.listCmd())
 }
@@ -1125,12 +1117,12 @@ func (m *Sessions) SetFocus(f Focus) {
 		m.sortRows()
 	}
 	if f.Left != "" {
-		m.notice = notice{text: "Left " + f.Left + "; it keeps running. enter goes back."}
+		m.notice = leftNotice(f.Left, true)
 	}
 }
 
 // ask opens c in row r: yes runs onYes, no shows the kept notice.
-func (m *Sessions) ask(r sessionctl.Row, c *prompt.Confirm, kept string, onYes func() tea.Cmd) {
+func (m *Sessions) ask(r sessionctl.Row, c *prompt.Confirm, kept notice, onYes func() tea.Cmd) {
 	m.target, m.confirm, m.kept, m.onYes = r, c, kept, onYes
 }
 
@@ -1175,41 +1167,15 @@ func (m *Sessions) syncCmd(r sessionctl.Row) tea.Cmd {
 	}
 }
 
-// syncNotice sums up a sync: what happened to each repository, and an
-// error mark when any forge sync or checkout update failed.
-func syncNotice(label string, res []RepoSync) notice {
-	parts := make([]string, 0, len(res))
-	failed := false
+// logSync logs why each repository of a sync failed: the notice only
+// counts them.
+func (m *Sessions) logSync(label string, res []RepoSync) {
 	for _, rs := range res {
-		name := path.Base(rs.Repo)
-		var part string
-		switch rs.Checkout.State {
-		case openshell.CheckoutUpdated:
-			part = name + " updated"
-		case openshell.CheckoutCurrent:
-			part = name + " up to date"
-		case openshell.CheckoutFetched:
-			part = name + " fetched (" + rs.Checkout.Detail + ")"
-		case openshell.CheckoutMissing:
-			part = name + " has no checkout"
-		default:
-			failed = true
-			part = name + " fetch failed: " + rs.Checkout.Detail
+		if syncFailed(rs) {
+			m.common.Logger.Info("sessions: sync failed", "session", label, "repo", rs.Repo,
+				"checkout", rs.Checkout.State, "detail", rs.Checkout.Detail, "forge", rs.Forge, "forge_err", rs.ForgeErr)
 		}
-		if rs.ForgeErr != "" {
-			failed = true
-			part += "; " + rs.Forge + " sync failed: " + rs.ForgeErr
-		}
-		parts = append(parts, part)
 	}
-	text := "Synced " + label + ": " + strings.Join(parts, ", ") + "."
-	if len(parts) == 0 {
-		text = "Synced " + label + ": no repositories."
-	}
-	if failed {
-		text = "✗ " + text
-	}
-	return notice{text: text, err: failed}
 }
 
 // editReposCmd adds repositories to the session (verb "add") or removes
@@ -1241,23 +1207,25 @@ func (m *Sessions) onAction(msg actionMsg) tea.Cmd {
 	label := sessionLabel(msg.name, msg.repos)
 	switch {
 	case msg.err != nil:
-		m.notice = notice{text: "✗ " + label + ": " + msg.err.Error(), err: true}
+		m.common.Logger.Info("sessions: "+msg.verb+" failed", "session", label, "err", msg.err)
+		m.notice = failedNotice(label, msg.err)
 	case msg.verb == "delete" && msg.done:
-		m.notice = notice{text: "Deleted " + label + "."}
+		m.notice = deletedNotice(label)
 	case msg.verb == "delete":
-		m.notice = notice{text: label + " was already deleted."}
+		m.notice = alreadyDeletedNotice(label)
 	case msg.verb == "suspend" && msg.done:
-		m.notice = notice{text: "Suspended " + label + "; its storage is kept."}
+		m.notice = suspendedNotice(label)
 	case msg.verb == "suspend":
-		m.notice = notice{text: label + " is already suspended."}
+		m.notice = alreadySuspendedNotice(label)
 	case msg.verb == "resume":
-		m.notice = notice{text: "Resumed " + label + "."}
+		m.notice = resumedNotice(label)
 	case msg.verb == "add":
-		m.notice = notice{text: "Added " + strings.Join(msg.changed, ", ") + " to " + label + "."}
+		m.notice = addedNotice(label, msg.changed)
 	case msg.verb == "sync":
+		m.logSync(label, msg.synced)
 		m.notice = syncNotice(label, msg.synced)
 	case msg.verb == "remove":
-		m.notice = notice{text: "Removed " + strings.Join(msg.changed, ", ") + " from " + label + "; their checkouts stay in /sandbox."}
+		m.notice = removedNotice(msg.changed)
 	}
 	return m.listCmd()
 }
@@ -1337,7 +1305,7 @@ func (m *Sessions) newSessionForm(repos []string, pre prefill) *prompt.Form {
 	}
 	f.Validate = func(f *prompt.Form) error {
 		if name := f.Field("name").Value(); m.exists(name) {
-			return fmt.Errorf("session %s already exists; pick another name, or attach to it from the list", name)
+			return fmt.Errorf("session %s already exists; pick another name", name)
 		}
 		return nil
 	}
@@ -1370,7 +1338,7 @@ func (m *Sessions) editReposForm(repos []string, pre prefill) *prompt.Form {
 	if pre.edit == "remove" {
 		f.Validate = func(f *prompt.Form) error {
 			if len(f.Field("repos").Values()) >= len(have) {
-				return errors.New("a session keeps at least one repository; delete it with d instead")
+				return errors.New("a session keeps at least one repository")
 			}
 			return nil
 		}
@@ -1441,10 +1409,12 @@ func sessionNameBase(profile string) string {
 	return s
 }
 
-// Summary renders the attention summary of the header: how many of the
-// user's sessions are blocked, errored, done and working, zero counts left
-// out; "" when there are none. Narrow drops the words.
-func (m *Sessions) Summary(narrow bool) string {
+// Summary renders the attention summary of the header in at most width
+// cells (width <= 0: no limit): how many sessions are blocked, errored, done
+// and working; "" when there are none. A glyph never shows without its
+// word: the least urgent states give way to "+N" sessions, and the summary
+// to "" when not even the first state fits.
+func (m *Sessions) Summary(width int) string {
 	if m.src == nil || m.listErr != nil {
 		return ""
 	}
@@ -1452,24 +1422,44 @@ func (m *Sessions) Summary(narrow bool) string {
 	for _, r := range m.rows {
 		counts[r.State()]++
 	}
-	st := m.common.Styles
-	sep := "  "
-	if narrow {
-		sep = " "
-	}
-	var parts []string
+	var states []events.State
 	for _, s := range []events.State{events.StateBlocked, events.StateError, events.StateDone, events.StateWorking} {
-		n := counts[s]
-		if n == 0 {
-			continue
+		if counts[s] > 0 {
+			states = append(states, s)
 		}
-		text := fmt.Sprintf("%s %d %s", s.Glyph(), n, s.Word())
-		if narrow {
-			text = fmt.Sprintf("%s%d", s.Glyph(), n)
-		}
-		parts = append(parts, stateStyle(st, s).Render(text))
 	}
-	return strings.Join(parts, sep)
+	if len(states) == 0 {
+		return ""
+	}
+	st := m.common.Styles
+	render := func(compact bool, k int) string {
+		parts := make([]string, 0, k+1)
+		for _, s := range states[:k] {
+			text := fmt.Sprintf("%s %d %s", s.Glyph(), counts[s], s.Word())
+			if compact {
+				text = fmt.Sprintf("%s%d %s", s.Glyph(), counts[s], s.Word())
+			}
+			parts = append(parts, stateStyle(st, s).Render(text))
+		}
+		out := strings.Join(parts, "  ")
+		rest := 0
+		for _, s := range states[k:] {
+			rest += counts[s]
+		}
+		if rest > 0 {
+			out += " " + st.RepoSelector.Normal.Desc.Render(fmt.Sprintf("+%d", rest))
+		}
+		return out
+	}
+	if v := render(false, len(states)); width <= 0 || lipgloss.Width(v) <= width {
+		return v
+	}
+	for k := len(states); k > 0; k-- {
+		if v := render(true, k); lipgloss.Width(v) <= width {
+			return v
+		}
+	}
+	return ""
 }
 
 // RepoBadge is the session badge of a repository (section 4): the most

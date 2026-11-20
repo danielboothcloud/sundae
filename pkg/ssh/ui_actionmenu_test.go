@@ -130,13 +130,13 @@ func TestActionMenuForges(t *testing.T) {
 	ui, _, ff := richHomeUI(t, 80, 20)
 	// A row not imported has nothing to open, push or copy.
 	uiKey(ui, "3", "j", ".")
-	if got := strings.Join(menuActions(ui), ", "); got != "i: import, r: sync forge" {
+	if got := strings.Join(menuActions(ui), ", "); got != "i: import, u: sync forge" {
 		t.Fatalf("not imported row actions %s", got)
 	}
 	uiKey(ui, "esc", "j", ".")
 	goldenFile(t, "home-forges-menu-80", screenText(ui))
 	got := strings.Join(menuActions(ui), ", ")
-	if got != "enter: open, r: sync, p: push, c: copy clone command" {
+	if got != "enter: open, u: sync, p: push, c: copy clone command" {
 		t.Fatalf("forge row actions %s", got)
 	}
 	// p runs the push, after its confirm.

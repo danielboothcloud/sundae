@@ -204,12 +204,9 @@ func TestHomeFrame(t *testing.T) {
 		t.Run(fmt.Sprint(w), func(t *testing.T) {
 			ui := newTestUI(t, w, 24, &fakeSource{rows: frameRows()})
 			home := screenText(ui)
-			summary := "▲ 1 blocked  ✓ 1 done  ● 2 working"
-			if w < 60 {
-				summary = "▲1 ✓1 ●2"
-			}
-			if !strings.Contains(home, summary) {
-				t.Fatalf("no summary %q:\n%s", summary, home)
+			header := strings.Split(home, "\n")[1]
+			if !strings.Contains(header, "▲ 1 blocked  ✓ 1 done  ● 2 working") || glyphAlone.MatchString(header) {
+				t.Fatalf("summary %q:\n%s", header, home)
 			}
 			uiKey(ui, "2")
 			goldenFile(t, fmt.Sprintf("home-sessions-%d", w), screenText(ui))
@@ -293,7 +290,7 @@ func TestHomeSessionsKeys(t *testing.T) {
 	ui2 := newTestUI(t, 80, 24, errSource{&fakeSource{}})
 	uiKey(ui2, "2")
 	s = screenText(ui2)
-	if !strings.Contains(s, "OpenShell gateway unreachable (r to retry)") || strings.Contains(s, "Bummer") {
+	if !strings.Contains(s, "OpenShell gateway unreachable · r retry") || strings.Contains(s, "Bummer") {
 		t.Fatalf("gateway down:\n%s", s)
 	}
 	goldenFile(t, "home-gateway-down-80", s)
@@ -301,6 +298,21 @@ func TestHomeSessionsKeys(t *testing.T) {
 	if s := screenText(ui2); strings.Contains(s, "unreachable") {
 		t.Fatalf("outage leaked out of the tab:\n%s", s)
 	}
+}
+
+// TestHomeEmptyStates: at 50 columns the gateway-down and empty states sit
+// at the top of the tab, wrapped under their own indent.
+func TestHomeEmptyStates(t *testing.T) {
+	ui := newTestUI(t, 50, 24, errSource{&fakeSource{}})
+	uiKey(ui, "2")
+	goldenFile(t, "home-gateway-down-50", screenText(ui))
+	ui = newTestUI(t, 50, 24, &fakeSource{rows: []sessionctl.Row{}})
+	uiKey(ui, "2")
+	if s := screenText(ui); !strings.Contains(s, "No sessions yet · n new session") {
+		t.Fatalf("empty:\n%s", s)
+	}
+	uiKey(ui, "l")
+	goldenFile(t, "home-signals-empty-50", screenText(ui))
 }
 
 // errSource is a Source whose gateway is down.

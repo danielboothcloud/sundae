@@ -7,14 +7,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"charm.land/ssh"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/danielboothcloud/sundae/pkg/config"
 	"github.com/danielboothcloud/sundae/pkg/events"
 	"github.com/danielboothcloud/sundae/pkg/openshell"
 	"github.com/danielboothcloud/sundae/pkg/sessionctl"
@@ -424,7 +427,7 @@ func TestSignalsGolden(t *testing.T) {
 			m := loaded(t, w-4, 14, src)
 			snap, feed := src.Follow()
 			m.Update(followMsg{snap: snap, feed: feed})
-			keys(m, "e")
+			keys(m, "l")
 			golden(t, fmt.Sprintf("signals-%d", w), view(m))
 		})
 	}
@@ -433,16 +436,16 @@ func TestSignalsGolden(t *testing.T) {
 func TestStatesGolden(t *testing.T) {
 	src := newFakeSource()
 	m := newModel(t, 76, 8, src)
-	if got := view(m); !strings.Contains(got, "Loading sessions…") {
+	if got := view(m); !strings.Contains(got, "Loading sessions …") {
 		t.Fatalf("loading:\n%s", got)
 	}
 	m.Update(listMsg{err: errors.New("dial tcp 127.0.0.1:1: connect: connection refused")})
 	golden(t, "gateway-down-80", view(m))
 	// The gateway being down is an error, not an agent state.
-	if want := m.common.Styles.Prompt.Error.Render("✗ " + gatewayDown); !strings.Contains(m.View(), want) {
+	if want := m.common.Styles.Prompt.Error.Render("✗ Cannot list sessions · r retry"); !strings.Contains(m.View(), want) {
 		t.Fatalf("the gateway-down line is not in the prompt's error style:\n%q", m.View())
 	}
-	if m.Summary(false) != "" {
+	if m.Summary(0) != "" {
 		t.Fatal("summary shown while the gateway is down")
 	}
 	if h := m.ShortHelp(); len(h) == 0 || h[0].Help().Key != "r" {
@@ -457,6 +460,31 @@ func TestStatesGolden(t *testing.T) {
 	n := newModel(t, 46, 8, src)
 	n.Update(listMsg{err: errors.New("connection refused")})
 	golden(t, "gateway-down-50", view(n))
+
+	// The empty signal history wraps under its own indent at 50 columns.
+	e := newModel(t, 46, 8, src)
+	e.Update(listMsg{rows: nil})
+	keys(e, "l")
+	golden(t, "signals-empty-50", view(e))
+}
+
+// TestListFailureNamesRuntime: only an all-OpenShell setup blames the
+// OpenShell gateway; other runtimes get neutral words.
+func TestListFailureNamesRuntime(t *testing.T) {
+	for runtime, want := range map[string]string{
+		config.RuntimeOpenShell: "✗ OpenShell gateway unreachable · r retry",
+		config.RuntimePod:       "✗ Cannot list sessions · r retry",
+	} {
+		cfg := config.DefaultConfig()
+		cfg.Sessions.Runtime = runtime
+		c := common.NewCommon(config.WithContext(context.Background(), cfg), 76, 8)
+		m := New(c, newFakeSource())
+		m.Update(listMsg{err: errors.New("dial tcp 127.0.0.1:1: connect: connection refused")})
+		if v := view(m); !strings.Contains(v, want) || !strings.Contains(v, "connection refused") || strings.Contains(v, "dial tcp") {
+			t.Errorf("%s:\n%s", runtime, v)
+		}
+		m.Close()
+	}
 }
 
 func TestFilterSessions(t *testing.T) {
@@ -555,7 +583,7 @@ func TestSignalsFollowAndPause(t *testing.T) {
 	m := loaded(t, 76, 30, src)
 	snap, feed := src.Follow()
 	m.Update(followMsg{snap: snap, feed: feed})
-	keys(m, "e")
+	keys(m, "l")
 	if ids := sigIDs(m); ids[0] != 9 || len(ids) != 8 {
 		t.Fatalf("snapshot order %v", ids)
 	}
@@ -592,7 +620,7 @@ func TestSignalsAttentionAndFilter(t *testing.T) {
 	src.snap = mockSignals()
 	m := loaded(t, 76, 30, src)
 	m.Update(followMsg{snap: src.snap, feed: &fakeFeed{ch: make(chan []signals.Signal)}})
-	keys(m, "e", "a")
+	keys(m, "l", "a")
 	// blocked, done, and the gap marker.
 	if got := fmt.Sprint(sigIDs(m)); got != "[9 7 5]" {
 		t.Fatalf("attention only: %s", got)
@@ -703,7 +731,7 @@ func TestDeleteConfirm(t *testing.T) {
 		keys(m, "d")
 	}
 	cmd := keys(m, "y")
-	if m.words(m.rows[0]) != "blocked · permission · deleting" {
+	if m.words(m.rows[0]) != "blocked · permission · deleting …" {
 		t.Fatalf("busy words %q", m.words(m.rows[0]))
 	}
 	run(m, cmd, 2)
@@ -744,7 +772,7 @@ func TestSuspendAndResume(t *testing.T) {
 	if fmt.Sprint(src.suspended) != "[claude-1]" {
 		t.Fatalf("suspended %v", src.suspended)
 	}
-	if !strings.Contains(screen(m), "Suspended infra / claude-1; its storage is kept.") {
+	if !strings.Contains(screen(m), "Suspended infra / claude-1; storage kept.") {
 		t.Fatalf("notice:\n%s", view(m))
 	}
 	keys(m, "G") // dotfiles / main is suspended: resume it, without attaching
@@ -784,9 +812,9 @@ func TestPaneSwitch(t *testing.T) {
 	if v := view(m); !strings.Contains(v, "Signals · ") {
 		t.Fatalf("stacked view has no signals section:\n%s", v)
 	}
-	keys(m, "e")
+	keys(m, "l")
 	if m.pane != signalsPane || !strings.Contains(view(m), "‹ Signal history ›") {
-		t.Fatal("e did not open the signal history")
+		t.Fatal("l did not open the signal history")
 	}
 	if h := m.ShortHelp(); h[3].Help().Key != "h" || h[3].Help().Desc != "sessions" {
 		t.Fatalf("help %v", h[3].Help())
@@ -808,9 +836,10 @@ func TestPaneSwitch(t *testing.T) {
 	if m.pane != sessionsPane {
 		t.Fatal("h did not go back")
 	}
-	keys(m, "e", "e")
+	// e no longer switches: l is the one key to the history.
+	keys(m, "e")
 	if m.pane != sessionsPane {
-		t.Fatal("e did not go back")
+		t.Fatal("e switched pane")
 	}
 }
 
@@ -840,21 +869,42 @@ func TestStackedFollowsCursor(t *testing.T) {
 	}
 	// Short: one line.
 	m.SetSize(76, 12)
-	if v := view(m); strings.Contains(v, "e full history") {
+	if v := view(m); strings.Contains(v, "l history") {
 		t.Fatalf("short view kept the full section:\n%s", v)
 	}
 }
 
+// TestSummary: the header counts keep a word with every glyph; the least
+// urgent states give way to "+N" sessions first (PRODUCT.md).
 func TestSummary(t *testing.T) {
 	m := loaded(t, 76, 30, newFakeSource())
-	if got := ansi.Strip(m.Summary(false)); got != "▲ 1 blocked  ✓ 1 done  ● 2 working" {
-		t.Fatalf("summary %q", got)
+	cases := []struct {
+		width int
+		want  string
+	}{
+		{0, "▲ 1 blocked  ✓ 1 done  ● 2 working"},
+		{34, "▲ 1 blocked  ✓ 1 done  ● 2 working"},
+		{33, "▲1 blocked  ✓1 done  ●2 working"},
+		{30, "▲1 blocked  ✓1 done +2"},
+		{21, "▲1 blocked +3"},
+		{13, "▲1 blocked +3"},
+		{12, ""},
 	}
-	if got := ansi.Strip(m.Summary(true)); got != "▲1 ✓1 ●2" {
-		t.Fatalf("narrow summary %q", got)
+	glyphAlone := regexp.MustCompile(`[▲✗✓●○] ?\d+(?: [^a-z]|$)`)
+	for _, tc := range cases {
+		got := ansi.Strip(m.Summary(tc.width))
+		if got != tc.want {
+			t.Errorf("Summary(%d) = %q, want %q", tc.width, got, tc.want)
+		}
+		if tc.width > 0 && lipgloss.Width(got) > tc.width {
+			t.Errorf("Summary(%d) is %d wide", tc.width, lipgloss.Width(got))
+		}
+		if glyphAlone.MatchString(got) {
+			t.Errorf("Summary(%d) = %q has a glyph without its word", tc.width, got)
+		}
 	}
 	m.Update(listMsg{rows: nil})
-	if got := m.Summary(false); got != "" {
+	if got := m.Summary(0); got != "" {
 		t.Fatalf("summary without sessions %q", got)
 	}
 }
@@ -992,7 +1042,7 @@ func TestEditSessionRepos(t *testing.T) {
 
 	// One repository: R refuses to remove it.
 	keys(m, "R")
-	if m.form != nil || !strings.Contains(screen(m), "a session keeps at least one") {
+	if m.form != nil || !strings.Contains(screen(m), "Cannot remove its only repository.") {
 		t.Fatalf("view:\n%s", view(m))
 	}
 }
@@ -1038,7 +1088,7 @@ func TestEnterAttachesFromBothPanes(t *testing.T) {
 	m.handoff = &fakeHandoff{}
 	keys(m, "G")
 	cmd := keys(m, "k", "enter")
-	if m.op == nil || !strings.Contains(view(m), "Attaching to dotfiles / main …  Ctrl-] comes back here.") || !strings.Contains(view(m), "Resuming…") {
+	if m.op == nil || !strings.Contains(view(m), "Attaching to dotfiles / main … · Ctrl-] back") || !strings.Contains(view(m), "Resuming …") {
 		t.Fatalf("attach of a suspended session:\n%s", view(m))
 	}
 	run(m, cmd, 1)
@@ -1051,7 +1101,7 @@ func TestEnterAttachesFromBothPanes(t *testing.T) {
 
 	// From the Signals pane: a listed session attaches...
 	m.Update(followMsg{snap: src.snap, feed: &fakeFeed{ch: make(chan []signals.Signal)}})
-	keys(m, "e", "g")
+	keys(m, "l", "g")
 	keys(m, "enter")
 	if m.op == nil || strings.Join(m.op.repos, ",") != "infra" || m.op.name != "claude-1" {
 		t.Fatalf("op %+v", m.op)
@@ -1069,7 +1119,7 @@ func TestEnterAttachesFromBothPanes(t *testing.T) {
 func TestAttachWithoutTerminal(t *testing.T) {
 	m := loaded(t, 76, 30, newFakeSource())
 	keys(m, "enter")
-	if m.op != nil || !strings.Contains(screen(m), "attaching needs the SSH terminal") {
+	if m.op != nil || !strings.Contains(screen(m), "Needs ssh -t to attach · c copy command") {
 		t.Fatalf("view:\n%s", view(m))
 	}
 }
@@ -1087,11 +1137,11 @@ func TestAttachExec(t *testing.T) {
 	}
 	m := loaded(t, 76, 30, src)
 	m.Update(attachDoneMsg{repos: []string{"infra"}, name: "claude-1", code: 3})
-	if !strings.Contains(screen(m), "infra / claude-1: the program exited with status 3.") {
+	if !strings.Contains(screen(m), "infra / claude-1: exit status 3.") {
 		t.Fatalf("view:\n%s", view(m))
 	}
 	m.Update(attachDoneMsg{repos: []string{"infra"}, name: "claude-1"})
-	if !strings.Contains(screen(m), "Left infra / claude-1. enter goes back.") {
+	if !strings.Contains(screen(m), "Left infra / claude-1.") {
 		t.Fatalf("view:\n%s", view(m))
 	}
 }
@@ -1104,7 +1154,7 @@ func TestAttachHomeKeyReturnsToTab(t *testing.T) {
 	att := &fakeAttacher{src: src, s: &openshell.Session{Name: "claude-1", Repos: []string{"infra"}, Sandbox: "sb-infra-claude-1"}, err: openshell.ErrHome}
 	m := loaded(t, 76, 30, src)
 	keys(m, "G") // the cursor away from the session
-	keys(m, "e")
+	keys(m, "l")
 	ex := newAttachExec(context.Background(), att, nopTerm{}, func() {}, nil, "", "")
 	if err := ex.Run(); err != nil {
 		t.Fatal(err)
@@ -1114,7 +1164,7 @@ func TestAttachHomeKeyReturnsToTab(t *testing.T) {
 	}
 	done := ex.doneMsg(nil)
 	_, after := m.Update(done)
-	if v := screen(m); !strings.Contains(v, "Left infra / claude-1; it keeps running. enter goes back.") || strings.Contains(v, "✗") {
+	if v := screen(m); !strings.Contains(v, "Left infra / claude-1; it keeps running.") || strings.Contains(v, "✗") {
 		t.Fatalf("view:\n%s", v)
 	}
 	if r, ok := m.selected(); m.pane != sessionsPane || !ok || r.Info.Sandbox != "sb-infra-claude-1" {
@@ -1156,7 +1206,7 @@ func TestSetFocus(t *testing.T) {
 	if r, ok := m.selected(); !ok || r.Info.Sandbox != "sb-infra-claude-1" {
 		t.Fatalf("selected %+v", r.Info)
 	}
-	if v := screen(m); !strings.Contains(v, "Left infra / claude-1; it keeps running. enter goes back.") {
+	if v := screen(m); !strings.Contains(v, "Left infra / claude-1; it keeps running.") {
 		t.Fatalf("view:\n%s", v)
 	}
 }
@@ -1206,7 +1256,7 @@ func TestScopeGolden(t *testing.T) {
 			m.Update(followMsg{snap: src.snap, feed: &fakeFeed{ch: make(chan []signals.Signal)}})
 			m.SetScope("sundae")
 			golden(t, fmt.Sprintf("repo-sessions-%d", w), view(m))
-			keys(m, "e")
+			keys(m, "l")
 			golden(t, fmt.Sprintf("repo-signals-%d", w), view(m))
 		})
 	}
@@ -1263,11 +1313,11 @@ func TestScopeKeys(t *testing.T) {
 	}
 	// A repository without sessions says so.
 	m.SetScope("gateway-2")
-	if !strings.Contains(view(m), "No sessions of this repository. Press n to start one.") {
+	if !strings.Contains(view(m), "No sessions of this repository · n new session") {
 		t.Fatalf("empty:\n%s", view(m))
 	}
 	// The header summary still counts every session.
-	if got := ansi.Strip(m.Summary(true)); got != "▲1 ✓1 ●2" {
+	if got := ansi.Strip(m.Summary(0)); got != "▲ 1 blocked  ✓ 1 done  ● 2 working" {
 		t.Fatalf("summary %q", got)
 	}
 }
@@ -1283,7 +1333,7 @@ func TestSyncWithForge(t *testing.T) {
 	if fmt.Sprint(src.synced) != "["+r.Info.Name+"]" {
 		t.Fatalf("synced %v", src.synced)
 	}
-	if !strings.Contains(screen(m), "Synced "+label+":") || !strings.Contains(screen(m), "updated") {
+	if !strings.Contains(screen(m), "Synced "+label+".") {
 		t.Fatalf("notice:\n%s", view(m))
 	}
 
@@ -1304,18 +1354,18 @@ func TestSyncNotice(t *testing.T) {
 		{Repo: "github/me/IaC", Forge: "github", Checkout: openshell.CheckoutUpdate{State: openshell.CheckoutCurrent}},
 		{Repo: "github/me/helm", Forge: "github", Checkout: openshell.CheckoutUpdate{State: openshell.CheckoutFetched, Detail: "the branch has no upstream"}},
 	})
-	want := "Synced homelab: GitOps updated, IaC up to date, helm fetched (the branch has no upstream)."
-	if n.err || n.text != want {
-		t.Fatalf("notice %+v, want %q", n, want)
+	if want := (notice{"Synced homelab; 1 only fetched.", common.MessageSuccess}); n != want {
+		t.Fatalf("notice %+v, want %+v", n, want)
 	}
 	n = syncNotice("homelab", []RepoSync{
 		{Repo: "github/me/IaC", Forge: "github", ForgeErr: "git fetch: HTTP 401", Checkout: openshell.CheckoutUpdate{State: openshell.CheckoutCurrent}},
+		{Repo: "github/me/GitOps", Forge: "github", Checkout: openshell.CheckoutUpdate{State: openshell.CheckoutUpdated}},
 	})
-	if !n.err || !strings.Contains(n.text, "IaC up to date; github sync failed: git fetch: HTTP 401") {
+	if want := (notice{"homelab: 1 of 2 failed to sync.", common.MessageError}); n != want {
 		t.Fatalf("forge failure: %+v", n)
 	}
 	n = syncNotice("homelab", []RepoSync{{Repo: "r", Checkout: openshell.CheckoutUpdate{State: openshell.CheckoutFailed, Detail: "Permission denied"}}})
-	if !n.err || !strings.Contains(n.text, "r fetch failed: Permission denied") {
+	if n.kind != common.MessageError || n.text != "homelab: 1 of 1 failed to sync." {
 		t.Fatalf("fetch failure: %+v", n)
 	}
 }

@@ -2,33 +2,9 @@ package common
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
-
-func TestNoticeView(t *testing.T) {
-	c := NewCommon(context.Background(), 80, 24)
-	ps := c.Styles.Prompt
-	cases := []struct {
-		text  string
-		isErr bool
-		want  string
-	}{
-		{"Started infra / claude-1.", false, ps.Success.Render("✓ Started infra / claude-1.")},
-		{"Deleted mine.", false, ps.Success.Render("✓ Deleted mine.")},
-		{"Cancelled.", false, ps.Notice.Render("Cancelled.")},
-		{"infra is already suspended.", false, ps.Notice.Render("infra is already suspended.")},
-		{"Suspended infra; its storage is kept.", false, ps.Success.Render("✓ Suspended infra; its storage is kept.")},
-		{"cannot list", true, ps.Error.Render("✗ cannot list")},
-		{"✗ scratch: unauthorized", false, ps.Error.Render("✗ scratch: unauthorized")},
-		{"✓ done already", false, ps.Success.Render("✓ done already")},
-		{"two\nlines", true, ps.Error.Render("✗ two lines")},
-	}
-	for _, tc := range cases {
-		if got := c.NoticeView(tc.text, NoticeKind(tc.text, tc.isErr), 80); got != tc.want {
-			t.Errorf("%q: %q, want %q", tc.text, got, tc.want)
-		}
-	}
-}
 
 func TestNoticeViewKinds(t *testing.T) {
 	c := NewCommon(context.Background(), 80, 24)
@@ -44,11 +20,30 @@ func TestNoticeViewKinds(t *testing.T) {
 		{"Kept mine.", MessageInfo, 80, ps.Notice.Render("Kept mine.")},
 		{"Created mine.", MessageSuccess, 80, ps.Success.Render("✓ Created mine.")},
 		{"mine: unauthorized", MessageError, 80, ps.Error.Render("✗ mine: unauthorized")},
+		{"two\nlines", MessageError, 80, ps.Error.Render("✗ two lines")},
 		{"Left infra / claude-1; it keeps running.", MessageInfo, 20, ps.Notice.Render("Left infra / claude…")},
 	}
 	for _, tc := range cases {
 		if got := c.NoticeView(tc.text, tc.kind, tc.width); got != tc.want {
 			t.Errorf("%q: %q, want %q", tc.text, got, tc.want)
 		}
+	}
+}
+
+func TestShortError(t *testing.T) {
+	cases := map[string]string{
+		"dial tcp 127.0.0.1:1: connect: connection refused":                         "connection refused",
+		`Get "https://api.github.com/user/repos": dial tcp: lookup x: no such host`: "host not found",
+		"rpc error: code = Unavailable desc = context deadline exceeded":            "timed out",
+		"forge github: GET /user/repos: 401 Unauthorized: Bad credentials":          "forge github: 401 Unauthorized: Bad credentials",
+		"repository already\nexists":                                                "repository already exists",
+	}
+	for in, want := range cases {
+		if got := ShortError(errors.New(in)); got != want {
+			t.Errorf("ShortError(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if ShortError(nil) != "" {
+		t.Error("ShortError(nil) is not empty")
 	}
 }
