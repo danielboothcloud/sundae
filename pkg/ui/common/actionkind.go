@@ -8,7 +8,7 @@ import (
 )
 
 // ActionKind is what an action does, for its colour: the footer, the
-// action menu and the action bar colour a key by its kind, so the main
+// action menu and the command palette colour a key by its kind, so the main
 // action and the ones that destroy something stand out the same way
 // everywhere.
 type ActionKind int

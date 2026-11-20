@@ -1,6 +1,7 @@
 package footer
 
 import (
+	"sort"
 	"strings"
 
 	"charm.land/bubbles/v2/help"
@@ -40,39 +41,115 @@ func separatorStyle(c common.Common) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(c.Styles.HelpDivider.GetForeground())
 }
 
+// Rank is how much a key earns its place on a narrow help line: lower
+// ranks are kept first, so the context's answer survives a phone width.
+type Rank int
+
+const (
+	// RankMore is "? more", the way to every key that was dropped.
+	RankMore Rank = iota
+	// RankPrimary is the context's answer: enter, y, esc.
+	RankPrimary
+	// RankRow is what to do with the selected row next: space actions, n new.
+	RankRow
+	// RankNav is moving the cursor and switching tabs.
+	RankNav
+	// RankFind is filtering and the signal history.
+	RankFind
+	// RankOther is any other key: mostly row keys the action menu lists too.
+	RankOther
+	// RankQuit is q quit, which the full help always lists.
+	RankQuit
+)
+
+// RankOf returns b's Rank, read from its help as common.KindOf reads its kind.
+func RankOf(b key.Binding) Rank {
+	h := b.Help()
+	switch {
+	case h.Key == "?":
+		return RankMore
+	case h.Desc == "quit":
+		return RankQuit
+	case common.KindOf(b) == common.ActionPrimary || h.Key == "esc" || h.Key == "y":
+		return RankPrimary
+	case h.Desc == "actions" || h.Desc == "new" || strings.HasPrefix(h.Desc, "new "):
+		return RankRow
+	case h.Desc == "move" || h.Desc == "tabs":
+		return RankNav
+	case h.Desc == "filter" || h.Desc == "history":
+		return RankFind
+	}
+	return RankOther
+}
+
+// sepWidth is the width of the " • " between help items.
+const sepWidth = 3
+
+// shown reports whether b has a place on a help line.
+func shown(b key.Binding) bool {
+	return b.Enabled() && (b.Help().Key != "" || b.Help().Desc != "")
+}
+
+// itemWidth is the width of b's "key desc".
+func itemWidth(b key.Binding) int {
+	return ansi.StringWidth(b.Help().Key) + 1 + ansi.StringWidth(b.Help().Desc)
+}
+
+// Fit returns the enabled bindings of kb that fit a help line width cells
+// wide, in kb's order: whole keys, taken by Rank, then by order. width <= 0
+// keeps them all.
+func Fit(kb []key.Binding, width int) []key.Binding {
+	var on []key.Binding
+	total := -sepWidth
+	for _, b := range kb {
+		if shown(b) {
+			on = append(on, b)
+			total += sepWidth + itemWidth(b)
+		}
+	}
+	if width <= 0 || total <= width {
+		return on
+	}
+	order := make([]int, len(on))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(i, j int) bool { return RankOf(on[order[i]]) < RankOf(on[order[j]]) })
+	// Once a key does not fit, no lower rank may take its place; keys of
+	// its own rank still may.
+	keep := make([]bool, len(on))
+	used, full := -sepWidth, Rank(-1)
+	for _, i := range order {
+		r := RankOf(on[i])
+		if full >= 0 && r > full {
+			break
+		}
+		if w := sepWidth + itemWidth(on[i]); used+w <= width {
+			keep[i] = true
+			used += w
+		} else {
+			full = r
+		}
+	}
+	var out []key.Binding
+	for i, b := range on {
+		if keep[i] {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
 // ShortView renders bindings as a short help line: "key desc" items
 // separated by " • ", each key (and the words of one that deletes or ends
 // something) coloured by its action kind (common.KindOf). Disabled
-// bindings are left out. With width > 0 the line ends with "…" where the
-// next item does not fit.
+// bindings are left out. With width > 0 only the keys Fit keeps are shown.
 func ShortView(c common.Common, kb []key.Binding, width int) string {
-	sep := separatorStyle(c).Render(" • ")
-	sepW := lipgloss.Width(sep)
-	ellipsis := separatorStyle(c).Render(" …")
-	var b strings.Builder
-	total := 0
-	for _, k := range kb {
-		if !k.Enabled() || (k.Help().Key == "" && k.Help().Desc == "") {
-			continue
-		}
-		item := c.KeyStyle(k).Render(k.Help().Key) + " " + c.DescStyle(k).Render(k.Help().Desc)
-		w := lipgloss.Width(item)
-		if total > 0 {
-			w += sepW
-		}
-		if width > 0 && total+w > width {
-			if total+lipgloss.Width(ellipsis) <= width {
-				b.WriteString(ellipsis)
-			}
-			break
-		}
-		if total > 0 {
-			b.WriteString(sep)
-		}
-		b.WriteString(item)
-		total += w
+	items := make([]string, 0, len(kb))
+	for _, k := range Fit(kb, width) {
+		items = append(items, c.KeyStyle(k).Render(k.Help().Key)+" "+c.DescStyle(k).Render(k.Help().Desc))
 	}
-	return b.String()
+	return strings.Join(items, separatorStyle(c).Render(" • "))
 }
 
 // New creates a new Footer.
@@ -121,38 +198,15 @@ func (f *Footer) view(style lipgloss.Style) string {
 	s := style.Width(f.common.Width)
 	helpView := f.help.View(f.keymap)
 	if !f.help.ShowAll {
-		helpView = f.shortView()
-	}
-	if !f.help.ShowAll {
-		// The help model adds items past its width when no "…" fits
-		// after the last one that does; keep the short help on its line.
-		helpView = ansi.Truncate(helpView, max(f.common.Width-f.common.Styles.Footer.GetHorizontalFrameSize(), 0), "…")
+		// The left-aligned keys take the right padding too: at 50 columns
+		// that cell is what lets n new stay next to the row's actions.
+		s = s.PaddingRight(0)
+		helpView = ShortView(f.common, f.keymap.ShortHelp(), f.help.Width()+style.GetPaddingRight())
 	}
 	return f.common.Zone.Mark(
 		"footer",
 		s.Render(helpView),
 	)
-}
-
-// shortView renders the short help, keeping a final "?" entry visible when
-// the actions before it do not all fit.
-func (f *Footer) shortView() string {
-	kb := f.keymap.ShortHelp()
-	n := len(kb)
-	width := f.help.Width()
-	if n < 2 || kb[n-1].Help().Key != "?" {
-		return ShortView(f.common, kb, width)
-	}
-	last := ShortView(f.common, kb[n-1:], 0)
-	sep := separatorStyle(f.common).Render(" • ")
-	rest := ShortView(f.common, kb[:n-1], 0)
-	if room := width - lipgloss.Width(sep) - lipgloss.Width(last); lipgloss.Width(rest) > room {
-		rest = ShortView(f.common, kb[:n-1], max(room, 1))
-	}
-	if rest == "" {
-		return last
-	}
-	return rest + sep + last
 }
 
 // ShortHelp returns the short help key bindings.

@@ -2,6 +2,7 @@ package ssh
 
 import (
 	"errors"
+	"slices"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -103,21 +104,20 @@ func (ui *UI) selection() *selection.Selection {
 	return nil
 }
 
-// footerView renders the footer; on the home page the action bar, the message
-// slot and the help, each line kept when empty so the tab's height never shifts.
+// footerView renders the footer; on the home page the footer's margin, the
+// message slot and the help, the slot kept when empty so the tab's height never shifts.
 func (ui *UI) footerView() string {
 	if s := ui.selection(); s != nil && ui.activePage == selectionPage && ui.state == readyState {
 		st := ui.common.Styles
 		w := ui.common.Width - st.App.GetHorizontalFrameSize()
-		inner := w - st.Footer.GetHorizontalFrameSize()
-		bar := st.Footer.Width(w).Render(s.ActionBar(inner))
-		return lipgloss.JoinVertical(lipgloss.Left, bar, ui.messageView(w), ui.footer.ViewNoMargin())
+		return lipgloss.NewStyle().MarginTop(st.Footer.GetMarginTop()).Render(
+			lipgloss.JoinVertical(lipgloss.Left, ui.messageView(w), ui.footer.ViewNoMargin()))
 	}
 	return ui.footer.View()
 }
 
 // messageView is the message slot, the active page's message at the help's
-// inset; it takes the margin line above the help, so it costs the tabs no row.
+// inset, on the line directly above the help.
 func (ui *UI) messageView(width int) string {
 	style := ui.common.Styles.Footer.UnsetMarginTop().Width(width)
 	m, ok := ui.pages[ui.activePage].(common.Messenger)
@@ -171,6 +171,10 @@ func (ui *UI) ShortHelp() []key.Binding {
 	case readyState:
 		b = append(b, ui.pages[ui.activePage].ShortHelp()...)
 	}
+	// q ranks lowest, so it shows only where every other key fits.
+	if !ui.IsFiltering() {
+		b = append(b, ui.common.KeyMap.Quit)
+	}
 	if !ui.capturing() {
 		more := ui.common.KeyMap.Help
 		more.SetHelp("?", "more")
@@ -194,8 +198,12 @@ func (ui *UI) FullHelp() [][]key.Binding {
 	if !ui.IsFiltering() {
 		h = append(h, ui.common.KeyMap.Quit)
 	}
-	b = append(b, h)
-	return b
+	// In the first column, which narrow widths never drop: the short help drops q first.
+	if len(b) > 0 {
+		b[0] = append(slices.Clone(b[0]), h...)
+		return b
+	}
+	return append(b, h)
 }
 
 // SetSize implements common.Component.

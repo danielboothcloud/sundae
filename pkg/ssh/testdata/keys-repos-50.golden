@@ -1,0 +1,23 @@
+
+    Sundae                              ▲1 ✓1 ●2
+
+  ‹ Repositories ›
+
+  ┃ sundae              ✓ 2 sessions   github ↑3
+  ┃ about sundae
+  ┃ jj git clone ssh://localhost:23231/sundae.g…
+
+    infra               ▲ 1 session    local
+    about infra
+    jj git clone ssh://localhost:23231/infra.gi…
+
+    scratch                            local
+    about scratch
+    jj git clone ssh://localhost:23231/scratch.…
+
+
+
+
+
+
+   enter open • space actions • ? more

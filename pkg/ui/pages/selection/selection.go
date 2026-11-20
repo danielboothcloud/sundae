@@ -3,6 +3,7 @@ package selection
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -364,8 +365,7 @@ func (s *Selection) ShortHelp() []key.Binding {
 		return s.capturingHelp()
 	}
 	// Every tab's help reads the same way: move, the main action, the
-	// tab's own keys, filter, then switching tabs. The selected row's
-	// other actions are in its action bar and menu.
+	// row's action menu, the tab's own keys, filter, then switching tabs.
 	var kb []key.Binding
 	switch s.activePane {
 	case selectorPane:
@@ -388,14 +388,25 @@ func (s *Selection) ShortHelp() []key.Binding {
 	case sessionsPane:
 		s.bindSessions()
 		kb = s.sessions.ShortHelp()
-		if len(kb) > 0 && kb[0].Help().Key == "enter" {
-			// After leaving an attached session: enter goes back, q quits; both must fit.
-			kb = append([]key.Binding{kb[0], s.common.KeyMap.Quit}, kb[1:]...)
-		}
 	default:
 		return []key.Binding{s.tabsHelp()}
 	}
-	return append(append([]key.Binding{s.common.KeyMap.UpDown}, kb...), s.tabsHelp())
+	return append(append([]key.Binding{s.common.KeyMap.UpDown}, s.withActions(kb)...), s.tabsHelp())
+}
+
+// withActions puts the action menu's key after the tab's main key when the
+// selected row has actions, so the help line points to the row's other actions.
+func (s *Selection) withActions(kb []key.Binding) []key.Binding {
+	if len(s.rowActions()) == 0 {
+		return kb
+	}
+	open := actionmenu.OpenKey
+	open.SetHelp("space", "actions")
+	at := 0
+	if len(kb) > 0 && common.KindOf(kb[0]) == common.ActionPrimary {
+		at = 1
+	}
+	return slices.Insert(slices.Clone(kb), at, open)
 }
 
 // tabsHelp is the help entry for switching tabs.

@@ -1,0 +1,23 @@
+
+    Sundae                              ▲1 ✓1 ●2
+
+  ‹ Sessions ›
+
+  ╭────────────────────────────────────────────╮
+  │ Commands                                   │
+  │ : █                                        │
+  │ > 1      Go to Repositories                │
+  │   2      Go to Sessions                    │
+  │   3      Go to Forges                      │
+  │   4      Go to About                       │
+  │   enter  Repositories › Open sundae        │
+  │   s      Repositories › New session sunda… │
+  │   c      Repositories › Copy command sund… │
+  │   enter  Sessions › Attach infra / claude… │
+  │   z      Sessions › Suspend infra / claud… │
+  │   A      Sessions › Add repos infra / cla… │
+  ╰────────────────────────────────────────────╯
+   Signals · infra / claude-1: none yet
+
+
+   ↑↓ move • enter run • esc close

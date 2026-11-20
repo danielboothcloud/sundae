@@ -35,7 +35,7 @@ func TestPaletteRunsCrossTab(t *testing.T) {
 	if s := screenText(ui); !strings.Contains(s, "type to search • ↑↓ move • enter run • esc close") {
 		t.Fatalf("footer:\n%s", s)
 	}
-	for _, want := range []string{"Go to Sessions  2", "Sessions › Delete  d"} {
+	for _, want := range []string{"Go to Sessions  2", "Sessions › Delete infra / claude-1  d"} {
 		if !strings.Contains(paletteEntries(ui), want) {
 			t.Fatalf("no %q in\n%s", want, paletteEntries(ui))
 		}
@@ -49,7 +49,7 @@ func TestPaletteRunsCrossTab(t *testing.T) {
 	// From Repositories, Delete runs on the Sessions tab, after its confirm.
 	uiKey(ui, ":")
 	paletteType(ui, "sessions delete")
-	if got := paletteEntries(ui); got != "Sessions › Delete  d" {
+	if got := paletteEntries(ui); got != "Sessions › Delete infra / claude-1  d" {
 		t.Fatalf("filtered:\n%s", got)
 	}
 	uiKey(ui, "enter")

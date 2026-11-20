@@ -1,0 +1,23 @@
+
+    Sundae                                  ▲ 1 blocked  ✓ 1 done  ● 2 working
+
+    Repositories  • Sessions    Forges    About
+
+   Session╭──────────────────────────────────────────────────────────╮essions
+          │ Commands                                                 │
+  ┃ ▲ infr│ : █                                                      │ked   5m
+  ┃   Appl│ > 1      Go to Repositories                              │
+          │   2      Go to Sessions                                  │
+    ✓ sund│   3      Go to Forges                                    │one   5m
+      Impl│   4      Go to About                                     │
+          │   enter  Repositories › Open sundae                      │
+    ● gate│   s      Repositories › New session sundae               │ing   5m
+      bash│   c      Repositories › Copy command sundae              │
+          │   enter  Sessions › Attach infra / claude-1              │
+          │   z      Sessions › Suspend infra / claude-1             │
+          │   A      Sessions › Add repos infra / claude-1           │
+   Signals╰──────────────────────────────────────────────────────────╯
+     No signals from this session yet.
+
+
+   type to search • ↑↓ move • enter run • esc close

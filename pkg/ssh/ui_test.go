@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -242,7 +243,7 @@ func TestHomeWithoutSessions(t *testing.T) {
 	}
 	// ? shows every key, the tab keys too.
 	uiKey(ui, "?")
-	if s := screenText(ui); !strings.Contains(s, "1-2 tab") || !strings.Contains(s, "? less") {
+	if s := screenText(ui); !strings.Contains(s, "1-2 tab") || !regexp.MustCompile(`\?\s+less`).MatchString(s) {
 		t.Fatalf("full help:\n%s", s)
 	}
 }

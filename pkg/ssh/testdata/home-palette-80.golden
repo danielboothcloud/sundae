@@ -9,12 +9,12 @@
           │ > 1      Go to Repositories                              │
           │   2      Go to Sessions                                  │
           │   3      Go to About                                     │
-          │   enter  Sessions › Attach                               │
-          │   z      Sessions › Suspend                              │
-          │   A      Sessions › Add repos                            │
-          │   u      Sessions › Sync with forge                      │
-          │   c      Sessions › Copy attach command                  │
-          │   d      Sessions › Delete                               │
+          │   enter  Sessions › Attach infra / claude-1              │
+          │   z      Sessions › Suspend infra / claude-1             │
+          │   A      Sessions › Add repos infra / claude-1           │
+          │   u      Sessions › Sync with forge infra / claude-1     │
+          │   c      Sessions › Copy attach command infra / claude-… │
+          │   d      Sessions › Delete infra / claude-1              │
           ╰──────────────────────────────────────────────────────────╯
 
 

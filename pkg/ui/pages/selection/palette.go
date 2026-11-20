@@ -33,7 +33,8 @@ type palette struct {
 }
 
 // commands are every home tab's entries: the tab switches, each tab's
-// actions for its selected row and a sync of each forge listed.
+// actions for its selected row, named with the row, and a sync of each
+// forge listed. A tab with no row has no actions here.
 func (s *Selection) commands() []command {
 	var cs []command
 	for i, p := range s.panes {
@@ -44,12 +45,14 @@ func (s *Selection) commands() []command {
 		if p == sessionsPane {
 			s.bindSessions()
 		}
+		target := s.rowTitle(p)
 		for _, b := range s.paneActions(p) {
-			if !b.Enabled() || len(b.Keys()) == 0 {
+			// A row's "sync forge" is the per-forge entry below, which names the forge.
+			if !b.Enabled() || len(b.Keys()) == 0 || target == "" || (p == forgesPane && b.Help().Desc == "sync forge") {
 				continue
 			}
 			nb := b
-			nb.SetHelp(actionmenu.KeyLabel(b), p.String()+" › "+actionmenu.Label(b))
+			nb.SetHelp(actionmenu.KeyLabel(b), p.String()+" › "+actionmenu.Label(b)+" "+target)
 			cs = append(cs, command{pane: p, binding: nb})
 		}
 	}

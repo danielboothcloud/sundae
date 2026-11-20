@@ -623,10 +623,14 @@ func (m *Sessions) Actions() []key.Binding {
 	return append(as, m.keys.Copy, m.keys.Delete)
 }
 
-// ActionsTitle names the selected row for the action menu.
+// ActionsTitle names the selected row for the action menu and the palette;
+// a signal by its session.
 func (m *Sessions) ActionsTitle() string {
 	if m.pane == signalsPane {
-		return "Signal"
+		if vis := m.visibleSignals(); m.sigCursor < len(vis) {
+			return m.signalWhere(vis[m.sigCursor])
+		}
+		return ""
 	}
 	if r, ok := m.selected(); ok {
 		return sessionLabel(r.Info.Name, rowRepos(r))

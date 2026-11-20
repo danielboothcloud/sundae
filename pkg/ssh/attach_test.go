@@ -459,7 +459,8 @@ func TestCLIHomeKeyOpensSessionsScreen(t *testing.T) {
 	send("x\x1b[93;5u")
 	out.waitFor(t, mark, "Left r / tool; it keeps running. enter goes back.")
 	out.waitFor(t, mark, "enter attach")
-	out.waitFor(t, mark, "q quit")
+	// q quit ranks lowest; at 80 columns ? lists it.
+	out.waitFor(t, mark, "? more")
 	out.waitFor(t, mark, "idle") // listed: enter has a row to attach to
 	if in, _ := cli.shell.seen(); in != "x" {
 		t.Errorf("the session read %q, want x", in)
