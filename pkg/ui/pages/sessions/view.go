@@ -13,6 +13,7 @@ import (
 	"github.com/danielboothcloud/sundae/pkg/signals"
 	"github.com/danielboothcloud/sundae/pkg/ui/common"
 	"github.com/danielboothcloud/sundae/pkg/ui/components/footer"
+	"github.com/danielboothcloud/sundae/pkg/ui/components/prompt"
 	"github.com/danielboothcloud/sundae/pkg/ui/styles"
 )
 
@@ -87,7 +88,7 @@ func (m *Sessions) View() string {
 			lines = append(lines, "", m.paneHeader(w), "")
 		}
 		body := h - len(lines)
-		if m.notice.text != "" || m.inlineConfirm() {
+		if m.notice.text != "" {
 			body -= 2
 		}
 		if m.pane == signalsPane {
@@ -96,12 +97,7 @@ func (m *Sessions) View() string {
 			lines = append(lines, m.stackedView(w, body)...)
 		}
 	}
-	if m.inlineConfirm() {
-		for len(lines) < h-2 {
-			lines = append(lines, "")
-		}
-		lines = append(lines, "", " "+m.confirm.View(w-2))
-	} else if m.notice.text != "" {
+	if m.notice.text != "" {
 		for len(lines) < h-2 {
 			lines = append(lines, "")
 		}
@@ -347,7 +343,8 @@ func (m *Sessions) sessionsView(w, h int) []string {
 	if len(vis) == 0 {
 		return []string{" " + st.RepoSelector.Normal.Desc.Render("No sessions match “"+m.rowQuery+"”.")}
 	}
-	per := max((h+1)/m.sessionRowHeight(), 1)
+	// The confirm's extra lines take the room of rows, so its row stays shown.
+	per := max((h+1-m.confirmExtra(w))/m.sessionRowHeight(), 1)
 	start := (m.cursor / per) * per
 	var lines []string
 	for i := start; i < len(vis) && i < start+per; i++ {
@@ -397,28 +394,57 @@ func (m *Sessions) sessionRow(r sessionctl.Row, selected bool, w int) []string {
 		msg = "(copied to clipboard)"
 	}
 
+	// An open confirm ends the first line with its question and takes the
+	// message's place.
+	confirm := m.confirmIn(r)
+	lw := cw
+	if confirm != nil {
+		lw -= confirm.AskWidth()
+	}
 	var lines []string
 	if m.narrow() {
 		lines = []string{
-			glyph + " " + sel.Title.Render(common.TruncateString(where, cw-2)),
+			glyph + " " + sel.Title.Render(common.TruncateString(where, lw-2)),
 			"  " + sel.Desc.Render(rt) + ss.Render(common.TruncateString(words, cw-2-ageWidth-len(rt))) + sel.Updated.Render(strings.TrimRight("  "+age, " ")),
 			"  " + msgStyle.Render(common.TruncateString(msg, cw-2)),
 		}
 	} else {
 		right := rt + words + "  " + fmt.Sprintf("%*s", ageWidth-2, age)
-		if lipgloss.Width(right) > cw/2 {
-			words = common.TruncateString(words, max(cw/2-ageWidth-len(rt), 1))
+		if lipgloss.Width(right) > lw/2 {
+			words = common.TruncateString(words, max(lw/2-ageWidth-len(rt), 1))
 			right = rt + words + "  " + fmt.Sprintf("%*s", ageWidth-2, age)
 		}
-		where = common.TruncateString(where, cw-2-lipgloss.Width(right)-2)
-		gap := max(cw-2-lipgloss.Width(where)-lipgloss.Width(right), 2)
+		where = common.TruncateString(where, lw-2-lipgloss.Width(right)-2)
+		gap := max(lw-2-lipgloss.Width(where)-lipgloss.Width(right), 2)
 		lines = []string{
 			glyph + " " + sel.Title.Render(where) + strings.Repeat(" ", gap) +
 				sel.Desc.Render(rt) + ss.Render(words) + sel.Updated.Render("  "+fmt.Sprintf("%*s", ageWidth-2, age)),
 			"  " + msgStyle.Render(common.TruncateString(msg, cw-2)),
 		}
 	}
+	if confirm != nil {
+		lines[0] = confirm.EndLine(lines[0], cw)
+		lines = append(lines[:len(lines)-1], indent(confirm.Lines(cw-2, 0), "  ")...)
+	}
 	return strings.Split(base.Render(strings.Join(lines, "\n")), "\n")
+}
+
+// confirmIn is the open confirm when it is drawn in row r; nil otherwise.
+func (m *Sessions) confirmIn(r sessionctl.Row) *prompt.Confirm {
+	if m.confirm == nil || r.Info.Sandbox != m.target.Info.Sandbox {
+		return nil
+	}
+	return m.confirm
+}
+
+// confirmExtra is how many lines the open confirm adds to its row in a
+// tab w columns wide.
+func (m *Sessions) confirmExtra(w int) int {
+	if m.confirm == nil {
+		return 0
+	}
+	cw := max(w-m.common.Styles.RepoSelector.Active.Base.GetHorizontalFrameSize(), 10)
+	return len(m.confirm.Lines(cw-2, 0)) - 1
 }
 
 func (m *Sessions) signalsView(w, h int) []string {
@@ -498,11 +524,6 @@ func (m *Sessions) signalWhere(s signals.Signal) string {
 	return w
 }
 
-// inlineConfirm reports whether the confirm shows in the tab rather than
-// in the frame's footer: on the repository page, whose footer is the
-// help.
-func (m *Sessions) inlineConfirm() bool { return m.confirm != nil && m.scope != "" }
-
 // truncate cuts s to n cells, ending in "…" when cut.
 func truncate(s string, n int) string { return ansi.Truncate(s, n, "…") }
 
@@ -514,22 +535,13 @@ func pad(s string, n int) string {
 	return s
 }
 
-// FooterLine is what replaces the help line: the end-session confirm
-// (section 5b). "" when there is none.
-func (m *Sessions) FooterLine(width int) string {
-	if m.confirm == nil || m.inlineConfirm() {
-		return ""
-	}
-	return m.confirm.View(width)
-}
-
 // ShortHelp implements help.KeyMap.
 func (m *Sessions) ShortHelp() []key.Binding {
 	switch {
 	case m.form != nil:
 		return m.form.ShortHelp()
 	case m.confirm != nil:
-		return []key.Binding{m.confirm.Yes, m.confirm.No}
+		return m.confirm.ShortHelp()
 	case m.op != nil:
 		return []key.Binding{m.keys.Cancel}
 	case m.typing:

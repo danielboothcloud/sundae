@@ -209,8 +209,10 @@ type Sessions struct {
 	// is open.
 	editing *prefill
 	confirm *prompt.Confirm
-	// onYes is what a yes to the confirm does.
-	onYes   func() tea.Cmd
+	// onYes is what a yes to the confirm does, kept the notice of a no.
+	onYes func() tea.Cmd
+	kept  string
+	// target is the row the confirm is drawn in.
 	target  sessionctl.Row
 	op      *operation
 	opLines []string
@@ -504,6 +506,10 @@ func (m *Sessions) setRows(rows []sessionctl.Row) {
 			delete(m.busy, k)
 		}
 	}
+	if m.confirm != nil && m.rowIndex(m.target.Info.Sandbox) < 0 {
+		// Its row is gone (deleted elsewhere): nothing is left to ask about.
+		m.confirm, m.onYes, m.kept = nil, nil, ""
+	}
 	m.sortRows()
 }
 
@@ -715,11 +721,12 @@ func (m *Sessions) onKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		m.confirm = nil
-		yes := m.onYes
-		m.onYes = nil
+		yes, kept := m.onYes, m.kept
+		m.onYes, m.kept = nil, ""
 		if res == prompt.Submitted && yes != nil {
 			return yes()
 		}
+		m.notice = notice{text: kept}
 		return nil
 	case m.form != nil:
 		res, cmd := m.form.Update(msg)
@@ -896,9 +903,8 @@ func (m *Sessions) onSessionsKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		return m.syncCmd(r)
 	case key.Matches(msg, m.keys.Delete):
-		m.target = r
-		m.ask("Delete "+label+"?  Sandbox, storage and unpushed work are lost.",
-			func() tea.Cmd { return m.deleteCmd(r) })
+		m.ask(r, prompt.NewConfirm(m.common, "delete", "delete?", "loses sandbox, storage, unpushed work"),
+			"Kept "+label+".", func() tea.Cmd { return m.deleteCmd(r) })
 		return nil
 	case key.Matches(msg, m.keys.Suspend):
 		if m.busy[r.Info.Sandbox] != "" {
@@ -1119,10 +1125,9 @@ func (m *Sessions) SetFocus(f Focus) {
 	}
 }
 
-// ask opens the confirm with question; yes runs onYes.
-func (m *Sessions) ask(question string, onYes func() tea.Cmd) {
-	m.confirm = prompt.NewConfirm(m.common, question)
-	m.onYes = onYes
+// ask opens c in row r: yes runs onYes, no shows the kept notice.
+func (m *Sessions) ask(r sessionctl.Row, c *prompt.Confirm, kept string, onYes func() tea.Cmd) {
+	m.target, m.confirm, m.kept, m.onYes = r, c, kept, onYes
 }
 
 func (m *Sessions) deleteCmd(r sessionctl.Row) tea.Cmd {

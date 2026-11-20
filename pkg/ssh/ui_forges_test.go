@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/x/ansi"
 	"github.com/danielboothcloud/sundae/pkg/backend"
 	"github.com/danielboothcloud/sundae/pkg/events"
 	"github.com/danielboothcloud/sundae/pkg/forge"
@@ -247,21 +246,22 @@ func TestHomeForgesTab(t *testing.T) {
 			ui, _, ff := richHomeUI(t, w, 20)
 			uiKey(ui, "3")
 			goldenFile(t, fmt.Sprintf("home-forges-%d", w), screenText(ui))
-			// p pushes, after a confirm naming the branch, in the footer;
-			// the question is cut to leave room for the answers.
+			// p pushes, after a confirm in the row naming the branch; the
+			// help line shows only its keys.
 			uiKey(ui, "j", "j", "p")
 			s := screenText(ui)
 			last := s[strings.LastIndex(s, "\n")+1:]
-			if !strings.HasPrefix(last, "   Push main of sundae to github") || !strings.HasSuffix(last, "y yes • N no") ||
-				ansi.StringWidth(last) != w-3 {
-				// The line ends inside the right margin (2) and the
-				// footer's padding (1).
-				t.Fatalf("confirm %q", last)
+			if !strings.Contains(s, "push main → github?") || last != "   y push • esc cancel" {
+				t.Fatalf("confirm %q:\n%s", last, s)
 			}
-			// q is an answer, not quit.
+			// q is ignored, not quit and not an answer; n cancels.
 			uiKey(ui, "q")
-			if len(ff.pushes) != 0 || strings.Contains(screenText(ui), "Push main of") {
-				t.Fatal("q did not cancel the push")
+			if len(ff.pushes) != 0 || !strings.Contains(screenText(ui), "push main → github?") {
+				t.Fatalf("q answered the confirm:\n%s", screenText(ui))
+			}
+			uiKey(ui, "n")
+			if s := screenText(ui); len(ff.pushes) != 0 || !strings.Contains(s, "Not pushed.") {
+				t.Fatalf("n:\n%s", s)
 			}
 			uiKey(ui, "p", "y")
 			waitPushes(t, ff, 1)
@@ -347,12 +347,15 @@ func TestRepoSessionsKeys(t *testing.T) {
 	if ui.activePage != repoPage {
 		t.Fatal("esc left the repository while the filter was open")
 	}
-	// The delete confirm shows in the tab.
+	// The delete confirm shows in the selected row; esc keeps it.
 	uiKey(ui, "d")
-	if s := screenText(ui); !strings.Contains(s, "Delete sundae / forge-sync?") {
+	if s := screenText(ui); !strings.Contains(s, "┃ ✓ forge-sync") || !strings.Contains(s, "delete?") || !strings.Contains(s, "y delete • esc keep") {
 		t.Fatalf("confirm:\n%s", s)
 	}
 	uiKey(ui, "esc")
+	if s := screenText(ui); !strings.Contains(s, "Kept sundae / forge-sync.") || ui.activePage != repoPage {
+		t.Fatalf("esc:\n%s", s)
+	}
 	// e shows the repository's signals.
 	uiKey(ui, "e")
 	if s := screenText(ui); !strings.Contains(s, "‹ Signal history ›") {

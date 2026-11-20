@@ -13,6 +13,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/danielboothcloud/sundae/pkg/proto"
 	"github.com/danielboothcloud/sundae/pkg/ui/common"
+	"github.com/danielboothcloud/sundae/pkg/ui/components/prompt"
 	"github.com/danielboothcloud/sundae/pkg/ui/pages/sessions"
 	"github.com/dustin/go-humanize"
 )
@@ -108,6 +109,8 @@ type ItemDelegate struct {
 	// the longest title, so the badges line up from row to row.
 	updatedW int
 	titleW   int
+	// confirm is the open confirm drawn in the row of id; nil for none.
+	confirm func(id string) *prompt.Confirm
 }
 
 // NewItemDelegate creates a new ItemDelegate. b holds the badges it
@@ -194,8 +197,18 @@ func (d *ItemDelegate) Render(w io.Writer, m list.Model, index int, listItem lis
 		styles = d.common.Styles.RepoSelector.Active
 	}
 
+	var confirm *prompt.Confirm
+	if d.confirm != nil {
+		confirm = d.confirm(i.ID())
+	}
+	// cw is the row's room; lw what its first line leaves for the question.
+	cw := m.Width() - styles.Base.GetHorizontalFrameSize()
+	lw := cw
+	if confirm != nil {
+		lw -= confirm.AskWidth()
+	}
 	title := i.Title()
-	title = common.TruncateString(title, m.Width()-styles.Base.GetHorizontalFrameSize())
+	title = common.TruncateString(title, lw)
 	if i.repo.IsPrivate() {
 		title += " 🔒"
 	}
@@ -205,14 +218,14 @@ func (d *ItemDelegate) Render(w io.Writer, m list.Model, index int, listItem lis
 	updatedStr := updated(i)
 	var right string
 	if d.badges != nil && (d.badges.sessionsOn || d.badges.originsOn) {
-		right = d.badgeColumns(i, styles.Updated, m.Width()-styles.Base.GetHorizontalFrameSize(), lipgloss.Width(title))
+		right = d.badgeColumns(i, styles.Updated, lw, lipgloss.Width(title))
 	} else {
-		if m.Width()-styles.Base.GetHorizontalFrameSize()-lipgloss.Width(updatedStr)-lipgloss.Width(title) <= 0 {
+		if lw-lipgloss.Width(updatedStr)-lipgloss.Width(title) <= 0 {
 			updatedStr = ""
 		}
 		updatedStyle := styles.Updated.
 			Align(lipgloss.Right).
-			Width(m.Width() - styles.Base.GetHorizontalFrameSize() - lipgloss.Width(title))
+			Width(lw - lipgloss.Width(title))
 		right = updatedStyle.Render(updatedStr)
 	}
 
@@ -228,28 +241,38 @@ func (d *ItemDelegate) Render(w io.Writer, m list.Model, index int, listItem lis
 	}
 	title = styles.Title.Render(title)
 	desc := i.Description()
-	desc = common.TruncateString(desc, m.Width()-styles.Base.GetHorizontalFrameSize())
+	desc = common.TruncateString(desc, cw)
 	desc = styles.Desc.Render(desc)
 
-	s.WriteString(lipgloss.JoinHorizontal(lipgloss.Bottom, title, right))
-	s.WriteRune('\n')
-	s.WriteString(desc)
-	s.WriteRune('\n')
-
-	cmd := i.Command()
-	cmdStyler := styles.Command.Render
-	if d.copiedID == i.ID() {
-		cmd = "(copied to clipboard)"
-		cmdStyler = styles.Desc.Render
-		d.copiedID = ""
+	head := lipgloss.JoinHorizontal(lipgloss.Bottom, title, right)
+	body := []string{desc}
+	if confirm != nil {
+		// The row's height is fixed: a wrapped confirm takes the command's
+		// line too.
+		head = confirm.EndLine(head, cw)
+		body = confirm.Lines(cw, 2)
 	}
-	cmd = common.TruncateString(cmd, m.Width()-styles.Base.GetHorizontalFrameSize())
-	s.WriteString(cmdStyler(cmd))
+	s.WriteString(head)
+	s.WriteRune('\n')
+	s.WriteString(strings.Join(body, "\n"))
+	if len(body) == 1 {
+		s.WriteRune('\n')
+		s.WriteString(d.commandLine(i, styles.Command, styles.Desc, cw))
+	}
 	fmt.Fprint(w, //nolint:errcheck
 		d.common.Zone.Mark(i.ID(),
 			styles.Base.Render(s.String()),
 		),
 	)
+}
+
+// commandLine is a row's clone command, or that it was just copied.
+func (d *ItemDelegate) commandLine(i Item, command, desc lipgloss.Style, cw int) string {
+	if d.copiedID == i.ID() {
+		d.copiedID = ""
+		return desc.Render(common.TruncateString("(copied to clipboard)", cw))
+	}
+	return command.Render(common.TruncateString(i.Command(), cw))
 }
 
 // Badge column widths: "● 12 sessions", and its compact "●12".

@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/danielboothcloud/sundae/pkg/forge"
 	"github.com/danielboothcloud/sundae/pkg/ui/common"
+	"github.com/danielboothcloud/sundae/pkg/ui/components/prompt"
 )
 
 // Repository row columns (wide layout).
@@ -297,17 +298,31 @@ func (m *Forges) repoRow(g group, r forge.RepoStatus, selected bool, w int) []st
 		last = sel.Updated.Render("never synced")
 	}
 
+	// An open confirm ends the first line with its question; its lines
+	// follow the row's, which say what a push would send.
+	var confirm *prompt.Confirm
+	lw := cw
+	if m.confirm != nil && m.confirmKey == rk {
+		confirm = m.confirm
+		lw -= confirm.AskWidth()
+	}
 	var lines []string
 	if m.narrow() {
 		lines = []string{
-			"  " + mark + " " + sel.Title.Render(common.TruncateString(path, cw-4)),
+			"  " + mark + " " + sel.Title.Render(common.TruncateString(path, lw-4)),
 			strings.TrimRight("    "+ab+"  "+last, " "),
 		}
 	} else {
-		pathW := max(cw-4-2-aheadWidth-2-lastWidth, 10)
+		pathW := max(lw-4-2-aheadWidth-2-lastWidth, 10)
 		lines = []string{
 			"  " + mark + " " + sel.Title.Render(pad(common.TruncateString(path, pathW), pathW)) +
 				"  " + pad(ab, aheadWidth) + "  " + last,
+		}
+	}
+	if confirm != nil {
+		lines[0] = confirm.EndLine(lines[0], cw)
+		for _, l := range confirm.Lines(cw-4, 0) {
+			lines = append(lines, "    "+l)
 		}
 	}
 	return strings.Split(base.Render(strings.Join(lines, "\n")), "\n")

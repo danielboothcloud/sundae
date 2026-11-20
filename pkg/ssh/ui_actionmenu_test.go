@@ -51,7 +51,7 @@ func TestActionMenuSessions(t *testing.T) {
 			}
 			// The action's key runs it, as pressing d does: the confirm.
 			uiKey(ui, ".", "d")
-			if s := screenText(ui); !strings.Contains(s, "Delete infra / claude-1?") {
+			if s := screenText(ui); !strings.Contains(s, "delete?") || !strings.Contains(s, "y delete • esc keep") {
 				t.Fatalf("d in the menu did not ask:\n%s", s)
 			}
 			uiKey(ui, "esc")
@@ -61,7 +61,7 @@ func TestActionMenuSessions(t *testing.T) {
 				uiKey(ui, "j")
 			}
 			uiKey(ui, "enter")
-			if s := screenText(ui); !strings.Contains(s, "Delete infra / claude-1?") {
+			if s := screenText(ui); !strings.Contains(s, "delete?") {
 				t.Fatalf("enter on Delete did not ask:\n%s", s)
 			}
 			uiKey(ui, "esc")
@@ -116,7 +116,7 @@ func TestActionMenuRepositories(t *testing.T) {
 		t.Fatalf("mine actions %s", got)
 	}
 	uiKey(ui, "d")
-	waitScreen(t, ui, "Delete mine?")
+	waitScreen(t, ui, "loses history, collaborators, webhooks")
 	uiKey(ui, "n")
 	// enter runs Open, the first.
 	uiKey(ui, "space")
@@ -141,7 +141,7 @@ func TestActionMenuForges(t *testing.T) {
 	}
 	// p runs the push, after its confirm.
 	uiKey(ui, "p")
-	if s := screenText(ui); !strings.Contains(s, "Push main of sundae") {
+	if s := screenText(ui); !strings.Contains(s, "push main → github?") {
 		t.Fatalf("p did not ask:\n%s", s)
 	}
 	uiKey(ui, "y")

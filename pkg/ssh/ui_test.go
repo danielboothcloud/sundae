@@ -276,15 +276,16 @@ func TestHomeSessionsKeys(t *testing.T) {
 		t.Fatalf("filter:\n%s", s)
 	}
 	uiKey(ui, "esc")
-	// The delete confirm takes the footer's place.
+	// The delete confirm is the selected row; the help line shows only
+	// its keys.
 	uiKey(ui, "d")
 	s := screenText(ui)
 	last := s[strings.LastIndex(s, "\n")+1:]
-	if !strings.Contains(last, "Delete infra / claude-1?") || !strings.HasSuffix(last, "y yes • N no") {
+	if !strings.Contains(s, "delete?") || last != "   y delete • esc keep" {
 		t.Fatalf("confirm line %q:\n%s", last, s)
 	}
 	uiKey(ui, "esc")
-	if s := screenText(ui); strings.Contains(s, "Delete infra") {
+	if s := screenText(ui); strings.Contains(s, "delete?") || !strings.Contains(s, "Kept infra / claude-1.") {
 		t.Fatalf("confirm still shown:\n%s", s)
 	}
 	// A gateway outage stays in the tab: the other tabs work.

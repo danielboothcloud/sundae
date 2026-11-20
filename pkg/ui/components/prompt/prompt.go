@@ -1,7 +1,7 @@
 // Package prompt holds the TUI's small input components: a Form of labelled
 // fields (fixed text, free text, a choice among options, a multi-select,
 // a yes/no toggle),
-// and a one-line yes/no Confirm. They are embedded by pages, which forward
+// and a yes/no Confirm drawn in the row it acts on. They are embedded by pages, which forward
 // messages to them and act on the Result.
 //
 // A Form is modal. In normal mode j/k (or ↑↓, tab) move between fields,
@@ -19,6 +19,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/danielboothcloud/sundae/pkg/ui/common"
 	"github.com/danielboothcloud/sundae/pkg/ui/components/footer"
 	"github.com/danielboothcloud/sundae/pkg/ui/styles"
@@ -914,47 +915,113 @@ func (f *Form) titleLine(width int) string {
 	return title + strings.Repeat(" ", gap) + badge
 }
 
-// Confirm is a one-line yes/no question; no is the default. y confirms,
-// any other key cancels.
+// Confirm is a yes/no question drawn in the row it acts on. Only y, n and
+// esc answer it: a stray key must never decide a destructive action.
 type Confirm struct {
 	common common.Common
-	// Question is what is asked.
+	// Action is the verb y runs ("delete", "push").
+	Action string
+	// Question ends the row's first line, e.g. "delete?".
 	Question string
-	// KeyMap is the confirm's keys, for help.
+	// Consequence replaces the row's description, e.g. "loses sandbox".
+	Consequence string
+	// Yes and No are the confirm's keys, for help.
 	Yes, No key.Binding
 }
 
-// NewConfirm returns a confirm asking question.
-func NewConfirm(c common.Common, question string) *Confirm {
-	return &Confirm{
-		common:   c,
-		Question: question,
-		Yes:      key.NewBinding(key.WithKeys("y", "Y"), key.WithHelp("y", "yes")),
-		No:       key.NewBinding(key.WithKeys("n", "N", "esc", "enter"), key.WithHelp("N", "no")),
+// NewConfirm returns a confirm whose y runs action. Declining a
+// destructive action keeps the row ("esc keep"), else cancels.
+func NewConfirm(c common.Common, action, question, consequence string) *Confirm {
+	cf := &Confirm{
+		common:      c,
+		Action:      action,
+		Question:    question,
+		Consequence: consequence,
+		Yes:         key.NewBinding(key.WithKeys("y", "Y"), key.WithHelp("y", action)),
 	}
+	decline := "cancel"
+	if cf.Destructive() {
+		decline = "keep"
+	}
+	cf.No = key.NewBinding(key.WithKeys("esc", "n", "N"), key.WithHelp("esc", decline))
+	return cf
 }
 
-// Update handles a message: y submits, any other key cancels.
+// Destructive reports whether yes deletes or ends something, as the help
+// colours keys (common.KindOf).
+func (c *Confirm) Destructive() bool { return common.KindOf(c.Yes) == common.ActionDanger }
+
+// Update handles a message: y submits, n or esc cancels; other keys are
+// ignored.
 func (c *Confirm) Update(msg tea.Msg) Result {
 	km, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return Pending
 	}
-	if key.Matches(km, c.Yes) {
+	switch {
+	case key.Matches(km, c.Yes):
 		return Submitted
+	case key.Matches(km, c.No):
+		return Cancelled
 	}
-	return Cancelled
+	return Pending
 }
 
-// View renders the question, in the prompt's question style, with the
-// answers at the right end of width columns as the help footer renders
-// keys ("y yes • N no"), cutting the question to fit.
-func (c *Confirm) View(width int) string {
-	answer := footer.ShortView(c.common, []key.Binding{c.Yes, c.No}, 0)
-	aw := lipgloss.Width(answer)
-	q := common.TruncateString(c.Question, max(width-aw-2, 1))
-	gap := max(width-lipgloss.Width(q)-aw, 2)
-	return c.common.Styles.Prompt.Question.Render(q) + strings.Repeat(" ", gap) + answer
+// ShortHelp is the confirm's keys, for the help line while it is open.
+func (c *Confirm) ShortHelp() []key.Binding { return []key.Binding{c.Yes, c.No} }
+
+// Keys renders the answers as the help line does: "y delete • esc keep".
+func (c *Confirm) Keys() string { return footer.ShortView(c.common, c.ShortHelp(), 0) }
+
+// Ask renders the question.
+func (c *Confirm) Ask() string { return c.common.Styles.Prompt.Question.Render(c.Question) }
+
+// AskWidth is the room the question takes at the end of a line, gap
+// included; rows shorten their first line by it.
+func (c *Confirm) AskWidth() int { return lipgloss.Width(c.Question) + 2 }
+
+// EndLine puts the question at the right end of line, in width columns,
+// cutting the line rather than the question.
+func (c *Confirm) EndLine(line string, width int) string {
+	ask := c.Ask()
+	if room := max(width-c.AskWidth(), 0); lipgloss.Width(line) > room {
+		line = ansi.Truncate(line, room, "…")
+	}
+	return line + strings.Repeat(" ", max(width-lipgloss.Width(line)-lipgloss.Width(ask), 2)) + ask
+}
+
+// Lines renders the consequence and the keys in width columns and at most
+// room lines (0: any): one line when both fit, else the consequence
+// wrapped and the keys right-aligned under the question. Only the
+// consequence is ever cut.
+func (c *Confirm) Lines(width, room int) []string {
+	style := c.common.Styles.Prompt.Detail
+	if c.Destructive() {
+		style = c.common.Styles.Action.DangerDesc
+	}
+	keys := c.Keys()
+	kw := lipgloss.Width(keys)
+	oneLine := func(cons string) string {
+		if cons == "" {
+			return strings.Repeat(" ", max(width-kw, 0)) + keys
+		}
+		return style.Render(cons) + strings.Repeat(" ", max(width-lipgloss.Width(cons)-kw, 2)) + keys
+	}
+	if lipgloss.Width(c.Consequence)+2+kw <= width {
+		return []string{oneLine(c.Consequence)}
+	}
+	if room == 1 {
+		return []string{oneLine(common.TruncateString(c.Consequence, max(width-kw-2, 0)))}
+	}
+	cons := strings.Split(ansi.Wordwrap(c.Consequence, max(width, 1), ""), "\n")
+	if room > 1 && len(cons) > room-1 {
+		cons = append(cons[:room-2], common.TruncateString(strings.Join(cons[room-2:], " "), max(width, 1)))
+	}
+	lines := make([]string, 0, len(cons)+1)
+	for _, l := range cons {
+		lines = append(lines, style.Render(strings.TrimRight(l, " ")))
+	}
+	return append(lines, oneLine(""))
 }
 
 // summary is a Multi field's picked options, shortened: "a, b +2".

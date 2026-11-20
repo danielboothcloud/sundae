@@ -155,6 +155,12 @@ func New(c common.Common) *Selection {
 	readme.NoContentStyle = c.Styles.NoContent.
 		SetString(defaultNoContent)
 	sel.delegate = NewItemDelegate(&c, &sel.activePane, sel.badges)
+	sel.delegate.confirm = func(id string) *prompt.Confirm {
+		if sel.deleting == nil || sel.deleteTarget != id {
+			return nil
+		}
+		return sel.deleting
+	}
 	selector := selector.New(c,
 		[]selector.IdentifiableItem{},
 		sel.delegate)
@@ -260,7 +266,7 @@ func (s *Selection) capturingHelp() []key.Binding {
 			return nil
 		}
 		if s.deleting != nil {
-			return []key.Binding{s.deleting.Yes, s.deleting.No}
+			return s.deleting.ShortHelp()
 		}
 		return s.repoForm.ShortHelp()
 	case forgesPane:
@@ -278,20 +284,16 @@ func (s *Selection) Summary(narrow bool) string {
 	return s.sessions.Summary(narrow)
 }
 
-// FooterLine is a line that replaces the help footer, e.g. a confirm; ""
-// for none.
+// FooterLine is the Repositories tab's notice, which replaces the help
+// line; "" for none.
 func (s *Selection) FooterLine(width int) string {
 	switch {
-	case s.activePane == selectorPane && s.creating != "":
+	case s.activePane != selectorPane:
+		return ""
+	case s.creating != "":
 		return s.common.Styles.Prompt.Notice.Render(common.TruncateString("Creating "+s.creating+" …", max(width, 1)))
-	case s.activePane == selectorPane && s.deleting != nil:
-		return s.deleting.View(max(width, 1))
-	case s.activePane == selectorPane && s.repoNotice != "":
+	case s.repoNotice != "":
 		return s.common.NoticeView(s.repoNotice, false, width)
-	case s.activePane == sessionsPane && s.sessions != nil:
-		return s.sessions.FooterLine(width)
-	case s.activePane == forgesPane && s.forges != nil:
-		return s.forges.FooterLine(width)
 	}
 	return ""
 }

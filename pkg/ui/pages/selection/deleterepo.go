@@ -34,8 +34,7 @@ func (s *Selection) openDelete(repo string) {
 		return
 	}
 	s.deleteTarget = repo
-	s.deleting = prompt.NewConfirm(s.common,
-		"Delete "+repo+"? Its history, collaborators and webhooks are removed for good.")
+	s.deleting = prompt.NewConfirm(s.common, "delete", "delete?", "loses history, collaborators, webhooks")
 }
 
 // onDeleteKey answers the delete confirm: y deletes in the background.
@@ -48,6 +47,7 @@ func (s *Selection) onDeleteKey(msg tea.KeyPressMsg) tea.Cmd {
 	repo := s.deleteTarget
 	s.deleteTarget = ""
 	if res != prompt.Submitted {
+		s.repoNotice = "Kept " + repo + "."
 		return nil
 	}
 	ctx := s.common.Context()

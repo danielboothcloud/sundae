@@ -194,6 +194,9 @@ type Forges struct {
 
 	confirm *prompt.Confirm
 	onYes   func() tea.Cmd
+	// confirmKey is the row the confirm is drawn in, kept the notice of
+	// a no.
+	confirmKey, kept string
 
 	// importForm asks how to import (jj or git) while it is open;
 	// onImport imports with the VCS chosen.
@@ -514,11 +517,12 @@ func (m *Forges) onKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		m.confirm = nil
-		yes := m.onYes
-		m.onYes = nil
+		yes, kept := m.onYes, m.kept
+		m.onYes, m.confirmKey, m.kept = nil, "", ""
 		if res == prompt.Submitted && yes != nil {
 			return yes()
 		}
+		m.notice = notice{text: kept}
 		return nil
 	case m.importForm != nil:
 		res, cmd := m.importForm.Update(msg)
@@ -886,9 +890,12 @@ func (m *Forges) onBranch(msg branchMsg) tea.Cmd {
 		m.notice = notice{text: "✗ Cannot push " + msg.repo + ": " + err.Error(), err: true}
 		return nil
 	}
-	q := fmt.Sprintf("Push %s of %s to %s?  Fast-forward only, no force.", msg.branch, msg.repo, msg.forge)
-	m.confirm = prompt.NewConfirm(m.common, q)
+	m.confirm = prompt.NewConfirm(m.common, "push", "push "+msg.branch+" → "+msg.forge+"?", "fast-forward only, no force")
+	m.confirmKey, m.kept = rowKey(msg.forge, msg.path), "Not pushed."
 	m.onYes = func() tea.Cmd { return m.pushCmd(msg.forge, msg.path, msg.repo, msg.branch) }
+	// The lookup is async: the cursor may have moved since p.
+	m.selKey = m.confirmKey
+	m.restoreCursor()
 	return nil
 }
 
@@ -964,20 +971,11 @@ func (m *Forges) perPage() int {
 // narrow reports whether the tab uses its narrow layout.
 func (m *Forges) narrow() bool { return m.common.Width < NarrowWidth }
 
-// FooterLine is what replaces the help line: a confirm. "" when there is
-// none.
-func (m *Forges) FooterLine(width int) string {
-	if m.confirm == nil {
-		return ""
-	}
-	return m.confirm.View(width)
-}
-
 // ShortHelp implements help.KeyMap.
 func (m *Forges) ShortHelp() []key.Binding {
 	switch {
 	case m.confirm != nil:
-		return []key.Binding{m.confirm.Yes, m.confirm.No}
+		return m.confirm.ShortHelp()
 	case m.importForm != nil:
 		return m.importForm.ShortHelp()
 	case m.typing:

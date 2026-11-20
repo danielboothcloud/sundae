@@ -1,0 +1,23 @@
+
+    Sundae                              ▲1 ✓1 ●2
+
+  ‹ Sessions ›
+
+  ┃ ▲ infra / claude-1                   delete?
+  ┃   blocked  5m
+  ┃   loses sandbox, storage, unpushed work
+  ┃                          y delete • esc keep
+
+    ✓ sundae / forge-sync
+      done  5m
+      Implemented GitHub discovery
+
+    ● gateway / main
+      working  5m
+      bash
+
+   Signals · infra / claude-1: none yet
+
+
+
+   y delete • esc keep

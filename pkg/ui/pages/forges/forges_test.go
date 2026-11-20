@@ -445,9 +445,25 @@ func TestForgesPushConfirmAndRefusal(t *testing.T) {
 	if m.confirm == nil {
 		t.Fatal("p did not ask")
 	}
-	if got := ansi.Strip(m.FooterLine(116)); !strings.HasPrefix(got, "Push main of github/danielboothcloud/sundae to github?  Fast-forward only, no force.") {
-		t.Fatalf("confirm %q", got)
+	// The row is the confirm: its question ends the row's line, the
+	// consequence and keys follow under it.
+	v := view(m)
+	if !strings.Contains(v, "push main → github?") || !strings.Contains(v, "fast-forward only, no force") || !strings.Contains(v, "y push • esc cancel") {
+		t.Fatalf("confirm:\n%s", v)
 	}
+	if !strings.Contains(v, "┃   ✓ danielboothcloud/sundae") {
+		t.Fatalf("not in the selected row:\n%s", v)
+	}
+	// Other keys are ignored; esc says nothing was pushed.
+	keys(m, "j", "q", "enter")
+	if m.confirm == nil {
+		t.Fatal("a stray key answered the confirm")
+	}
+	keys(m, "esc")
+	if m.confirm != nil || len(src.pushes) != 0 || !strings.Contains(view(m), "Not pushed.") {
+		t.Fatalf("esc:\n%s", view(m))
+	}
+	run(m, keys(m, "p"), 1)
 	run(m, keys(m, "y"), 2)
 	if fmt.Sprint(src.pushes) != "[github/danielboothcloud/sundae@main]" {
 		t.Fatalf("pushes %v", src.pushes)

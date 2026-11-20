@@ -242,45 +242,103 @@ func TestFormView(t *testing.T) {
 }
 
 func TestConfirm(t *testing.T) {
-	c := NewConfirm(newCommon(), "End infra / claude-1?  The sandbox and any unpushed work are deleted.")
-	if c.Update(press("y")) != Submitted {
-		t.Fatal("y did not confirm")
+	c := NewConfirm(newCommon(), "delete", "delete?", "loses sandbox, storage, unpushed work")
+	for _, k := range []string{"y", "Y"} {
+		if c.Update(press(k)) != Submitted {
+			t.Fatalf("%s did not confirm", k)
+		}
 	}
-	for _, k := range []string{"n", "N", "enter", "esc", "x"} {
+	for _, k := range []string{"n", "N", "esc"} {
 		if c.Update(press(k)) != Cancelled {
 			t.Fatalf("%s did not cancel", k)
+		}
+	}
+	// No stray key answers: enter, q, d and the like are ignored.
+	for _, k := range []string{"enter", "q", "d", "x", "j", "space"} {
+		if c.Update(press(k)) != Pending {
+			t.Fatalf("%s answered the confirm", k)
 		}
 	}
 	if c.Update(tea.WindowSizeMsg{}) != Pending {
 		t.Fatal("a non-key message closed the confirm")
 	}
-	v := ansi.Strip(c.View(80))
-	if !strings.HasSuffix(v, "y yes • N no") || ansi.StringWidth(v) != 80 {
-		t.Fatalf("view %q (%d)", v, ansi.StringWidth(v))
+	if got := ansi.Strip(c.Keys()); got != "y delete • esc keep" {
+		t.Fatalf("keys %q", got)
 	}
-	v = ansi.Strip(c.View(40))
-	if ansi.StringWidth(v) > 40 || !strings.HasSuffix(v, "y yes • N no") || !strings.Contains(v, "…") {
-		t.Fatalf("narrow view %q", v)
+	if !c.Destructive() {
+		t.Fatal("delete is not destructive")
+	}
+	push := NewConfirm(newCommon(), "push", "push main → github?", "fast-forward only, no force")
+	if push.Destructive() || ansi.Strip(push.Keys()) != "y push • esc cancel" {
+		t.Fatalf("push keys %q", ansi.Strip(push.Keys()))
+	}
+}
+
+// TestConfirmLines checks the confirm's fit: one line when the
+// consequence and keys fit, else the keys on their own line; the question
+// and keys are never cut, the consequence only when rows are short.
+func TestConfirmLines(t *testing.T) {
+	c := NewConfirm(newCommon(), "delete", "delete?", "loses sandbox, storage, unpushed work")
+	strip := func(ls []string) []string {
+		out := make([]string, len(ls))
+		for i, l := range ls {
+			out[i] = ansi.Strip(l)
+		}
+		return out
+	}
+	one := strip(c.Lines(72, 0))
+	if len(one) != 1 || !strings.HasPrefix(one[0], "loses sandbox, storage, unpushed work") ||
+		!strings.HasSuffix(one[0], "y delete • esc keep") || ansi.StringWidth(one[0]) != 72 {
+		t.Fatalf("wide %q", one)
+	}
+	two := strip(c.Lines(42, 0))
+	if len(two) != 2 || two[0] != "loses sandbox, storage, unpushed work" ||
+		two[1] != strings.Repeat(" ", 42-19)+"y delete • esc keep" {
+		t.Fatalf("narrow %q", two)
+	}
+	wrapped := strip(c.Lines(20, 0))
+	if len(wrapped) != 4 || strings.Contains(strings.Join(wrapped, ""), "…") || wrapped[3] != " y delete • esc keep" {
+		t.Fatalf("wrapped %q", wrapped)
+	}
+	// Two lines at most: the consequence is cut, never the keys.
+	short := strip(c.Lines(20, 2))
+	if len(short) != 2 || !strings.HasSuffix(short[0], "…") || short[1] != " y delete • esc keep" {
+		t.Fatalf("two lines %q", short)
+	}
+	line := ansi.Strip(c.EndLine("▲ a very long session name that does not fit", 30))
+	if !strings.HasSuffix(line, "  delete?") || ansi.StringWidth(line) != 30 || !strings.Contains(line, "…") {
+		t.Fatalf("end line %q", line)
 	}
 }
 
 // TestConfirmLooksLikeTheHelp checks the confirm's colours: the question
-// in the prompt's question colour and the answers exactly as the help
-// footer renders the confirm's keys.
+// in the prompt's question colour, a destructive consequence in the
+// danger colour, and the keys exactly as the help footer renders them,
+// y in the danger key colour.
 func TestConfirmLooksLikeTheHelp(t *testing.T) {
-	c := NewConfirm(newCommon(), "Delete mine?")
+	c := NewConfirm(newCommon(), "delete", "delete?", "loses history")
 	st := c.common.Styles
 	sep := footer.NewHelp(c.common).Styles.ShortSeparator.Render(" • ")
-	answer := st.HelpKey.Render("y") + " " + st.HelpValue.Render("yes") + sep +
-		st.HelpKey.Render("N") + " " + st.HelpValue.Render("no")
-	want := st.Prompt.Question.Render("Delete mine?") + strings.Repeat(" ", 40-12-12) + answer
-	if got := c.View(40); got != want {
-		t.Fatalf("view\n%q\nwant\n%q", got, want)
+	answer := st.Action.DangerKey.Render("y") + " " + st.Action.DangerDesc.Render("delete") + sep +
+		st.HelpKey.Render("esc") + " " + st.HelpValue.Render("keep")
+	if c.Keys() != answer {
+		t.Fatalf("keys\n%q\nwant\n%q", c.Keys(), answer)
+	}
+	want := st.Action.DangerDesc.Render("loses history") + strings.Repeat(" ", 40-13-19) + answer
+	if got := c.Lines(40, 0); len(got) != 1 || got[0] != want {
+		t.Fatalf("lines\n%q\nwant\n%q", got, want)
+	}
+	if got := c.EndLine("x", 10); got != "x"+strings.Repeat(" ", 2)+st.Prompt.Question.Render("delete?") {
+		t.Fatalf("end line %q", got)
 	}
 	// The footer, showing the same keys as its help, renders them alike.
-	f := footer.New(c.common, keys{c.Yes, c.No})
+	f := footer.New(c.common, keys(c.ShortHelp()))
 	if !strings.Contains(f.View(), answer) {
 		t.Fatalf("the help footer renders the keys as %q, the confirm as %q", f.View(), answer)
+	}
+	push := NewConfirm(c.common, "push", "push main → github?", "fast-forward only")
+	if want := st.HelpKey.Render("y") + " " + st.HelpValue.Render("push"); !strings.HasPrefix(push.Keys(), want) {
+		t.Fatalf("push keys %q", push.Keys())
 	}
 }
 

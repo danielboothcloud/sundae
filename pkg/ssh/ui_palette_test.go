@@ -53,7 +53,7 @@ func TestPaletteRunsCrossTab(t *testing.T) {
 		t.Fatalf("filtered:\n%s", got)
 	}
 	uiKey(ui, "enter")
-	if s := screenText(ui); !strings.Contains(s, "Delete infra / claude-1?") {
+	if s := screenText(ui); !strings.Contains(s, "┃ ▲ infra / claude-1") || !strings.Contains(s, "delete?") {
 		t.Fatalf("Delete did not ask:\n%s", s)
 	}
 	uiKey(ui, "esc")

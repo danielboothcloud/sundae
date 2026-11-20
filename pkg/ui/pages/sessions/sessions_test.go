@@ -20,6 +20,7 @@ import (
 	"github.com/danielboothcloud/sundae/pkg/sessionctl"
 	"github.com/danielboothcloud/sundae/pkg/signals"
 	"github.com/danielboothcloud/sundae/pkg/ui/common"
+	"github.com/danielboothcloud/sundae/pkg/ui/components/footer"
 )
 
 var update = flag.Bool("update", false, "update golden files")
@@ -669,15 +670,32 @@ func TestDeleteConfirm(t *testing.T) {
 	if !m.Capturing() {
 		t.Fatal("the confirm does not capture keys")
 	}
-	line := ansi.Strip(m.FooterLine(76))
-	if !strings.HasPrefix(line, "Delete infra / claude-1?  Sandbox, storage and unpushed work") || !strings.HasSuffix(line, "y yes • N no") {
-		t.Fatalf("confirm line %q", line)
+	// The selected row is the confirm: question on its first line,
+	// consequence and keys in place of its message.
+	v := view(m)
+	if !strings.Contains(v, "┃ ▲ infra / claude-1") || !strings.Contains(v, "delete?") ||
+		!strings.Contains(v, "┃   loses sandbox, storage, unpushed work") || !strings.Contains(v, "y delete • esc keep") {
+		t.Fatalf("confirm:\n%s", v)
 	}
-	keys(m, "n")
-	if m.confirm != nil || len(src.deleted) != 0 {
-		t.Fatal("n did not cancel")
+	if got := ansi.Strip(footer.ShortView(m.common, m.ShortHelp(), 0)); got != "y delete • esc keep" {
+		t.Fatalf("help %q", got)
 	}
-	cmd := keys(m, "d", "y")
+	// Other keys are ignored, not a silent no.
+	keys(m, "j", "q", "enter", "x")
+	if m.confirm == nil || m.cursor != 0 || len(src.deleted) != 0 {
+		t.Fatal("a stray key answered the confirm")
+	}
+	for _, k := range []string{"n", "esc"} {
+		keys(m, k)
+		if m.confirm != nil || len(src.deleted) != 0 {
+			t.Fatalf("%s did not cancel", k)
+		}
+		if !strings.Contains(view(m), "Kept infra / claude-1.") {
+			t.Fatalf("%s: no kept notice:\n%s", k, view(m))
+		}
+		keys(m, "d")
+	}
+	cmd := keys(m, "y")
 	if m.words(m.rows[0]) != "blocked · permission · deleting" {
 		t.Fatalf("busy words %q", m.words(m.rows[0]))
 	}
@@ -690,6 +708,25 @@ func TestDeleteConfirm(t *testing.T) {
 	}
 	if want := m.common.Styles.Prompt.Success.Render("✓ Deleted infra / claude-1."); !strings.Contains(m.View(), want) {
 		t.Fatalf("the notice is not in the prompt's success style:\n%q", m.View())
+	}
+}
+
+// TestDeleteConfirmRowGone checks a confirm whose row went away (deleted
+// elsewhere) closes rather than taking keys unseen.
+func TestDeleteConfirmRowGone(t *testing.T) {
+	src := newFakeSource()
+	m := loaded(t, 50, 30, src)
+	keys(m, "d")
+	gone := m.target.Info.Sandbox
+	var rest []sessionctl.Row
+	for _, r := range src.rows {
+		if r.Info.Sandbox != gone {
+			rest = append(rest, r)
+		}
+	}
+	m.Update(listMsg{rows: rest})
+	if m.confirm != nil || m.Capturing() {
+		t.Fatal("the confirm outlived its row")
 	}
 }
 
@@ -1189,10 +1226,10 @@ func TestScopeKeys(t *testing.T) {
 		t.Fatal("n did not open the form for the repository")
 	}
 	keys(m, "esc")
-	// d asks in the tab: the repository page's footer is the help.
+	// d asks in the row, as on the home page.
 	keys(m, "j", "d")
-	if m.FooterLine(80) != "" || !strings.Contains(view(m), "Delete sundae / tui?") || !strings.Contains(view(m), "y yes • N no") {
-		t.Fatalf("confirm:\n%s", view(m))
+	if v := view(m); !strings.Contains(v, "┃ ● tui") || !strings.Contains(v, "delete?") || !strings.Contains(v, "┃   loses sandbox, storage, unpushed work") {
+		t.Fatalf("confirm:\n%s", v)
 	}
 	run(m, keys(m, "y"), 2)
 	if fmt.Sprint(src.deleted) != "[tui]" {

@@ -103,9 +103,8 @@ func (ui *UI) selection() *selection.Selection {
 	return nil
 }
 
-// footerView renders the footer: the help, or a line the home page puts in
-// its place (the end-session confirm), laid out as the footer lays out the
-// help.
+// footerView renders the footer: the help, or the Repositories tab's
+// notice in its place, laid out as the footer lays out the help.
 //
 // On the home page the action bar (the selected row's actions) comes
 // first. Its line is kept even when empty, so the tab's height does not
