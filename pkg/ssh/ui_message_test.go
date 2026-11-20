@@ -24,8 +24,8 @@ func screenLines(ui *UI) []string {
 	return lines
 }
 
-// checkSlot checks msg is in the frame's rendering on the line above the help
-// (repo page: status bar), and that only that line differs from before.
+// checkSlot checks msg is in the frame's rendering on the line above the help,
+// on every page, and that only that line differs from before.
 func checkSlot(t *testing.T, ui *UI, before []string, msg string) {
 	t.Helper()
 	lines := screenLines(ui)
@@ -36,10 +36,7 @@ func checkSlot(t *testing.T, ui *UI, before []string, msg string) {
 		t.Fatalf("slot %q, want %q:\n%s", got, "   "+msg, after)
 	}
 	wantHelp := strings.TrimRight("  "+ansi.Strip(ui.footer.ViewNoMargin()), " ")
-	if ui.activePage == repoPage {
-		wantHelp = "? Help"
-	}
-	if !strings.Contains(lines[help], wantHelp) {
+	if lines[help] != wantHelp {
 		t.Fatalf("help line %q, want %q:\n%s", lines[help], wantHelp, after)
 	}
 	text, kind := ui.pages[ui.activePage].(common.Messenger).Message()

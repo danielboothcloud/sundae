@@ -111,21 +111,12 @@ func (l *Log) ShortHelp() []key.Binding {
 	case logViewCommits:
 		copyKey := l.common.KeyMap.Copy
 		copyKey.SetHelp("c", "copy hash")
-		return []key.Binding{
-			l.common.KeyMap.UpDown,
-			l.common.KeyMap.SelectItem,
-			copyKey,
-		}
+		return []key.Binding{l.common.KeyMap.UpDown, openKey(l.common), copyKey}
 	case logViewDiff:
 		copyKey := l.common.KeyMap.Copy
 		copyKey.SetHelp("c", "copy diff")
-		return []key.Binding{
-			l.common.KeyMap.UpDown,
-			l.common.KeyMap.BackItem,
-			copyKey,
-			l.common.KeyMap.GotoTop,
-			l.common.KeyMap.GotoBottom,
-		}
+		// h and the page's esc back go back: the full help lists h.
+		return []key.Binding{l.common.KeyMap.UpDown, copyKey}
 	default:
 		return []key.Binding{}
 	}
@@ -140,8 +131,8 @@ func (l *Log) FullHelp() [][]key.Binding {
 		copyKey := l.common.KeyMap.Copy
 		copyKey.SetHelp("c", "copy hash")
 		b = append(b, []key.Binding{
+			openKey(l.common),
 			l.common.KeyMap.SelectItem,
-			l.common.KeyMap.BackItem,
 		})
 		b = append(b, [][]key.Binding{
 			{
@@ -375,42 +366,21 @@ func (l *Log) SpinnerID() int {
 	return l.spinner.ID()
 }
 
-// StatusBarValue returns the status bar value.
-func (l *Log) StatusBarValue() string {
-	if l.activeView == logViewLoading {
-		return ""
-	}
-	c := l.activeCommit
-	if c == nil {
-		return ""
-	}
-	who := c.Author.Name
-	if email := c.Author.Email; email != "" {
-		who += " <" + email + ">"
-	}
-	value := c.ID.String()[:7]
-	if who != "" {
-		value += " by " + who
-	}
-	return value
-}
-
-// StatusBarInfo returns the status bar info.
-func (l *Log) StatusBarInfo() string {
+// Position implements common.TabComponent: the commit shown, and the
+// cursor among all commits or how far the diff is scrolled.
+func (l *Log) Position() (string, string) {
 	switch l.activeView {
-	case logViewLoading:
-		if l.count == 0 {
-			return ""
-		}
-		fallthrough
 	case logViewCommits:
-		// We're using l.nextPage instead of l.selector.Paginator.Page because
-		// of the paginator hack above.
-		return fmt.Sprintf("p. %d/%d", l.nextPage+1, l.selector.TotalPages())
+		// The selector holds a slot for every commit, loaded or not.
+		return "", common.ListPosition(l.selector.Index(), int(l.count))
 	case logViewDiff:
-		return fmt.Sprintf("☰ %.f%%", l.vp.ScrollPercent()*100)
+		item := ""
+		if c := l.selectedCommit; c != nil {
+			item = c.ID.String()[:7]
+		}
+		return item, scrollPosition(l.vp.ScrollPercent())
 	default:
-		return ""
+		return "", ""
 	}
 }
 

@@ -11,7 +11,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"image/color"
 	"path"
 	"slices"
 	"strings"
@@ -341,7 +340,7 @@ func (m *Sessions) Busy() bool { return m.op != nil }
 func (m *Sessions) Filtered() bool { return m.query() != "" }
 
 // SelectedName returns the selected session's name and how many sessions
-// the tab shows, for a status bar; "" when none is selected.
+// the tab shows, for the repository page's header; "" when none is selected.
 func (m *Sessions) SelectedName() (name string, index, total int) {
 	vis := m.visibleRows()
 	r, ok := m.selected()
@@ -1446,17 +1445,6 @@ func sessionNameBase(profile string) string {
 // user's sessions are blocked, errored, done and working, zero counts left
 // out; "" when there are none. Narrow drops the words.
 func (m *Sessions) Summary(narrow bool) string {
-	return m.summary(narrow, nil)
-}
-
-// StatusSummary renders the attention summary for the repository page's
-// status bar (R7): narrow, on the bar's background.
-func (m *Sessions) StatusSummary() string {
-	bg := m.common.Styles.StatusBarSummary.GetBackground()
-	return m.summary(true, bg)
-}
-
-func (m *Sessions) summary(narrow bool, bg color.Color) string {
 	if m.src == nil || m.listErr != nil {
 		return ""
 	}
@@ -1479,14 +1467,7 @@ func (m *Sessions) summary(narrow bool, bg color.Color) string {
 		if narrow {
 			text = fmt.Sprintf("%s%d", s.Glyph(), n)
 		}
-		style := stateStyle(st, s)
-		if bg != nil {
-			style = style.Background(bg)
-		}
-		parts = append(parts, style.Render(text))
-	}
-	if bg != nil {
-		return strings.Join(parts, st.StatusBarSummary.UnsetPadding().Render(sep))
+		parts = append(parts, stateStyle(st, s).Render(text))
 	}
 	return strings.Join(parts, sep)
 }

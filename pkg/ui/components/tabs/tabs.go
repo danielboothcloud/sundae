@@ -45,6 +45,20 @@ func New(c common.Common, tabs []string) *Tabs {
 	return r
 }
 
+// NewTopLevel returns tabs in the style every page shares: "• " marks the active
+// tab, shown alone as "‹ name ›" below collapseBelow columns or when they overflow.
+func NewTopLevel(c common.Common, tabs []string, collapseBelow int) *Tabs {
+	t := New(c, tabs)
+	t.TabSeparator = lipgloss.NewStyle()
+	t.TabInactive = c.Styles.TopLevelNormalTab
+	t.TabActive = c.Styles.TopLevelActiveTab
+	t.TabDot = c.Styles.TopLevelActiveTabDot
+	t.UseDot = true
+	t.CollapseBelow = collapseBelow
+	t.CollapseOverflow = true
+	return t
+}
+
 // SetSize implements common.Component.
 func (t *Tabs) SetSize(width, height int) {
 	t.common.SetSize(width, height)

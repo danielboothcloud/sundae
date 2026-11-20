@@ -124,20 +124,23 @@ func TestHistoryShowsJJ(t *testing.T) {
 	if !strings.Contains(v, "▸ ") || !strings.Contains(v, "second change") || !strings.Contains(v, "add a") || !strings.Contains(v, "main") {
 		t.Fatalf("log:\n%s", v)
 	}
-	if !strings.HasPrefix(h.StatusBarValue(), "change ") || h.StatusBarInfo() != "1/2" {
-		t.Fatalf("status %q %q", h.StatusBarValue(), h.StatusBarInfo())
+	if item, at := h.Position(); item != "" || at != "1 of 2" {
+		t.Fatalf("position %q %q", item, at)
 	}
 
 	// j moves to the next change; enter shows it; h goes back.
 	h.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	if h.StatusBarInfo() != "2/2" {
-		t.Fatalf("after j %q", h.StatusBarInfo())
+	if _, at := h.Position(); at != "2 of 2" {
+		t.Fatalf("after j %q", at)
 	}
 	_, cmd = h.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	drive(h, cmd)
 	v = ansi.Strip(h.View())
 	if h.Path() != "change" || !strings.Contains(v, "add a") || !strings.Contains(v, "Change ID:") {
 		t.Fatalf("show:\n%s", v)
+	}
+	if item, at := h.Position(); !strings.HasPrefix(item, "change ") || !strings.HasSuffix(at, "%") {
+		t.Fatalf("position shown %q %q", item, at)
 	}
 	h.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
 	if h.Path() != "" {

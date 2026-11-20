@@ -24,11 +24,9 @@ type Component interface {
 type TabComponent interface {
 	Component
 
-	// StatusBarValue returns the status bar value component.
-	StatusBarValue() string
-
-	// StatusBarInfo returns the status bar info component.
-	StatusBarInfo() string
+	// Position returns, for the page's header, the item shown when no row names it
+	// (a path, a commit) and where the tab is in it ("3 of 12", "42%").
+	Position() (item, at string)
 
 	// SpinnerID returns the ID of the spinner.
 	SpinnerID() int

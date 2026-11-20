@@ -2,6 +2,7 @@ package repo
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"charm.land/bubbles/v2/help"
@@ -9,13 +10,12 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/danielboothcloud/sundae/git"
 	"github.com/danielboothcloud/sundae/pkg/proto"
 	"github.com/danielboothcloud/sundae/pkg/ui/common"
-	"github.com/danielboothcloud/sundae/pkg/ui/components/footer"
-	"github.com/danielboothcloud/sundae/pkg/ui/components/selector"
-	"github.com/danielboothcloud/sundae/pkg/ui/components/statusbar"
 	"github.com/danielboothcloud/sundae/pkg/ui/components/tabs"
+	"github.com/danielboothcloud/sundae/pkg/ui/pages/sessions"
 )
 
 type state int
@@ -52,37 +52,35 @@ type Repo struct {
 	selectedRepo proto.Repository
 	activeTab    int
 	tabs         *tabs.Tabs
-	statusbar    *statusbar.Model
 	panes        []common.TabComponent
 	ref          *git.Reference
 	state        state
 	spinner      spinner.Model
 	panesReady   []bool
 	// notice is the page's own message (what was copied), until the next
-	// key or click; messageLine is the frame's message slot, drawn here.
-	notice      string
-	messageLine string
+	// key or click.
+	notice string
+	// summary is the attention summary with words; summaryNarrow, with
+	// glyphs only, for a narrow terminal where the words do not fit.
+	summary, summaryNarrow string
 }
 
 // New returns a new Repo.
 func New(c common.Common, comps ...common.TabComponent) *Repo {
-	sb := statusbar.New(c)
 	ts := make([]string, 0)
 	for _, c := range comps {
 		ts = append(ts, c.TabName())
 	}
 	c.Logger = c.Logger.WithPrefix("ui.repo")
-	tb := tabs.New(c, ts)
-	// On a narrow terminal the tabs collapse to the active one
-	// (tui-screens.md section 9), so the Sessions tab stays reachable.
-	tb.CollapseOverflow = true
+	// The home page's tabs: on a narrow terminal they collapse to the active
+	// one (tui-screens.md section 9), so the Sessions tab stays reachable.
+	tb := tabs.NewTopLevel(c, ts, sessions.NarrowWidth)
 	// Make sure the order matches the order of tab constants above.
 	s := spinner.New(spinner.WithSpinner(spinner.Dot),
 		spinner.WithStyle(c.Styles.Spinner))
 	r := &Repo{
 		common:     c,
 		tabs:       tb,
-		statusbar:  sb,
 		panes:      comps,
 		state:      loadingState,
 		spinner:    s,
@@ -104,12 +102,18 @@ func (r *Repo) tabNames(vcs proto.VCS) []string {
 	return names
 }
 
+// headerLines is the header's height: the name and clone command, then
+// the description and the context.
+const headerLines = 2
+
+// getMargins returns the height above the active tab: the header, the
+// tabs and the body's top margin. The frame draws the footer.
 func (r *Repo) getMargins() (int, int) {
-	hh := lipgloss.Height(r.headerView())
-	hm := r.common.Styles.Repo.Body.GetVerticalFrameSize() +
-		hh +
-		r.common.Styles.Repo.Header.GetVerticalFrameSize() +
-		r.common.Styles.StatusBar.GetHeight()
+	st := r.common.Styles
+	hm := st.Tabs.GetHeight() + st.Tabs.GetVerticalFrameSize() + st.Repo.Body.GetMarginTop()
+	if r.selectedRepo != nil {
+		hm += headerLines
+	}
 	return 0, hm
 }
 
@@ -118,7 +122,6 @@ func (r *Repo) SetSize(width, height int) {
 	r.common.SetSize(width, height)
 	_, hm := r.getMargins()
 	r.tabs.SetSize(width, height-hm)
-	r.statusbar.SetSize(width, height-hm)
 	for _, p := range r.panes {
 		p.SetSize(width, height-hm)
 	}
@@ -129,15 +132,14 @@ func (r *Repo) Path() string {
 	return r.panes[r.activeTab].Path()
 }
 
+// commonHelp is the page's own keys, after the tab's, as home ends its
+// help line with switching tabs.
 func (r *Repo) commonHelp() []key.Binding {
-	b := make([]key.Binding, 0)
 	back := r.common.KeyMap.Back
-	back.SetHelp("esc", "back to menu")
+	back.SetHelp("esc", "back")
 	tab := r.common.KeyMap.Section
 	tab.SetHelp("H/L", "tabs")
-	b = append(b, back)
-	b = append(b, tab)
-	return b
+	return []key.Binding{back, tab}
 }
 
 // Capturing reports whether the active tab takes every key (the Sessions
@@ -150,10 +152,10 @@ func (r *Repo) Capturing() bool {
 	return false
 }
 
-// SetSummary sets the attention summary at the status bar's right end
-// (tui-screens.md R7); "" for none.
-func (r *Repo) SetSummary(summary string) {
-	r.statusbar.SetSummary(summary)
+// SetSummary sets the attention summary at the header's right end
+// (tui-screens.md R7), with words and with glyphs only; "" for none.
+func (r *Repo) SetSummary(words, glyphs string) {
+	r.summary, r.summaryNarrow = words, glyphs
 }
 
 // Message implements common.Messenger: the page's notice, else the
@@ -168,20 +170,12 @@ func (r *Repo) Message() (string, common.MessageKind) {
 	return "", common.MessageInfo
 }
 
-// SetMessageLine sets the frame's rendered message slot, which the page
-// draws directly above its status bar.
-func (r *Repo) SetMessageLine(line string) {
-	r.messageLine = line
-}
-
 // ShortHelp implements help.KeyMap.
 func (r *Repo) ShortHelp() []key.Binding {
 	if r.Capturing() {
 		return r.panes[r.activeTab].(help.KeyMap).ShortHelp()
 	}
-	b := r.commonHelp()
-	b = append(b, r.panes[r.activeTab].(help.KeyMap).ShortHelp()...)
-	return b
+	return append(r.panes[r.activeTab].(help.KeyMap).ShortHelp(), r.commonHelp()...)
 }
 
 // FullHelp implements help.KeyMap.
@@ -198,7 +192,6 @@ func (r *Repo) Init() tea.Cmd {
 	r.activeTab = 0
 	return tea.Batch(
 		r.tabs.Init(),
-		r.statusbar.Init(),
 		r.spinner.Tick,
 	)
 }
@@ -250,11 +243,6 @@ func (r *Repo) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 		switch msg := msg.(type) {
 		case tea.MouseClickMsg:
 			switch msg.Button {
-			case tea.MouseLeft:
-				switch {
-				case r.common.Zone.Get("repo-help").InBounds(msg):
-					cmds = append(cmds, footer.ToggleFooterCmd)
-				}
 			case tea.MouseRight:
 				switch {
 				case r.common.Zone.Get("repo-main").InBounds(msg):
@@ -282,7 +270,15 @@ func (r *Repo) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 	case LogItemsMsg, LogDiffMsg, LogCountMsg:
 		cmds = append(cmds, r.updateTabComponent(&Log{}, msg))
 	case RefItemsMsg:
-		cmds = append(cmds, r.updateTabComponent(&Refs{refPrefix: msg.prefix}, msg))
+		// By prefix, not tab name: a jj repository's Branches tab is named Bookmarks.
+		for i, p := range r.panes {
+			if refs, ok := p.(*Refs); ok && refs.refPrefix == msg.prefix {
+				m, cmd := refs.Update(msg)
+				r.panes[i] = m.(common.TabComponent)
+				cmds = append(cmds, cmd)
+				break
+			}
+		}
 	case StashListMsg, StashPatchMsg:
 		cmds = append(cmds, r.updateTabComponent(&Stash{}, msg))
 	// We have two spinners, one is used to when loading the repository and the
@@ -330,119 +326,160 @@ func (r *Repo) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 	if cmd != nil {
 		cmds = append(cmds, cmd)
 	}
-
-	// Update the status bar on these events
-	// Must come after we've updated the active tab
-	switch msg.(type) {
-	case RepoMsg, RefMsg, tabs.ActiveTabMsg, tea.KeyPressMsg,
-		tea.MouseClickMsg, tea.MouseWheelMsg, FileItemsMsg, FileContentMsg,
-		FileBlameMsg, selector.ActiveMsg, LogItemsMsg, GoBackMsg, LogDiffMsg,
-		EmptyRepoMsg, StashListMsg, StashPatchMsg:
-		r.setStatusBarInfo()
-	}
-
-	s, cmd := r.statusbar.Update(msg)
-	r.statusbar = s.(*statusbar.Model)
-	if cmd != nil {
-		cmds = append(cmds, cmd)
-	}
-
 	return r, tea.Batch(cmds...)
 }
 
 // View implements tea.Model.
 func (r *Repo) View() string {
-	wm, hm := r.getMargins()
-	hm += r.common.Styles.Tabs.GetHeight() +
-		r.common.Styles.Tabs.GetVerticalFrameSize()
-	s := r.common.Styles.Repo.Base.
-		Width(r.common.Width - wm).
-		Height(r.common.Height - hm)
-	// The message slot takes the line of the body's bottom margin, so the
-	// tab keeps its height with or without a message.
-	mainStyle := r.common.Styles.Repo.Body.
-		MarginBottom(0).
-		Height(r.common.Height - hm)
+	_, hm := r.getMargins()
 	var main string
-	var statusbar string
 	switch r.state {
 	case loadingState:
 		main = fmt.Sprintf("%s loading…", r.spinner.View())
 	case readyState:
 		main = r.panes[r.activeTab].View()
-		if _, ok := r.panes[r.activeTab].(*Sessions); ok {
-			// The sessions change without a key press.
-			r.setStatusBarInfo()
-		}
-		statusbar = r.statusbar.View()
 	}
+	// The frame's footer starts with a blank line, so the body needs no
+	// bottom margin.
 	main = r.common.Zone.Mark(
 		"repo-main",
-		mainStyle.Render(main),
+		r.common.Styles.Repo.Body.MarginBottom(0).Height(r.common.Height-hm).Render(main),
 	)
 	view := lipgloss.JoinVertical(lipgloss.Left,
 		r.headerView(),
-		r.tabs.View(),
+		r.common.Styles.Tabs.Render(r.tabs.View()),
 		main,
-		lipgloss.NewStyle().Height(1).MaxHeight(1).Render(r.messageLine),
-		statusbar,
 	)
-	return s.Render(view)
+	return r.common.Styles.Repo.Base.
+		Width(r.common.Width).
+		MaxHeight(r.common.Height).
+		Render(view)
 }
 
+// headerView is the page's header: the name and the clone command, then
+// the description and the context.
 func (r *Repo) headerView() string {
 	if r.selectedRepo == nil {
 		return ""
 	}
-	truncate := lipgloss.NewStyle().MaxWidth(r.common.Width)
-	header := r.selectedRepo.ProjectName()
-	if header == "" {
-		header = r.selectedRepo.Name()
+	w := r.common.Width
+	name := r.selectedRepo.ProjectName()
+	if name == "" {
+		name = r.selectedRepo.Name()
 	}
-	header = r.common.Styles.Repo.HeaderName.Render(header)
-	desc := strings.TrimSpace(r.selectedRepo.Description())
-	if desc != "" {
-		header = lipgloss.JoinVertical(lipgloss.Left,
-			header,
-			r.common.Styles.Repo.HeaderDesc.Render(desc),
-		)
-	}
+	name = r.common.Styles.Repo.HeaderName.Render(common.TruncateString(name, w))
+	urlWidth := w - lipgloss.Width(name) - 1
 	urlStyle := r.common.Styles.URLStyle.
-		Width(r.common.Width - lipgloss.Width(header) - 1).
+		Width(max(urlWidth, 0)).
 		Align(lipgloss.Right)
 	var url string
 	if cfg := r.common.Config(); cfg != nil {
 		url = r.common.CloneCmd(cfg.SSH.PublicURL, r.selectedRepo.Name(), r.selectedRepo.Vcs())
 	}
-	url = common.TruncateString(url, r.common.Width-lipgloss.Width(header)-1)
 	url = r.common.Zone.Mark(
 		fmt.Sprintf("%s-url", r.selectedRepo.Name()),
-		urlStyle.Render(url),
+		urlStyle.Render(common.TruncateString(url, urlWidth)),
 	)
-
-	header = lipgloss.JoinHorizontal(lipgloss.Top, header, url)
-
-	style := r.common.Styles.Repo.Header.Width(r.common.Width)
-	return style.Render(
-		truncate.Render(header),
-	)
+	return lipgloss.NewStyle().MaxWidth(w).Render(lipgloss.JoinVertical(lipgloss.Left,
+		lipgloss.JoinHorizontal(lipgloss.Top, name, url),
+		r.contextLine(w),
+	))
 }
 
-func (r *Repo) setStatusBarInfo() {
-	if r.selectedRepo == nil {
-		return
+// contextLine is the header's second line: the description, and at the
+// right end the context, which takes the room the description needs.
+func (r *Repo) contextLine(width int) string {
+	right := r.contextView(width)
+	room := width
+	if right != "" {
+		room -= lipgloss.Width(right) + 2
 	}
+	left := ""
+	if desc := strings.Join(strings.Fields(r.selectedRepo.Description()), " "); desc != "" && room >= minCut {
+		left = r.common.Styles.Repo.HeaderDesc.Render(common.TruncateString(desc, room))
+	}
+	gap := max(width-lipgloss.Width(left)-lipgloss.Width(right), 0)
+	return left + strings.Repeat(" ", gap) + right
+}
 
-	active := r.panes[r.activeTab]
-	key := r.selectedRepo.Name()
-	value := active.StatusBarValue()
-	info := active.StatusBarInfo()
-	extra := "*"
+// minCut is the fewest cells a cut path or description keeps; shorter
+// reads as noise, so it is left out instead.
+const minCut = 8
+
+// contextView is the ref, the tab's item and position, then the summary. The item
+// gives way first, then the ref; the words go only when narrow and nothing else can.
+func (r *Repo) contextView(width int) string {
+	var ref, item, at string
 	if r.ref != nil {
-		extra += " " + r.ref.Name().Short()
+		ref = r.ref.Name().Short()
 	}
+	if r.state == readyState {
+		item, at = r.panes[r.activeTab].Position()
+	}
+	sums := []string{r.summary}
+	if width < sessions.NarrowWidth && r.summaryNarrow != r.summary {
+		sums = append(sums, r.summaryNarrow)
+	}
+	for _, sum := range sums {
+		for _, ref := range []string{ref, ""} {
+			if item == "" {
+				break
+			}
+			// Paths keep their end, the file's name.
+			without := lipgloss.Width(r.renderContext(sum, ref, "x", at)) - 1
+			if room := width - without; room >= min(lipgloss.Width(item), minCut) {
+				return r.renderContext(sum, ref, cutLeft(item, room), at)
+			}
+		}
+		for _, parts := range [][]string{{ref, at}, {at}} {
+			if v := r.renderContext(sum, parts...); lipgloss.Width(v) <= width {
+				return v
+			}
+		}
+	}
+	return ansi.Truncate(r.renderContext(sums[len(sums)-1], at), width, "…")
+}
 
-	r.statusbar.SetStatus(key, value, info, extra)
+// renderContext joins the parts that are not empty with " · ", then the
+// summary after a wider gap, as it is about every session, not this tab.
+func (r *Repo) renderContext(summary string, parts ...string) string {
+	st := r.common.Styles
+	sep := lipgloss.NewStyle().Foreground(st.HelpDivider.GetForeground()).Render(" · ")
+	on := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p != "" {
+			on = append(on, st.Repo.HeaderContext.Render(p))
+		}
+	}
+	ctx := strings.Join(on, sep)
+	switch {
+	case summary == "":
+		return ctx
+	case ctx == "":
+		return summary
+	}
+	return ctx + "   " + summary
+}
+
+// cutLeft cuts s to n cells from the left, marking the cut with "…".
+func cutLeft(s string, n int) string {
+	w := ansi.StringWidth(s)
+	if w <= n {
+		return s
+	}
+	if n < 1 {
+		return ""
+	}
+	return ansi.TruncateLeft(s, w-n+1, "…")
+}
+
+// scrollPosition is how far a view is scrolled, from its 0-1 fraction.
+func scrollPosition(fraction float64) string {
+	p := fraction * 100
+	if p < 0 || math.IsNaN(p) {
+		p = 0
+	}
+	return common.ScrollPercent(int(math.Round(p)))
 }
 
 func (r *Repo) updateTabComponent(c common.TabComponent, msg tea.Msg) tea.Cmd {
@@ -479,6 +516,13 @@ func copyCmd(text, msg string) tea.Cmd {
 			Message: msg,
 		}
 	}
+}
+
+// openKey is enter on a list row, the tab's main key.
+func openKey(c common.Common) key.Binding {
+	k := c.KeyMap.Select
+	k.SetHelp("enter", "open")
+	return k
 }
 
 func goBackCmd() tea.Msg {

@@ -45,9 +45,10 @@ type Styles struct {
 		Title      lipgloss.Style
 		Command    lipgloss.Style
 		Body       lipgloss.Style
-		Header     lipgloss.Style
 		HeaderName lipgloss.Style
 		HeaderDesc lipgloss.Style
+		// HeaderContext is the ref, item and position in the header.
+		HeaderContext lipgloss.Style
 	}
 
 	Footer      lipgloss.Style
@@ -156,14 +157,6 @@ type Styles struct {
 	SpinnerContainer lipgloss.Style
 
 	NoContent lipgloss.Style
-
-	StatusBar        lipgloss.Style
-	StatusBarKey     lipgloss.Style
-	StatusBarValue   lipgloss.Style
-	StatusBarInfo    lipgloss.Style
-	StatusBarBranch  lipgloss.Style
-	StatusBarHelp    lipgloss.Style
-	StatusBarSummary lipgloss.Style
 
 	Tabs         lipgloss.Style
 	TabInactive  lipgloss.Style
@@ -311,17 +304,15 @@ func DefaultStyles() *Styles {
 	s.Repo.Body = lipgloss.NewStyle().
 		Margin(1, 0)
 
-	s.Repo.Header = lipgloss.NewStyle().
-		MaxHeight(2).
-		Border(lipgloss.NormalBorder(), false, false, true, false).
-		BorderForeground(lipgloss.Color("236"))
-
 	s.Repo.HeaderName = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("212")).
 		Bold(true)
 
 	s.Repo.HeaderDesc = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("243"))
+
+	s.Repo.HeaderContext = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("248"))
 
 	s.Footer = lipgloss.NewStyle().
 		MarginTop(1).
@@ -532,39 +523,6 @@ func DefaultStyles() *Styles {
 		MarginTop(1).
 		MarginLeft(2).
 		Foreground(lipgloss.Color("242"))
-
-	s.StatusBar = lipgloss.NewStyle().
-		Height(1)
-
-	s.StatusBarKey = lipgloss.NewStyle().
-		Bold(true).
-		Padding(0, 1).
-		Background(lipgloss.Color("206")).
-		Foreground(lipgloss.Color("228"))
-
-	s.StatusBarValue = lipgloss.NewStyle().
-		Padding(0, 1).
-		Background(lipgloss.Color("235")).
-		Foreground(lipgloss.Color("243"))
-
-	s.StatusBarInfo = lipgloss.NewStyle().
-		Padding(0, 1).
-		Background(lipgloss.Color("212")).
-		Foreground(lipgloss.Color("230"))
-
-	s.StatusBarBranch = lipgloss.NewStyle().
-		Padding(0, 1).
-		Background(lipgloss.Color("62")).
-		Foreground(lipgloss.Color("230"))
-
-	s.StatusBarSummary = lipgloss.NewStyle().
-		Padding(0, 1).
-		Background(lipgloss.Color("235"))
-
-	s.StatusBarHelp = lipgloss.NewStyle().
-		Padding(0, 1).
-		Background(lipgloss.Color("237")).
-		Foreground(lipgloss.Color("243"))
 
 	s.Tabs = lipgloss.NewStyle().
 		Height(1)

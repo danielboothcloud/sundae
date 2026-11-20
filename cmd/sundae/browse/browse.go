@@ -3,6 +3,7 @@ package browse
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"charm.land/bubbles/v2/key"
@@ -73,13 +74,12 @@ const (
 )
 
 type model struct {
-	model      *repo.Repo
-	footer     *footer.Footer
-	repo       proto.Repository
-	common     common.Common
-	state      state
-	showFooter bool
-	error      error
+	model  *repo.Repo
+	footer *footer.Footer
+	repo   proto.Repository
+	common common.Common
+	state  state
+	error  error
 }
 
 var _ tea.Model = &model{}
@@ -88,10 +88,7 @@ func (m *model) SetSize(w, h int) {
 	m.common.SetSize(w, h)
 	style := m.common.Styles.App
 	wm := style.GetHorizontalFrameSize()
-	hm := style.GetVerticalFrameSize()
-	if m.showFooter {
-		hm += m.footer.Height()
-	}
+	hm := style.GetVerticalFrameSize() + lipgloss.Height(m.footerView())
 
 	m.footer.SetSize(w-wm, h-hm)
 	m.model.SetSize(w-wm, h-hm)
@@ -107,7 +104,9 @@ func (m model) ShortHelp() []key.Binding {
 			m.common.KeyMap.Help,
 		}
 	default:
-		return m.model.ShortHelp()
+		more := m.common.KeyMap.Help
+		more.SetHelp("?", "more")
+		return append(m.model.ShortHelp(), m.common.KeyMap.Quit, more)
 	}
 }
 
@@ -125,8 +124,24 @@ func (m model) FullHelp() [][]key.Binding {
 			},
 		}
 	default:
-		return m.model.FullHelp()
+		less := m.common.KeyMap.Help
+		less.SetHelp("?", "less")
+		b := m.model.FullHelp()
+		if len(b) == 0 {
+			return [][]key.Binding{{less, m.common.KeyMap.Quit}}
+		}
+		b[0] = append(slices.Clone(b[0]), less, m.common.KeyMap.Quit)
+		return b
 	}
+}
+
+// footerView is the footer as the server's TUI draws it: the message slot,
+// then the help.
+func (m *model) footerView() string {
+	if m.state == startState {
+		return m.footer.ViewWithMessage(m.model.Message())
+	}
+	return m.footer.View()
 }
 
 // Init implements tea.Model.
@@ -153,8 +168,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.common.KeyMap.Back) && m.error != nil:
 			m.error = nil
 			m.state = startState
-			// Always show the footer on error.
-			m.showFooter = m.footer.ShowAll()
 		case key.Matches(msg, m.common.KeyMap.Help):
 			cmds = append(cmds, footer.ToggleFooterCmd)
 		case key.Matches(msg, m.common.KeyMap.Quit):
@@ -173,11 +186,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case footer.ToggleFooterMsg:
 		m.footer.SetShowAll(!m.footer.ShowAll())
-		m.showFooter = !m.showFooter
 	case common.ErrorMsg:
 		m.error = msg
 		m.state = errorState
-		m.showFooter = true
 	}
 
 	f, cmd := m.footer.Update(msg)
@@ -205,10 +216,8 @@ func (m *model) View() tea.View {
 	v.MouseMode = tea.MouseModeCellMotion
 
 	style := m.common.Styles.App
-	wm, hm := style.GetHorizontalFrameSize(), style.GetVerticalFrameSize()
-	if m.showFooter {
-		hm += m.footer.Height()
-	}
+	footer := m.footerView()
+	wm, hm := style.GetHorizontalFrameSize(), style.GetVerticalFrameSize()+lipgloss.Height(footer)
 
 	var view string
 	switch m.state {
@@ -227,9 +236,7 @@ func (m *model) View() tea.View {
 			Render(err)
 	}
 
-	if m.showFooter {
-		view = lipgloss.JoinVertical(lipgloss.Left, view, m.footer.View())
-	}
+	view = lipgloss.JoinVertical(lipgloss.Left, view, footer)
 
 	v.Content = m.common.Zone.Scan(style.Render(view))
 	return v

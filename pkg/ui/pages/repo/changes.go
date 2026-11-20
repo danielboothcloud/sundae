@@ -1,7 +1,6 @@
 package repo
 
 import (
-	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -164,6 +163,10 @@ func (c *Changes) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 		}
 		c.cursor = max(min(c.cursor, len(c.nodes)-1), 0)
 		return c, nil
+	case GoBackMsg:
+		// esc, as h, leaves the change shown.
+		c.showing = ""
+		return c, nil
 	case changesShowMsg:
 		c.loading = false
 		if msg.err != nil {
@@ -270,32 +273,20 @@ func (c *Changes) logView(h int) string {
 	return b.String()
 }
 
-// StatusBarValue implements common.TabComponent.
-func (c *Changes) StatusBarValue() string {
+// Position implements common.TabComponent: the change shown, and the
+// cursor among the changes or how far the change is scrolled.
+func (c *Changes) Position() (string, string) {
 	if c.showing != "" {
-		return "change " + c.showing
+		return "change " + c.showing, scrollPosition(c.vp.ScrollPercent())
 	}
-	if ch := c.selected(); ch != "" {
-		return "change " + ch
-	}
-	return ""
-}
-
-// StatusBarInfo implements common.TabComponent.
-func (c *Changes) StatusBarInfo() string {
-	if c.showing != "" {
-		return fmt.Sprintf("☰ %.f%%", c.vp.ScrollPercent()*100)
-	}
-	if len(c.nodes) == 0 {
-		return ""
-	}
-	return fmt.Sprintf("%d/%d", c.cursor+1, len(c.nodes))
+	return "", common.ListPosition(c.cursor, len(c.nodes))
 }
 
 // ShortHelp implements help.KeyMap.
 func (c *Changes) ShortHelp() []key.Binding {
 	if c.showing != "" {
-		return []key.Binding{c.common.KeyMap.UpDown, c.keys.Back}
+		// The page's esc back goes back too.
+		return []key.Binding{c.common.KeyMap.UpDown}
 	}
 	return []key.Binding{c.common.KeyMap.UpDown, c.keys.Show, c.keys.Refresh}
 }
@@ -383,11 +374,8 @@ func (h *History) ShortHelp() []key.Binding { return h.active().ShortHelp() }
 // FullHelp implements help.KeyMap.
 func (h *History) FullHelp() [][]key.Binding { return h.active().FullHelp() }
 
-// StatusBarValue implements common.TabComponent.
-func (h *History) StatusBarValue() string { return h.active().StatusBarValue() }
-
-// StatusBarInfo implements common.TabComponent.
-func (h *History) StatusBarInfo() string { return h.active().StatusBarInfo() }
+// Position implements common.TabComponent.
+func (h *History) Position() (string, string) { return h.active().Position() }
 
 // SpinnerID implements common.TabComponent.
 func (h *History) SpinnerID() int { return h.active().SpinnerID() }

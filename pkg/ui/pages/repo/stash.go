@@ -108,29 +108,16 @@ func (s *Stash) FullHelp() [][]key.Binding {
 	return b
 }
 
-// StatusBarValue implements common.Component.
-func (s *Stash) StatusBarValue() string {
-	item, ok := s.list.SelectedItem().(StashItem)
-	if !ok {
-		return " "
-	}
-	idx := s.list.Index()
-	return fmt.Sprintf("stash@{%d}: %s", idx, item.Title())
-}
-
-// StatusBarInfo implements common.Component.
-func (s *Stash) StatusBarInfo() string {
+// Position implements common.TabComponent: the stash shown, and the
+// cursor among the stashes or how far the patch is scrolled.
+func (s *Stash) Position() (string, string) {
 	switch s.state {
 	case stashStateList:
-		totalPages := s.list.TotalPages()
-		if totalPages <= 1 {
-			return "p. 1/1"
-		}
-		return fmt.Sprintf("p. %d/%d", s.list.Page()+1, totalPages)
+		return "", common.ListPosition(s.list.Index(), len(s.list.VisibleItems()))
 	case stashStatePatch:
-		return common.ScrollPercent(s.code.ScrollPosition())
+		return fmt.Sprintf("stash@{%d}", s.list.Index()), common.ScrollPercent(s.code.ScrollPosition())
 	default:
-		return ""
+		return "", ""
 	}
 }
 

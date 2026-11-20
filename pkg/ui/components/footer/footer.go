@@ -185,10 +185,22 @@ func (f *Footer) View() string {
 	return f.view(f.common.Styles.Footer)
 }
 
-// ViewNoMargin renders the footer without its top margin, for a frame
-// that draws its own line (the message slot) directly above the help.
+// ViewNoMargin renders the help line alone, without the footer's top margin.
 func (f *Footer) ViewNoMargin() string {
 	return f.view(f.common.Styles.Footer.UnsetMarginTop())
+}
+
+// ViewWithMessage renders the footer every page shares: the message slot, then
+// the help. The slot stays when empty so the page above never shifts.
+func (f *Footer) ViewWithMessage(text string, kind common.MessageKind) string {
+	st := f.common.Styles.Footer
+	slot := st.UnsetMarginTop().Width(f.common.Width)
+	msg := ""
+	if text != "" {
+		msg = f.common.NoticeView(text, kind, f.common.Width-slot.GetHorizontalFrameSize())
+	}
+	return lipgloss.NewStyle().MarginTop(st.GetMarginTop()).Render(
+		lipgloss.JoinVertical(lipgloss.Left, slot.Render(msg), f.ViewNoMargin()))
 }
 
 func (f *Footer) view(style lipgloss.Style) string {

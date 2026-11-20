@@ -127,21 +127,14 @@ func (f *Files) SetSize(width, height int) {
 
 // ShortHelp implements help.KeyMap.
 func (f *Files) ShortHelp() []key.Binding {
-	k := f.selector.KeyMap
+	// h, as the page's esc back, goes up: the full help lists it.
 	switch f.activeView {
 	case filesViewFiles:
-		return []key.Binding{
-			f.common.KeyMap.SelectItem,
-			f.common.KeyMap.BackItem,
-			k.CursorUp,
-			k.CursorDown,
-		}
+		return []key.Binding{f.common.KeyMap.UpDown, openKey(f.common)}
 	case filesViewContent:
-		b := []key.Binding{
-			f.common.KeyMap.UpDown,
-			f.common.KeyMap.BackItem,
-		}
-		return b
+		copyKey := f.common.KeyMap.Copy
+		copyKey.SetHelp("c", "copy")
+		return []key.Binding{f.common.KeyMap.UpDown, copyKey}
 	default:
 		return []key.Binding{}
 	}
@@ -158,6 +151,7 @@ func (f *Files) FullHelp() [][]key.Binding {
 		k := f.selector.KeyMap
 		b = append(b, [][]key.Binding{
 			{
+				openKey(f.common),
 				f.common.KeyMap.SelectItem,
 				f.common.KeyMap.BackItem,
 			},
@@ -369,24 +363,17 @@ func (f *Files) SpinnerID() int {
 	return f.spinner.ID()
 }
 
-// StatusBarValue returns the status bar value.
-func (f *Files) StatusBarValue() string {
-	p := f.path
-	if p == "." || p == "" {
-		return " "
-	}
-	return p
-}
-
-// StatusBarInfo returns the status bar info.
-func (f *Files) StatusBarInfo() string {
+// Position implements common.TabComponent: the directory or file shown,
+// and the cursor in the directory or how far the file is scrolled.
+func (f *Files) Position() (string, string) {
+	item := f.Path()
 	switch f.activeView {
 	case filesViewFiles:
-		return fmt.Sprintf("# %d/%d", f.selector.Index()+1, len(f.selector.VisibleItems()))
+		return item, common.ListPosition(f.selector.Index(), len(f.selector.VisibleItems()))
 	case filesViewContent:
-		return common.ScrollPercent(f.code.ScrollPosition())
+		return item, common.ScrollPercent(f.code.ScrollPosition())
 	default:
-		return ""
+		return "", ""
 	}
 }
 

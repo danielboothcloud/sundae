@@ -135,14 +135,7 @@ func New(c common.Common) *Selection {
 	for i, p := range sel.panes {
 		ts[i] = p.String()
 	}
-	t := tabs.New(c, ts)
-	t.TabSeparator = lipgloss.NewStyle()
-	t.TabInactive = c.Styles.TopLevelNormalTab
-	t.TabActive = c.Styles.TopLevelActiveTab
-	t.TabDot = c.Styles.TopLevelActiveTabDot
-	t.UseDot = true
-	t.CollapseBelow = sessions.NarrowWidth
-	sel.tabs = t
+	sel.tabs = tabs.NewTopLevel(c, ts, sessions.NarrowWidth)
 
 	keys := []string{"tab", "shift+tab", "H", "L"}
 	for i := range sel.panes {
@@ -220,15 +213,6 @@ func (s *Selection) bindSessions() {
 // SessionsModel returns the Sessions tab's model, for the repository
 // page's Sessions tab; nil when sessions are off.
 func (s *Selection) SessionsModel() *sessions.Sessions { return s.sessions }
-
-// StatusSummary is the attention summary for the repository page's
-// status bar (R7); "" when there is none.
-func (s *Selection) StatusSummary() string {
-	if s.sessions == nil {
-		return ""
-	}
-	return s.sessions.StatusSummary()
-}
 
 // IsFiltering returns true when keys go to text input: the repository
 // filter is typed, or the active tab has a form, confirm or filter open.

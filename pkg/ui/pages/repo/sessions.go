@@ -1,8 +1,6 @@
 package repo
 
 import (
-	"fmt"
-
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"github.com/danielboothcloud/sundae/pkg/proto"
@@ -78,7 +76,11 @@ func (s *Sessions) Message() (string, common.MessageKind) {
 // ShortHelp implements help.KeyMap.
 func (s *Sessions) ShortHelp() []key.Binding {
 	s.bind()
-	return s.model.ShortHelp()
+	if s.model.Capturing() {
+		return s.model.ShortHelp()
+	}
+	// As the home Sessions tab's help line starts.
+	return append([]key.Binding{s.common.KeyMap.UpDown}, s.model.ShortHelp()...)
 }
 
 // FullHelp implements help.KeyMap.
@@ -87,21 +89,15 @@ func (s *Sessions) FullHelp() [][]key.Binding {
 	return s.model.FullHelp()
 }
 
-// StatusBarValue implements common.TabComponent: the selected session.
-func (s *Sessions) StatusBarValue() string {
-	s.bind()
-	name, _, _ := s.model.SelectedName()
-	if name == "" {
-		return "no sessions"
-	}
-	return name
-}
-
-// StatusBarInfo implements common.TabComponent: "1 of 2".
-func (s *Sessions) StatusBarInfo() string {
+// Position implements common.TabComponent: the selected row names the
+// session; "1 of 2".
+func (s *Sessions) Position() (string, string) {
 	s.bind()
 	_, i, n := s.model.SelectedName()
-	return fmt.Sprintf("%d of %d", i, n)
+	if i == 0 {
+		return "", ""
+	}
+	return "", common.ListPosition(i-1, n)
 }
 
 // SpinnerID implements common.TabComponent; the tab has no spinner.

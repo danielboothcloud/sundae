@@ -126,5 +126,13 @@ func IsFileMarkdown(content, ext string) bool {
 // ScrollPercent returns a string representing the scroll percentage of the
 // viewport.
 func ScrollPercent(position int) string {
-	return fmt.Sprintf("≡ %d%%", position)
+	return fmt.Sprintf("%d%%", position)
+}
+
+// ListPosition is where the cursor is in a list: "3 of 12"; "" when empty.
+func ListPosition(index, total int) string {
+	if total <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d of %d", index+1, total)
 }

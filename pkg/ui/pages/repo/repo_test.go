@@ -9,7 +9,7 @@ import (
 )
 
 // TestRepoCopyMessage checks what was copied goes to the frame's message
-// slot, not the status bar, until the next key.
+// slot until the next key.
 func TestRepoCopyMessage(t *testing.T) {
 	c := common.NewCommon(context.Background(), 80, 24)
 	r := New(c, NewReadme(c))

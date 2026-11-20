@@ -1,7 +1,6 @@
 package repo
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 
@@ -96,13 +95,7 @@ func (r *Refs) SetSize(width, height int) {
 func (r *Refs) ShortHelp() []key.Binding {
 	copyKey := r.common.KeyMap.Copy
 	copyKey.SetHelp("c", "copy ref")
-	k := r.selector.KeyMap
-	return []key.Binding{
-		r.common.KeyMap.SelectItem,
-		k.CursorUp,
-		k.CursorDown,
-		copyKey,
-	}
+	return []key.Binding{r.common.KeyMap.UpDown, r.browseKey(), copyKey}
 }
 
 // FullHelp implements help.KeyMap.
@@ -111,7 +104,7 @@ func (r *Refs) FullHelp() [][]key.Binding {
 	copyKey.SetHelp("c", "copy ref")
 	k := r.selector.KeyMap
 	return [][]key.Binding{
-		{r.common.KeyMap.SelectItem},
+		{r.browseKey(), r.common.KeyMap.SelectItem},
 		{
 			k.CursorUp,
 			k.CursorDown,
@@ -124,6 +117,13 @@ func (r *Refs) FullHelp() [][]key.Binding {
 			copyKey,
 		},
 	}
+}
+
+// browseKey is enter, which shows the ref's files.
+func (r *Refs) browseKey() key.Binding {
+	k := r.common.KeyMap.Select
+	k.SetHelp("enter", "browse")
+	return k
 }
 
 // Init implements tea.Model.
@@ -204,21 +204,12 @@ func (r *Refs) SpinnerID() int {
 	return r.spinner.ID()
 }
 
-// StatusBarValue implements statusbar.StatusBar.
-func (r *Refs) StatusBarValue() string {
-	if r.activeRef == nil {
-		return ""
+// Position implements common.TabComponent: the selected row names the ref.
+func (r *Refs) Position() (string, string) {
+	if r.isLoading {
+		return "", ""
 	}
-	return r.activeRef.Name().String()
-}
-
-// StatusBarInfo implements statusbar.StatusBar.
-func (r *Refs) StatusBarInfo() string {
-	totalPages := r.selector.TotalPages()
-	if totalPages <= 1 {
-		return "p. 1/1"
-	}
-	return fmt.Sprintf("p. %d/%d", r.selector.Page()+1, totalPages)
+	return "", common.ListPosition(r.selector.Index(), len(r.selector.VisibleItems()))
 }
 
 func (r *Refs) updateItemsCmd() tea.Msg {

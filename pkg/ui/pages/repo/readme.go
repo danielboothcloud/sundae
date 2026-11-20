@@ -106,6 +106,7 @@ func (r *Readme) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		r.SetSize(msg.Width, msg.Height)
 	case EmptyRepoMsg:
+		r.isLoading = false
 		cmds = append(cmds,
 			r.code.SetContent(defaultEmptyRepoMsg(r.common.Config(),
 				r.repo.Name(), r.repo.Vcs()), ".md"),
@@ -145,18 +146,17 @@ func (r *Readme) SpinnerID() int {
 	return r.spinner.ID()
 }
 
-// StatusBarValue implements statusbar.StatusBar.
-func (r *Readme) StatusBarValue() string {
-	dir := path.Dir(r.readmePath)
-	if dir == "." || dir == "" {
-		return " "
+// Position implements common.TabComponent: the readme's path when it is
+// not the root README, and how far it is scrolled.
+func (r *Readme) Position() (string, string) {
+	if r.isLoading {
+		return "", ""
 	}
-	return dir
-}
-
-// StatusBarInfo implements statusbar.StatusBar.
-func (r *Readme) StatusBarInfo() string {
-	return common.ScrollPercent(r.code.ScrollPosition())
+	item := ""
+	if dir := path.Dir(r.readmePath); dir != "." && dir != "" {
+		item = r.readmePath
+	}
+	return item, common.ScrollPercent(r.code.ScrollPosition())
 }
 
 func (r *Readme) updateReadmeCmd() tea.Msg {

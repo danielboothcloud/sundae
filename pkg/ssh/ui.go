@@ -45,7 +45,6 @@ type UI struct {
 	state       sessionState
 	header      *header.Header
 	footer      *footer.Footer
-	showFooter  bool
 	error       error
 }
 
@@ -61,7 +60,6 @@ func NewUI(c common.Common, initialRepo string) *UI {
 		state:       loadingState,
 		header:      h,
 		initialRepo: initialRepo,
-		showFooter:  true,
 	}
 	ui.footer = footer.New(c, ui)
 	return ui
@@ -77,12 +75,7 @@ func (ui *UI) getMargins() (wm, hm int) {
 	}
 	wm += style.GetHorizontalFrameSize()
 	hm += style.GetVerticalFrameSize()
-	if ui.showFooter {
-		// NOTE: we don't use the footer's style to determine the margins
-		// because footer.Height() is the height of the footer after applying
-		// the styles.
-		hm += lipgloss.Height(ui.footerView())
-	}
+	hm += lipgloss.Height(ui.footerView())
 	return
 }
 
@@ -104,31 +97,13 @@ func (ui *UI) selection() *selection.Selection {
 	return nil
 }
 
-// footerView renders the footer; on the home page the footer's margin, the
-// message slot and the help, the slot kept when empty so the tab's height never shifts.
+// footerView renders the footer, the same on home and the repository page:
+// the active page's message slot, then the help.
 func (ui *UI) footerView() string {
-	if s := ui.selection(); s != nil && ui.activePage == selectionPage && ui.state == readyState {
-		st := ui.common.Styles
-		w := ui.common.Width - st.App.GetHorizontalFrameSize()
-		return lipgloss.NewStyle().MarginTop(st.Footer.GetMarginTop()).Render(
-			lipgloss.JoinVertical(lipgloss.Left, ui.messageView(w), ui.footer.ViewNoMargin()))
+	if m, ok := ui.pages[ui.activePage].(common.Messenger); ok && ui.state == readyState {
+		return ui.footer.ViewWithMessage(m.Message())
 	}
 	return ui.footer.View()
-}
-
-// messageView is the message slot, the active page's message at the help's
-// inset, on the line directly above the help.
-func (ui *UI) messageView(width int) string {
-	style := ui.common.Styles.Footer.UnsetMarginTop().Width(width)
-	m, ok := ui.pages[ui.activePage].(common.Messenger)
-	if !ok || ui.state != readyState {
-		return style.Render("")
-	}
-	text, kind := m.Message()
-	if text == "" {
-		return style.Render("")
-	}
-	return style.Render(ui.common.NoticeView(text, kind, width-style.GetHorizontalFrameSize()))
 }
 
 // repo returns the repository page.
@@ -280,8 +255,6 @@ func (ui *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, ui.common.KeyMap.Back) && ui.error != nil:
 			ui.error = nil
 			ui.state = readyState
-			// Always show the footer on error.
-			ui.showFooter = ui.footer.ShowAll()
 		case key.Matches(msg, ui.common.KeyMap.Help) && !ui.capturing():
 			cmds = append(cmds, footer.ToggleFooterCmd)
 		case key.Matches(msg, ui.common.KeyMap.Quit):
@@ -293,8 +266,6 @@ func (ui *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ui.pages[ui.activePage].(*repo.Repo).Path() == "" &&
 			key.Matches(msg, ui.common.KeyMap.Back):
 			ui.activePage = selectionPage
-			// Always show the footer on selection page.
-			ui.showFooter = true
 		}
 	case tea.MouseClickMsg:
 		switch msg.Button {
@@ -306,20 +277,13 @@ func (ui *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case footer.ToggleFooterMsg:
 		ui.footer.SetShowAll(!ui.footer.ShowAll())
-		// Show the footer when on repo page and shot all help.
-		if ui.error == nil && ui.activePage == repoPage {
-			ui.showFooter = !ui.showFooter
-		}
 	case repo.RepoMsg:
 		ui.common.SetValue(common.RepoKey, msg)
 		ui.activePage = repoPage
-		// Show the footer on repo page if show all is set.
-		ui.showFooter = ui.footer.ShowAll()
 		cmds = append(cmds, repo.UpdateRefCmd(msg))
 	case common.ErrorMsg:
 		ui.error = msg
 		ui.state = errorState
-		ui.showFooter = true
 	case forges.OpenRepoMsg:
 		cmds = append(cmds, ui.setRepoCmd(msg.Repo))
 	case selector.SelectMsg:
@@ -369,10 +333,8 @@ func (ui *UI) View() tea.View {
 	var view string
 	wm, hm := ui.getMargins()
 	if r, s := ui.repo(), ui.selection(); ui.activePage == repoPage && r != nil && s != nil {
-		// The attention summary, in a repository, is at the status
-		// bar's right end (R7).
-		r.SetSummary(s.StatusSummary())
-		r.SetMessageLine(ui.messageView(ui.common.Width - wm))
+		// The attention summary stays in view in a repository (R7), in its header.
+		r.SetSummary(s.Summary(false), s.Summary(true))
 	}
 	switch ui.state {
 	case loadingState:
@@ -399,9 +361,7 @@ func (ui *UI) View() tea.View {
 		}
 		view = lipgloss.JoinVertical(lipgloss.Left, ui.header.View(), view)
 	}
-	if ui.showFooter {
-		view = lipgloss.JoinVertical(lipgloss.Left, view, ui.footerView())
-	}
+	view = lipgloss.JoinVertical(lipgloss.Left, view, ui.footerView())
 	v.Content = ui.common.Zone.Scan(
 		ui.common.Styles.App.Render(view),
 	)

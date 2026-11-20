@@ -289,8 +289,8 @@ func settle(t *testing.T, ui *UI) {
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		drainLate(ui)
-		// The status bar shows once the repository is read.
-		if s := screenText(ui); ui.activePage == repoPage && strings.Contains(s, "? Help") {
+		// The repository and its tab are read once nothing is loading.
+		if s := screenText(ui); ui.activePage == repoPage && !strings.Contains(s, "loading") {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -324,7 +324,7 @@ func TestHomeForgesHiddenWithoutSource(t *testing.T) {
 func TestRepoSessionsTab(t *testing.T) {
 	for _, w := range []int{80, 50} {
 		t.Run(fmt.Sprint(w), func(t *testing.T) {
-			ui, _, _ := richHomeUI(t, w, 20)
+			ui, _, _ := richHomeUI(t, w, 24)
 			uiKeyDepth(ui, 6, "enter") // sundae
 			settle(t, ui)
 			for range 5 {
@@ -343,7 +343,7 @@ func TestRepoSessionsKeys(t *testing.T) {
 		uiKey(ui, "tab")
 	}
 	s := screenText(ui)
-	if !strings.Contains(s, "forge-sync") || strings.Contains(s, "infra / claude-1") || !strings.Contains(s, "▲1 ✓1 ●2") {
+	if !strings.Contains(s, "forge-sync") || strings.Contains(s, "infra / claude-1") || !strings.Contains(s, "▲ 1 blocked  ✓ 1 done  ● 2 working") {
 		t.Fatalf("repo sessions:\n%s", s)
 	}
 	// While the filter is typed, q, ? and tab are text or the tab's.

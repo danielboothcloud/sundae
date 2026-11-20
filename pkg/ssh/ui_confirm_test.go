@@ -28,7 +28,7 @@ func checkConfirmRow(t *testing.T, screen, question, keys string) {
 	if !asked || !answered {
 		t.Fatalf("%q and %q not whole in the selected row:\n%s", question, keys, screen)
 	}
-	if last := screen[strings.LastIndex(screen, "\n")+1:]; strings.TrimSpace(last) != keys && !strings.Contains(last, "? Help") {
+	if last := screen[strings.LastIndex(screen, "\n")+1:]; strings.TrimSpace(last) != keys {
 		t.Fatalf("help line %q, want only the keys", last)
 	}
 }
