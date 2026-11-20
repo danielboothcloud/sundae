@@ -93,7 +93,7 @@ type (
 		forge string
 		// rows are the outcomes per row.
 		rows map[string]result
-		// notice is the line shown at the bottom.
+		// notice is the message for the frame's message slot.
 		notice notice
 		// reposChanged reports whether the operation added repositories.
 		reposChanged bool
@@ -115,7 +115,7 @@ func IsMsg(msg tea.Msg) bool {
 	return false
 }
 
-// notice is a one-line message shown at the bottom of the tab.
+// notice is a one-line message the frame shows in its message slot.
 type notice struct {
 	text string
 	err  bool

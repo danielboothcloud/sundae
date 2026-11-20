@@ -248,6 +248,18 @@ func view(m *Forges) string {
 	return strings.TrimRight(strings.Join(lines, "\n"), "\n")
 }
 
+// message is the tab's message as the frame's message slot renders it.
+func message(m *Forges) string {
+	text, kind := m.Message()
+	return m.common.NoticeView(text, kind, m.common.Width)
+}
+
+// screen is the tab's view and below it the message the frame shows in
+// its message slot.
+func screen(m *Forges) string {
+	return view(m) + "\n" + ansi.Strip(message(m))
+}
+
 func golden(t *testing.T, name, got string) {
 	t.Helper()
 	path := filepath.Join("testdata", name+".golden")
@@ -344,13 +356,13 @@ func TestForgesInProgressGolden(t *testing.T) {
 	if fmt.Sprint(src.imports) != "[[github danielboothcloud/dotfiles]]" || fmt.Sprint(src.vcs) != "[jj]" {
 		t.Fatalf("imports %v as %v", src.imports, src.vcs)
 	}
-	if !strings.Contains(view(m), "Imported danielboothcloud/dotfiles as github/danielboothcloud/dotfiles.") {
+	if !strings.Contains(screen(m), "Imported danielboothcloud/dotfiles as github/danielboothcloud/dotfiles.") {
 		t.Fatalf("import result:\n%s", view(m))
 	}
 	close(src.gate)
 	_, next := m.Update(<-done)
 	run(m, next, 2)
-	if m.busy[headerKey("github")] != "" || !strings.Contains(view(m), "Synced github: 2 repositories.") {
+	if m.busy[headerKey("github")] != "" || !strings.Contains(screen(m), "Synced github: 2 repositories.") {
 		t.Fatalf("sync result:\n%s", view(m))
 	}
 }
@@ -415,7 +427,7 @@ func TestForgesImportAllRespectsFilter(t *testing.T) {
 	src.repos["gitlab"][1].Imported = true
 	run(m, m.loadCmd(""), 1)
 	keys(m, "I")
-	if m.importForm != nil || !strings.Contains(view(m), "Nothing to import") {
+	if m.importForm != nil || !strings.Contains(screen(m), "Nothing to import") {
 		t.Fatalf("view:\n%s", view(m))
 	}
 }
@@ -426,13 +438,13 @@ func TestForgesImportFailureStaysInTheRow(t *testing.T) {
 	m := started(t, 76, 20, src)
 	selectRow(t, m, "me/broken")
 	run(m, keys(m, "i", "enter"), 2)
-	got := view(m)
+	got := screen(m)
 	if !strings.Contains(got, "✗ import failed") || !strings.Contains(got, "✗ Cannot import me/broken: git fetch: repository not found") {
 		t.Fatalf("view:\n%s", got)
 	}
 	// The reason stays shown when the row is selected again.
 	keys(m, "k", "j")
-	if !strings.Contains(view(m), "✗ me/broken: git fetch: repository not found") {
+	if !strings.Contains(screen(m), "✗ me/broken: git fetch: repository not found") {
 		t.Fatalf("view:\n%s", view(m))
 	}
 }
@@ -460,7 +472,7 @@ func TestForgesPushConfirmAndRefusal(t *testing.T) {
 		t.Fatal("a stray key answered the confirm")
 	}
 	keys(m, "esc")
-	if m.confirm != nil || len(src.pushes) != 0 || !strings.Contains(view(m), "Not pushed.") {
+	if m.confirm != nil || len(src.pushes) != 0 || !strings.Contains(screen(m), "Not pushed.") {
 		t.Fatalf("esc:\n%s", view(m))
 	}
 	run(m, keys(m, "p"), 1)
@@ -468,12 +480,12 @@ func TestForgesPushConfirmAndRefusal(t *testing.T) {
 	if fmt.Sprint(src.pushes) != "[github/danielboothcloud/sundae@main]" {
 		t.Fatalf("pushes %v", src.pushes)
 	}
-	if !strings.Contains(view(m), "Pushed main of github/danielboothcloud/sundae to github: 1111111..2222222.") {
+	if !strings.Contains(screen(m), "Pushed main of github/danielboothcloud/sundae to github: 1111111..2222222.") {
 		t.Fatalf("view:\n%s", view(m))
 	}
 	st := m.common.Styles
-	if want := st.Prompt.Success.Render("✓ Pushed main of github/danielboothcloud/sundae to github: 1111111..2222222."); !strings.Contains(m.View(), want) {
-		t.Fatalf("the notice is not in the prompt's success style:\n%q", m.View())
+	if want := st.Prompt.Success.Render("✓ Pushed main of github/danielboothcloud/sundae to github: 1111111..2222222."); message(m) != want {
+		t.Fatalf("the notice is not in the prompt's success style:\n%q", message(m))
 	}
 
 	// A refused push says why, in the tab.
@@ -481,11 +493,11 @@ func TestForgesPushConfirmAndRefusal(t *testing.T) {
 	selectRow(t, m, "danielboothcloud/pi-aio")
 	run(m, keys(m, "p"), 1)
 	run(m, keys(m, "y"), 2)
-	got := view(m)
+	got := screen(m)
 	if !strings.Contains(got, "✗ push refused") || !strings.Contains(got, "✗ Push refused: forge branch main has 2 commit(s) that main lacks") {
 		t.Fatalf("view:\n%s", got)
 	}
-	raw := m.View()
+	raw := m.View() + message(m)
 	for _, want := range []string{
 		st.Prompt.Error.Render("✗ push refused"),
 		strings.TrimSuffix(st.Prompt.Error.Render("✗ Push refused: forge branch main has 2 commit(s) that main lacks"), "\x1b[m"),
@@ -504,7 +516,7 @@ func TestForgesPushConfirmAndRefusal(t *testing.T) {
 	// Pushing a repository that is not imported, or from a header, is
 	// explained instead.
 	selectRow(t, m, "danielboothcloud/dotfiles")
-	if keys(m, "p") != nil || !strings.Contains(view(m), "not imported; there is nothing to push") {
+	if keys(m, "p") != nil || !strings.Contains(screen(m), "not imported; there is nothing to push") {
 		t.Fatalf("view:\n%s", view(m))
 	}
 }
@@ -517,18 +529,18 @@ func TestForgesSyncAndOpen(t *testing.T) {
 	if fmt.Sprint(src.syncs) != "[github:github/danielboothcloud/sundae]" {
 		t.Fatalf("syncs %v", src.syncs)
 	}
-	if !strings.Contains(view(m), "Synced github/danielboothcloud/sundae: main fast-forwarded.") {
+	if !strings.Contains(screen(m), "Synced github/danielboothcloud/sundae: main fast-forwarded.") {
 		t.Fatalf("view:\n%s", view(m))
 	}
 	cmd := keys(m, "enter")
 	if msg, ok := cmd().(OpenRepoMsg); !ok || msg.Repo != "github/danielboothcloud/sundae" {
 		t.Fatalf("enter: %v", cmd())
 	}
-	if c := keys(m, "c"); c == nil || !strings.Contains(view(m), "git clone ssh://git.example.com/github/danielboothcloud/sundae") {
+	if c := keys(m, "c"); c == nil || !strings.Contains(screen(m), "git clone ssh://git.example.com/github/danielboothcloud/sundae") {
 		t.Fatalf("copy:\n%s", view(m))
 	}
 	selectRow(t, m, "danielboothcloud/dotfiles")
-	if keys(m, "enter") != nil || !strings.Contains(view(m), "not imported; press i to import it") {
+	if keys(m, "enter") != nil || !strings.Contains(screen(m), "not imported; press i to import it") {
 		t.Fatalf("enter on a repository not imported:\n%s", view(m))
 	}
 }
@@ -630,7 +642,7 @@ func TestForgesListErrorStaysInTheHeader(t *testing.T) {
 		t.Fatalf("view:\n%s", got)
 	}
 	selectRow(t, m, "gitlab")
-	if !strings.Contains(view(m), "✗ gitlab: cannot list: dial tcp") {
+	if !strings.Contains(screen(m), "✗ gitlab: cannot list: dial tcp") {
 		t.Fatalf("selected header:\n%s", view(m))
 	}
 	golden(t, "forges-list-error-100", view(m))

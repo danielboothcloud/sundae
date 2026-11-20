@@ -65,7 +65,7 @@ func (s *Selection) commands() []command {
 
 // openPalette opens the command palette.
 func (s *Selection) openPalette() {
-	s.repoNotice = ""
+	s.repoNotice = notice{}
 	p := &palette{all: s.commands()}
 	p.filter()
 	s.palette = p

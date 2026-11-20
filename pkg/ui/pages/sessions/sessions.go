@@ -99,10 +99,15 @@ func DefaultKeyMap() KeyMap {
 	}
 }
 
-// notice is a one-line message shown at the bottom of the tab.
+// notice is a one-line message the frame shows in its message slot.
 type notice struct {
 	text string
 	err  bool
+}
+
+// Message implements common.Messenger: the tab's notice.
+func (m *Sessions) Message() (string, common.MessageKind) {
+	return m.notice.text, common.NoticeKind(m.notice.text, m.notice.err)
 }
 
 // Messages.

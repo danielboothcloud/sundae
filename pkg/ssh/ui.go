@@ -103,24 +103,32 @@ func (ui *UI) selection() *selection.Selection {
 	return nil
 }
 
-// footerView renders the footer: the help, or the Repositories tab's
-// notice in its place, laid out as the footer lays out the help.
-//
-// On the home page the action bar (the selected row's actions) comes
-// first. Its line is kept even when empty, so the tab's height does not
-// change as the selection moves.
+// footerView renders the footer; on the home page the action bar, the message
+// slot and the help, each line kept when empty so the tab's height never shifts.
 func (ui *UI) footerView() string {
 	if s := ui.selection(); s != nil && ui.activePage == selectionPage && ui.state == readyState {
 		st := ui.common.Styles
 		w := ui.common.Width - st.App.GetHorizontalFrameSize()
 		inner := w - st.Footer.GetHorizontalFrameSize()
 		bar := st.Footer.Width(w).Render(s.ActionBar(inner))
-		if line := s.FooterLine(inner); line != "" {
-			return lipgloss.JoinVertical(lipgloss.Left, bar, st.Footer.Width(w).Render(line))
-		}
-		return lipgloss.JoinVertical(lipgloss.Left, bar, ui.footer.View())
+		return lipgloss.JoinVertical(lipgloss.Left, bar, ui.messageView(w), ui.footer.ViewNoMargin())
 	}
 	return ui.footer.View()
+}
+
+// messageView is the message slot, the active page's message at the help's
+// inset; it takes the margin line above the help, so it costs the tabs no row.
+func (ui *UI) messageView(width int) string {
+	style := ui.common.Styles.Footer.UnsetMarginTop().Width(width)
+	m, ok := ui.pages[ui.activePage].(common.Messenger)
+	if !ok || ui.state != readyState {
+		return style.Render("")
+	}
+	text, kind := m.Message()
+	if text == "" {
+		return style.Render("")
+	}
+	return style.Render(ui.common.NoticeView(text, kind, width-style.GetHorizontalFrameSize()))
 }
 
 // repo returns the repository page.
@@ -356,6 +364,7 @@ func (ui *UI) View() tea.View {
 		// The attention summary, in a repository, is at the status
 		// bar's right end (R7).
 		r.SetSummary(s.StatusSummary())
+		r.SetMessageLine(ui.messageView(ui.common.Width - wm))
 	}
 	switch ui.state {
 	case loadingState:

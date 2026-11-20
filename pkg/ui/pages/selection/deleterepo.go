@@ -4,6 +4,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/danielboothcloud/sundae/pkg/access"
 	"github.com/danielboothcloud/sundae/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/ui/common"
 	"github.com/danielboothcloud/sundae/pkg/ui/components/prompt"
 )
 
@@ -26,10 +27,10 @@ func (s *Selection) canDelete(repo string) bool {
 
 // openDelete asks to delete repo (the Repositories tab's D key).
 func (s *Selection) openDelete(repo string) {
-	s.repoNotice = ""
+	s.repoNotice = notice{}
 	if !s.canDelete(repo) {
 		if repo != "" {
-			s.repoNotice = "✗ " + repo + ": " + proto.ErrUnauthorized.Error()
+			s.repoNotice = notice{repo + ": " + proto.ErrUnauthorized.Error(), common.MessageError}
 		}
 		return
 	}
@@ -47,13 +48,13 @@ func (s *Selection) onDeleteKey(msg tea.KeyPressMsg) tea.Cmd {
 	repo := s.deleteTarget
 	s.deleteTarget = ""
 	if res != prompt.Submitted {
-		s.repoNotice = "Kept " + repo + "."
+		s.repoNotice = notice{"Kept " + repo + ".", common.MessageInfo}
 		return nil
 	}
 	ctx := s.common.Context()
 	be := s.common.Backend()
 	user := proto.UserFromContext(ctx)
-	s.repoNotice = "Deleting " + repo + " …"
+	s.repoNotice = notice{"Deleting " + repo, common.MessageBusy}
 	return func() tea.Msg {
 		// Checked again: access may have changed since the confirm opened.
 		if be.AccessLevelForUser(ctx, repo, user) < access.ReadWriteAccess {
@@ -66,9 +67,9 @@ func (s *Selection) onDeleteKey(msg tea.KeyPressMsg) tea.Cmd {
 // onRepoDeleted reports the outcome and lists the repositories again.
 func (s *Selection) onRepoDeleted(msg repoDeletedMsg) tea.Cmd {
 	if msg.err != nil {
-		s.repoNotice = "✗ " + msg.repo + ": " + msg.err.Error()
+		s.repoNotice = notice{msg.repo + ": " + msg.err.Error(), common.MessageError}
 		return nil
 	}
-	s.repoNotice = "Deleted " + msg.repo + "."
+	s.repoNotice = notice{"Deleted " + msg.repo + ".", common.MessageSuccess}
 	return s.reloadRepos("")
 }

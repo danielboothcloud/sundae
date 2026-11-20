@@ -58,6 +58,10 @@ type Repo struct {
 	state        state
 	spinner      spinner.Model
 	panesReady   []bool
+	// notice is the page's own message (what was copied), until the next
+	// key or click; messageLine is the frame's message slot, drawn here.
+	notice      string
+	messageLine string
 }
 
 // New returns a new Repo.
@@ -152,6 +156,24 @@ func (r *Repo) SetSummary(summary string) {
 	r.statusbar.SetSummary(summary)
 }
 
+// Message implements common.Messenger: the page's notice, else the
+// active tab's message.
+func (r *Repo) Message() (string, common.MessageKind) {
+	if r.notice != "" {
+		return r.notice, common.MessageInfo
+	}
+	if m, ok := r.panes[r.activeTab].(common.Messenger); ok {
+		return m.Message()
+	}
+	return "", common.MessageInfo
+}
+
+// SetMessageLine sets the frame's rendered message slot, which the page
+// draws directly above its status bar.
+func (r *Repo) SetMessageLine(line string) {
+	r.messageLine = line
+}
+
 // ShortHelp implements help.KeyMap.
 func (r *Repo) ShortHelp() []key.Binding {
 	if r.Capturing() {
@@ -208,6 +230,7 @@ func (r *Repo) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 	case tabs.ActiveTabMsg:
 		r.activeTab = int(msg)
 	case tea.KeyPressMsg, tea.MouseClickMsg:
+		r.notice = ""
 		if _, ok := msg.(tea.KeyPressMsg); ok && r.Capturing() {
 			// A form, confirm or filter of the tab has the keys.
 			break
@@ -251,7 +274,7 @@ func (r *Repo) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 		if cfg := r.common.Config(); cfg != nil {
 			cmds = append(cmds, tea.SetClipboard(txt))
 		}
-		r.statusbar.SetStatus("", msg.Message, "", "")
+		r.notice = msg.Message
 	case ReadmeMsg:
 		cmds = append(cmds, r.updateTabComponent(&Readme{}, msg))
 	case FileItemsMsg, FileContentMsg:
@@ -335,7 +358,10 @@ func (r *Repo) View() string {
 	s := r.common.Styles.Repo.Base.
 		Width(r.common.Width - wm).
 		Height(r.common.Height - hm)
+	// The message slot takes the line of the body's bottom margin, so the
+	// tab keeps its height with or without a message.
 	mainStyle := r.common.Styles.Repo.Body.
+		MarginBottom(0).
 		Height(r.common.Height - hm)
 	var main string
 	var statusbar string
@@ -358,6 +384,7 @@ func (r *Repo) View() string {
 		r.headerView(),
 		r.tabs.View(),
 		main,
+		lipgloss.NewStyle().Height(1).MaxHeight(1).Render(r.messageLine),
 		statusbar,
 	)
 	return s.Render(view)

@@ -88,20 +88,11 @@ func (m *Sessions) View() string {
 			lines = append(lines, "", m.paneHeader(w), "")
 		}
 		body := h - len(lines)
-		if m.notice.text != "" {
-			body -= 2
-		}
 		if m.pane == signalsPane {
 			lines = append(lines, m.signalsView(w, body)...)
 		} else {
 			lines = append(lines, m.stackedView(w, body)...)
 		}
-	}
-	if m.notice.text != "" {
-		for len(lines) < h-2 {
-			lines = append(lines, "")
-		}
-		lines = append(lines, "", " "+m.common.NoticeView(m.notice.text, m.notice.err, w-1))
 	}
 	if len(lines) > h {
 		lines = lines[:max(h, 0)]

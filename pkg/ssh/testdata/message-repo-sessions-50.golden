@@ -1,0 +1,23 @@
+
+  sundae       jj git clone ssh://localhost:232…
+  about sundae
+  ‹ Sessions ›
+
+
+  ┃ ✓ forge-sync
+  ┃   done  5m
+  ┃   Implemented GitHub discovery
+
+    ● tui
+      working  5m
+      Running go test ./pkg/ui/...
+
+
+
+
+
+
+
+   Signals · forge-sync: none yet
+   Kept sundae / forge-sync.
+   sundae  forge-…  1 of 2  *  ? Help  ▲1 ✓1 ●2

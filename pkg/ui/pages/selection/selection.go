@@ -81,9 +81,9 @@ type Selection struct {
 	// names the repository it is creating.
 	repoForm *prompt.Form
 	creating string
-	// repoNotice is a one-line message about the last repository
-	// created, shown in the footer until the next key.
-	repoNotice string
+	// repoNotice is the Repositories tab's message about the last
+	// repository created or deleted, kept until the next key.
+	repoNotice notice
 
 	// badges are the Repositories tab's session and origin badges, which
 	// delegate renders.
@@ -284,18 +284,31 @@ func (s *Selection) Summary(narrow bool) string {
 	return s.sessions.Summary(narrow)
 }
 
-// FooterLine is the Repositories tab's notice, which replaces the help
-// line; "" for none.
-func (s *Selection) FooterLine(width int) string {
-	switch {
-	case s.activePane != selectorPane:
-		return ""
-	case s.creating != "":
-		return s.common.Styles.Prompt.Notice.Render(common.TruncateString("Creating "+s.creating+" …", max(width, 1)))
-	case s.repoNotice != "":
-		return s.common.NoticeView(s.repoNotice, false, width)
+// notice is a one-line message for the frame's message slot.
+type notice struct {
+	text string
+	kind common.MessageKind
+}
+
+// Message implements common.Messenger: the active tab's message.
+func (s *Selection) Message() (string, common.MessageKind) {
+	switch s.activePane {
+	case selectorPane:
+		if s.creating != "" {
+			return "Creating " + s.creating, common.MessageBusy
+		}
+		return s.repoNotice.text, s.repoNotice.kind
+	case sessionsPane:
+		if s.sessions != nil {
+			s.bindSessions()
+			return s.sessions.Message()
+		}
+	case forgesPane:
+		if s.forges != nil {
+			return s.forges.Message()
+		}
 	}
-	return ""
+	return "", common.MessageInfo
 }
 
 // Close stops the tabs' background work. The UI calls it when it quits.
@@ -594,7 +607,7 @@ func (s *Selection) Update(msg tea.Msg) (common.Model, tea.Cmd) {
 		return s, cmd
 	case tea.KeyPressMsg:
 		if s.activePane == selectorPane {
-			s.repoNotice = ""
+			s.repoNotice = notice{}
 		}
 		if s.palette != nil {
 			return s, s.onPaletteKey(msg)

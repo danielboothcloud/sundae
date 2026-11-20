@@ -53,53 +53,39 @@ func (m *Forges) View() string {
 		}
 		lines = append(lines, " "+desc.Render(common.TruncateString(fmt.Sprintf("/%s · %d of %d repositories", m.query, shown, total), w-1)), "")
 	}
-	bottom := m.bottomLine(w)
-	body := h - len(lines)
-	if bottom != "" {
-		body -= 2
-	}
-	lines = append(lines, m.listView(w, max(body, 1))...)
-	if bottom != "" {
-		for len(lines) < h-2 {
-			lines = append(lines, "")
-		}
-		lines = append(lines, "", bottom)
-	}
+	lines = append(lines, m.listView(w, max(h-len(lines), 1))...)
 	if len(lines) > h {
 		lines = lines[:max(h, 0)]
 	}
 	return lipgloss.NewStyle().Width(w).Height(h).MaxHeight(h).Render(strings.Join(lines, "\n"))
 }
 
-// bottomLine is the notice, else the error of the selected row.
-func (m *Forges) bottomLine(w int) string {
-	st := m.common.Styles
+// Message implements common.Messenger: the notice, else the error of the
+// selected row, so why a row failed shows without another key.
+func (m *Forges) Message() (string, common.MessageKind) {
 	if m.notice.text != "" {
-		return " " + m.common.NoticeView(m.notice.text, m.notice.err, w-1)
+		return m.notice.text, common.NoticeKind(m.notice.text, m.notice.err)
 	}
 	it, ok := m.selected()
 	if !ok {
-		return ""
+		return "", common.MessageInfo
 	}
 	g := m.groups[it.g]
 	if it.kind == headerRow {
 		// The whole of what went wrong with the forge.
 		if text, ok := m.forgeError(g.status); ok {
-			return " " + st.Prompt.Error.Render(common.TruncateString("✗ "+g.status.Name+": "+text, w-1))
+			return oneLine(g.status.Name + ": " + text), common.MessageError
 		}
-		return ""
+		return "", common.MessageInfo
 	}
 	r := g.repos[it.r]
-	text := ""
 	if res, ok := m.results[rowKey(g.status.Name, r.Path)]; ok && res.err {
-		text = "✗ " + res.detail
-	} else if r.LastError != "" && m.busy[rowKey(g.status.Name, r.Path)] == "" {
-		text = "✗ Last sync failed: " + r.LastError
+		return oneLine(res.detail), common.MessageError
 	}
-	if text == "" {
-		return ""
+	if r.LastError != "" && m.busy[rowKey(g.status.Name, r.Path)] == "" {
+		return oneLine("Last sync failed: " + r.LastError), common.MessageError
 	}
-	return " " + st.Prompt.Error.Render(common.TruncateString(oneLine(text), w-1))
+	return "", common.MessageInfo
 }
 
 func (m *Forges) listView(w, h int) []string {

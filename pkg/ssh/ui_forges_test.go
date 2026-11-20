@@ -29,6 +29,8 @@ type fakeForges struct {
 	origins map[string]forge.Origin
 	pushes  []string
 	feed    *chanFeed
+	// branchErr is what PushBranch fails with; nil for main.
+	branchErr error
 }
 
 func newFakeForges() *fakeForges {
@@ -62,7 +64,14 @@ func (f *fakeForges) SyncForge(context.Context, string) ([]forge.RepoSyncResult,
 func (f *fakeForges) SyncRepo(context.Context, string, string) (forge.RepoSyncResult, error) {
 	return forge.RepoSyncResult{}, nil
 }
-func (f *fakeForges) PushBranch(context.Context, string) (string, error) { return "main", nil }
+
+func (f *fakeForges) PushBranch(context.Context, string) (string, error) {
+	if f.branchErr != nil {
+		return "", f.branchErr
+	}
+	return "main", nil
+}
+
 func (f *fakeForges) Push(_ context.Context, repo, branch string) (*forge.PushResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

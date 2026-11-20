@@ -21,9 +21,33 @@ func TestNoticeView(t *testing.T) {
 		{"cannot list", true, ps.Error.Render("✗ cannot list")},
 		{"✗ scratch: unauthorized", false, ps.Error.Render("✗ scratch: unauthorized")},
 		{"✓ done already", false, ps.Success.Render("✓ done already")},
+		{"two\nlines", true, ps.Error.Render("✗ two lines")},
 	}
 	for _, tc := range cases {
-		if got := c.NoticeView(tc.text, tc.isErr, 80); got != tc.want {
+		if got := c.NoticeView(tc.text, NoticeKind(tc.text, tc.isErr), 80); got != tc.want {
+			t.Errorf("%q: %q, want %q", tc.text, got, tc.want)
+		}
+	}
+}
+
+func TestNoticeViewKinds(t *testing.T) {
+	c := NewCommon(context.Background(), 80, 24)
+	ps := c.Styles.Prompt
+	cases := []struct {
+		text  string
+		kind  MessageKind
+		width int
+		want  string
+	}{
+		{"Creating mine", MessageBusy, 80, ps.Notice.Render("Creating mine …")},
+		{"Deleting mine …", MessageBusy, 80, ps.Notice.Render("Deleting mine …")},
+		{"Kept mine.", MessageInfo, 80, ps.Notice.Render("Kept mine.")},
+		{"Created mine.", MessageSuccess, 80, ps.Success.Render("✓ Created mine.")},
+		{"mine: unauthorized", MessageError, 80, ps.Error.Render("✗ mine: unauthorized")},
+		{"Left infra / claude-1; it keeps running.", MessageInfo, 20, ps.Notice.Render("Left infra / claude…")},
+	}
+	for _, tc := range cases {
+		if got := c.NoticeView(tc.text, tc.kind, tc.width); got != tc.want {
 			t.Errorf("%q: %q, want %q", tc.text, got, tc.want)
 		}
 	}

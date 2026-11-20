@@ -14,6 +14,7 @@ import (
 	"github.com/danielboothcloud/sundae/pkg/config"
 	"github.com/danielboothcloud/sundae/pkg/proto"
 	"github.com/danielboothcloud/sundae/pkg/signals"
+	"github.com/danielboothcloud/sundae/pkg/ui/common"
 	"github.com/danielboothcloud/sundae/pkg/ui/components/prompt"
 	"github.com/danielboothcloud/sundae/pkg/utils"
 )
@@ -45,7 +46,7 @@ func (s *Selection) canCreate() bool {
 // openNewRepo opens the new-repository form (the Repositories tab's n
 // key).
 func (s *Selection) openNewRepo() {
-	s.repoNotice = ""
+	s.repoNotice = notice{}
 	s.repoForm = s.newRepoForm()
 }
 
@@ -178,11 +179,11 @@ func (s *Selection) onRepoCreated(msg repoCreatedMsg) tea.Cmd {
 			s.repoForm.SetError(msg.err)
 			return nil
 		}
-		s.repoNotice = "✗ " + msg.repo + ": " + msg.err.Error()
+		s.repoNotice = notice{msg.repo + ": " + msg.err.Error(), common.MessageError}
 		return nil
 	}
 	s.repoForm = nil
-	s.repoNotice = "Created " + msg.repo + "."
+	s.repoNotice = notice{"Created " + msg.repo + ".", common.MessageSuccess}
 	cmd := s.reloadRepos(msg.repo)
 	if msg.start && s.sessions != nil {
 		start := s.selectPane(sessionsPane)

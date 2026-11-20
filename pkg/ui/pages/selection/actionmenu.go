@@ -77,7 +77,7 @@ func (s *Selection) openMenu() {
 	if len(as) == 0 {
 		return
 	}
-	s.repoNotice = ""
+	s.repoNotice = notice{}
 	s.menu = actionmenu.New(s.common, s.rowTitle(), as)
 }
 

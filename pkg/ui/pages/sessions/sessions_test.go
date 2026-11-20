@@ -340,6 +340,13 @@ func view(m *Sessions) string {
 	return strings.TrimRight(strings.Join(lines, "\n"), "\n")
 }
 
+// screen is the tab's view and below it the message the frame shows in
+// its message slot.
+func screen(m *Sessions) string {
+	text, kind := m.Message()
+	return view(m) + "\n" + ansi.Strip(m.common.NoticeView(text, kind, m.common.Width))
+}
+
 func golden(t *testing.T, name, got string) {
 	t.Helper()
 	path := filepath.Join("testdata", name+".golden")
@@ -690,7 +697,7 @@ func TestDeleteConfirm(t *testing.T) {
 		if m.confirm != nil || len(src.deleted) != 0 {
 			t.Fatalf("%s did not cancel", k)
 		}
-		if !strings.Contains(view(m), "Kept infra / claude-1.") {
+		if !strings.Contains(screen(m), "Kept infra / claude-1.") {
 			t.Fatalf("%s: no kept notice:\n%s", k, view(m))
 		}
 		keys(m, "d")
@@ -703,11 +710,11 @@ func TestDeleteConfirm(t *testing.T) {
 	if fmt.Sprint(src.deleted) != "[claude-1]" {
 		t.Fatalf("deleted %v", src.deleted)
 	}
-	if !strings.Contains(view(m), "Deleted infra / claude-1.") {
+	if !strings.Contains(screen(m), "Deleted infra / claude-1.") {
 		t.Fatalf("notice:\n%s", view(m))
 	}
-	if want := m.common.Styles.Prompt.Success.Render("✓ Deleted infra / claude-1."); !strings.Contains(m.View(), want) {
-		t.Fatalf("the notice is not in the prompt's success style:\n%q", m.View())
+	if text, kind := m.Message(); kind != common.MessageSuccess || m.common.NoticeView(text, kind, 80) != m.common.Styles.Prompt.Success.Render("✓ Deleted infra / claude-1.") {
+		t.Fatalf("the notice is not a success: %q %v", text, kind)
 	}
 }
 
@@ -737,7 +744,7 @@ func TestSuspendAndResume(t *testing.T) {
 	if fmt.Sprint(src.suspended) != "[claude-1]" {
 		t.Fatalf("suspended %v", src.suspended)
 	}
-	if !strings.Contains(view(m), "Suspended infra / claude-1; its storage is kept.") {
+	if !strings.Contains(screen(m), "Suspended infra / claude-1; its storage is kept.") {
 		t.Fatalf("notice:\n%s", view(m))
 	}
 	keys(m, "G") // dotfiles / main is suspended: resume it, without attaching
@@ -749,7 +756,7 @@ func TestSuspendAndResume(t *testing.T) {
 	if len(src.prepared) != 1 || src.prepared[0].Create || src.prepared[0].Name != "main" || src.closed != 1 {
 		t.Fatalf("prepared %+v, closed %d", src.prepared, src.closed)
 	}
-	if !strings.Contains(view(m), "Resumed dotfiles / main.") {
+	if !strings.Contains(screen(m), "Resumed dotfiles / main.") {
 		t.Fatalf("notice:\n%s", view(m))
 	}
 }
@@ -927,7 +934,7 @@ func TestNewSessionForm(t *testing.T) {
 	if !req.Create || strings.Join(req.Repos, ",") != "sundae,infra" || req.Name != "tu2" || req.Profile != "shell" {
 		t.Fatalf("request %+v", req)
 	}
-	if m.op != nil || src.closed != 1 || !strings.Contains(view(m), "Started tu2 (sundae, infra).") {
+	if m.op != nil || src.closed != 1 || !strings.Contains(screen(m), "Started tu2 (sundae, infra).") {
 		t.Fatalf("op %v closed %d:\n%s", m.op, src.closed, view(m))
 	}
 
@@ -979,13 +986,13 @@ func TestEditSessionRepos(t *testing.T) {
 	if len(src.prepared) != 1 || src.prepared[0].Create || src.prepared[0].Name != "claude-1" || strings.Join(src.prepared[0].Repos, ",") != "sundae" {
 		t.Fatalf("prepared %+v", src.prepared)
 	}
-	if !strings.Contains(view(m), "Added sundae to") {
+	if !strings.Contains(screen(m), "Added sundae to") {
 		t.Fatalf("notice:\n%s", view(m))
 	}
 
 	// One repository: R refuses to remove it.
 	keys(m, "R")
-	if m.form != nil || !strings.Contains(view(m), "a session keeps at least one") {
+	if m.form != nil || !strings.Contains(screen(m), "a session keeps at least one") {
 		t.Fatalf("view:\n%s", view(m))
 	}
 }
@@ -1062,7 +1069,7 @@ func TestEnterAttachesFromBothPanes(t *testing.T) {
 func TestAttachWithoutTerminal(t *testing.T) {
 	m := loaded(t, 76, 30, newFakeSource())
 	keys(m, "enter")
-	if m.op != nil || !strings.Contains(view(m), "attaching needs the SSH terminal") {
+	if m.op != nil || !strings.Contains(screen(m), "attaching needs the SSH terminal") {
 		t.Fatalf("view:\n%s", view(m))
 	}
 }
@@ -1080,11 +1087,11 @@ func TestAttachExec(t *testing.T) {
 	}
 	m := loaded(t, 76, 30, src)
 	m.Update(attachDoneMsg{repos: []string{"infra"}, name: "claude-1", code: 3})
-	if !strings.Contains(view(m), "infra / claude-1: the program exited with status 3.") {
+	if !strings.Contains(screen(m), "infra / claude-1: the program exited with status 3.") {
 		t.Fatalf("view:\n%s", view(m))
 	}
 	m.Update(attachDoneMsg{repos: []string{"infra"}, name: "claude-1"})
-	if !strings.Contains(view(m), "Left infra / claude-1. enter goes back.") {
+	if !strings.Contains(screen(m), "Left infra / claude-1. enter goes back.") {
 		t.Fatalf("view:\n%s", view(m))
 	}
 }
@@ -1107,7 +1114,7 @@ func TestAttachHomeKeyReturnsToTab(t *testing.T) {
 	}
 	done := ex.doneMsg(nil)
 	_, after := m.Update(done)
-	if v := view(m); !strings.Contains(v, "Left infra / claude-1; it keeps running. enter goes back.") || strings.Contains(v, "✗") {
+	if v := screen(m); !strings.Contains(v, "Left infra / claude-1; it keeps running. enter goes back.") || strings.Contains(v, "✗") {
 		t.Fatalf("view:\n%s", v)
 	}
 	if r, ok := m.selected(); m.pane != sessionsPane || !ok || r.Info.Sandbox != "sb-infra-claude-1" {
@@ -1149,7 +1156,7 @@ func TestSetFocus(t *testing.T) {
 	if r, ok := m.selected(); !ok || r.Info.Sandbox != "sb-infra-claude-1" {
 		t.Fatalf("selected %+v", r.Info)
 	}
-	if v := view(m); !strings.Contains(v, "Left infra / claude-1; it keeps running. enter goes back.") {
+	if v := screen(m); !strings.Contains(v, "Left infra / claude-1; it keeps running. enter goes back.") {
 		t.Fatalf("view:\n%s", v)
 	}
 }
@@ -1276,7 +1283,7 @@ func TestSyncWithForge(t *testing.T) {
 	if fmt.Sprint(src.synced) != "["+r.Info.Name+"]" {
 		t.Fatalf("synced %v", src.synced)
 	}
-	if !strings.Contains(view(m), "Synced "+label+":") || !strings.Contains(view(m), "updated") {
+	if !strings.Contains(screen(m), "Synced "+label+":") || !strings.Contains(screen(m), "updated") {
 		t.Fatalf("notice:\n%s", view(m))
 	}
 

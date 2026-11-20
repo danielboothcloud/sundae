@@ -229,7 +229,7 @@ func (c *Changes) View() string {
 	var body string
 	switch {
 	case c.err != nil:
-		body = " " + c.common.NoticeView(c.err.Error(), true, c.common.Width-1)
+		body = " " + c.common.NoticeView(c.err.Error(), common.MessageError, c.common.Width-1)
 	case (c.loading || c.stale) && len(c.lines) == 0:
 		body = st.SpinnerContainer.Render(c.spinner.View() + " running jj log…")
 	case len(c.nodes) == 0:

@@ -54,7 +54,7 @@ func TestDeleteRepoConfirmsAndDeletes(t *testing.T) {
 		t.Fatalf("a stray key answered:\n%s", screenText(ui))
 	}
 	uiKey(ui, "n")
-	checkFooterLine(t, ui, "kept", ui.common.Styles.Prompt.Notice.Render("Kept mine."))
+	checkMessageLine(t, ui, "kept", ui.common.Styles.Prompt.Notice.Render("Kept mine."))
 	if _, err := be.Repository(ctx, "mine"); err != nil {
 		t.Fatalf("deleted after no: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestDeleteRepoConfirmsAndDeletes(t *testing.T) {
 	uiKey(ui, "d")
 	uiKey(ui, "y")
 	waitScreen(t, ui, "Deleted mine.")
-	checkFooterLine(t, ui, "notice", ui.common.Styles.Prompt.Success.Render("✓ Deleted mine."))
+	checkMessageLine(t, ui, "notice", ui.common.Styles.Prompt.Success.Render("✓ Deleted mine."))
 	if _, err := be.Repository(ctx, "mine"); err == nil {
 		t.Fatal("repository still exists")
 	}
@@ -83,23 +83,24 @@ func TestDeleteRepoNeedsWriteAccess(t *testing.T) {
 	}
 	uiKey(ui, "d")
 	waitScreen(t, ui, "✗ scratch: unauthorized")
-	checkFooterLine(t, ui, "error", ui.common.Styles.Prompt.Error.Render("✗ scratch: unauthorized"))
+	checkMessageLine(t, ui, "error", ui.common.Styles.Prompt.Error.Render("✗ scratch: unauthorized"))
 	if _, err := be.Repository(ctx, "scratch"); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// checkFooterLine checks the footer's help line shows line, laid out as
-// the help footer: the footer's style, padding and width. The action bar
-// line above it is not checked.
-func checkFooterLine(t *testing.T, ui *UI, what, line string) {
+// checkMessageLine checks the message slot, directly above the help line,
+// shows line at the help's inset, and the help line stays as it is.
+func checkMessageLine(t *testing.T, ui *UI, what, line string) {
 	t.Helper()
 	st := ui.common.Styles
-	want := st.Footer.Width(ui.common.Width - st.App.GetHorizontalFrameSize()).Render(line)
-	if got := ui.footerView(); !strings.HasSuffix(got, want) {
-		t.Fatalf("%s footer\n%q\nwant it to end with\n%q", what, got, want)
+	w := ui.common.Width - st.App.GetHorizontalFrameSize()
+	want := st.Footer.UnsetMarginTop().Width(w).Render(line)
+	help := ui.footer.ViewNoMargin()
+	if got := ui.footerView(); !strings.HasSuffix(got, want+"\n"+help) {
+		t.Fatalf("%s footer\n%q\nwant it to end with\n%q", what, got, want+"\n"+help)
 	}
-	if got, help := lipgloss.Width(ui.footerView()), lipgloss.Width(ui.footer.View()); got != help {
-		t.Fatalf("%s footer is %d columns wide, the help footer %d", what, got, help)
+	if got, w := lipgloss.Width(ui.footerView()), lipgloss.Width(ui.footer.View()); got != w {
+		t.Fatalf("%s footer is %d columns wide, the help footer %d", what, got, w)
 	}
 }

@@ -69,6 +69,12 @@ func (s *Sessions) View() string {
 	return s.model.View()
 }
 
+// Message implements common.Messenger: the shared model's notice.
+func (s *Sessions) Message() (string, common.MessageKind) {
+	s.bind()
+	return s.model.Message()
+}
+
 // ShortHelp implements help.KeyMap.
 func (s *Sessions) ShortHelp() []key.Binding {
 	s.bind()

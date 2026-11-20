@@ -105,11 +105,20 @@ func (f *Footer) Update(_ tea.Msg) (common.Model, tea.Cmd) {
 
 // View implements tea.Model.
 func (f *Footer) View() string {
+	return f.view(f.common.Styles.Footer)
+}
+
+// ViewNoMargin renders the footer without its top margin, for a frame
+// that draws its own line (the message slot) directly above the help.
+func (f *Footer) ViewNoMargin() string {
+	return f.view(f.common.Styles.Footer.UnsetMarginTop())
+}
+
+func (f *Footer) view(style lipgloss.Style) string {
 	if f.keymap == nil {
 		return ""
 	}
-	s := f.common.Styles.Footer.
-		Width(f.common.Width)
+	s := style.Width(f.common.Width)
 	helpView := f.help.View(f.keymap)
 	if !f.help.ShowAll {
 		helpView = f.shortView()
