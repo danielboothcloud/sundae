@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 
@@ -290,5 +291,111 @@ func TestDockerRuntimeSession(t *testing.T) {
 	}
 	if existed, err := mgr.Delete(ctx, alice, "main", DeleteOptions{}); err != nil || !existed || len(engine.Containers)+len(engine.Volumes) != 0 {
 		t.Fatalf("delete: %v %v", existed, err)
+	}
+}
+
+// scriptRuns returns the calls of the named script in sandbox, and the
+// index in all runs of each.
+func (f *fakeExec) scriptRuns(sandbox, name string) ([]execCall, []int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var calls []execCall
+	var at []int
+	for i, c := range f.runs {
+		if c.sandbox == sandbox && c.script() == name {
+			calls = append(calls, c)
+			at = append(at, i)
+		}
+	}
+	return calls, at
+}
+
+// cloneRuns returns the index in all runs of each clone in sandbox.
+func (f *fakeExec) cloneRuns(sandbox string) []int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var at []int
+	for i, c := range f.runs {
+		if c.sandbox == sandbox && slices.Contains(c.command, "clone") {
+			at = append(at, i)
+		}
+	}
+	return at
+}
+
+func TestPodSharedLinks(t *testing.T) {
+	ctx := context.Background()
+	h := newPodHarness(t, func(c *config.Config) {
+		withForges(t, c)
+		c.Pod.SharedVolumes = []config.SharedVolume{{Name: "auth", ClaimName: "auth", MountPath: "/auth", Links: []config.SharedLink{
+			{Path: "/home/me/.config/pi/auth.json", Target: "pi/auth.json"},
+			{Path: "/home/me/it's \"here\"", Target: "x y"},
+		}}}
+		c.Sessions.Profiles["plain"] = config.SessionProfile{Runtime: config.RuntimePod, Pod: &config.PodSettings{
+			SharedVolumes: []config.SharedVolume{{Name: "auth", ClaimName: "auth", MountPath: "/auth"}},
+		}}
+	})
+	want := []string{
+		"/home/me/.config/pi/auth.json", "/auth", "/auth/pi/auth.json",
+		"/home/me/it's \"here\"", "/auth", "/auth/x y",
+	}
+	check := func(sandbox string, n int) {
+		t.Helper()
+		calls, at := h.exec.scriptRuns(sandbox, sharedLinksName)
+		if len(calls) != n {
+			t.Fatalf("%d links runs, want %d", len(calls), n)
+		}
+		c := calls[n-1]
+		if strings.Join(c.args(), "|") != strings.Join(want, "|") {
+			t.Fatalf("links args = %q", c.args())
+		}
+		// After the clones and the private files' restore (a link under a
+		// checkout would make it look cloned), before the program.
+		clones := h.exec.cloneRuns(sandbox)
+		_, restores := h.exec.scriptRuns(sandbox, privateRestoreName)
+		_, osewa := h.exec.scriptRuns(sandbox, osewaListName)
+		if len(clones) != 2 || len(restores) != n || clones[1] > at[n-1] || restores[n-1] > at[n-1] || osewa[len(osewa)-1] < at[n-1] {
+			t.Fatalf("links ran at %d, clones at %v, restores at %v, osewa list at %v", at[n-1], clones, restores, osewa)
+		}
+	}
+
+	var progress strings.Builder
+	h.exec.linksOut = "/home/me/.config/pi/auth.json: moved to the shared volume (/auth/pi/auth.json)\n"
+	s, err := h.mgr.Start(ctx, StartOptions{User: alice, Profile: "podman", Progress: &progress, Repos: []RepoSpec{
+		{Name: "r"}, {Name: "github/me/tool", Forge: ghRemote, PrivatePaths: []string{"AGENTS.md"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(s.Sandbox, 1)
+	if !strings.Contains(progress.String(), "moved to the shared volume") {
+		t.Fatalf("progress = %q", progress.String())
+	}
+
+	// Every attach, as a restarted container has lost them; a failure
+	// is a warning.
+	h.exec.linksExit = 1
+	progress.Reset()
+	if _, err := h.mgr.Resume(ctx, StartOptions{User: alice, Name: "main", Progress: &progress, ResolveRepo: privateResolver(config.GitIdentity{})}); err != nil {
+		t.Fatal(err)
+	}
+	check(s.Sandbox, 2)
+	if !strings.Contains(progress.String(), "Warning: could not make the shared volume links: ") {
+		t.Fatalf("progress = %q", progress.String())
+	}
+	h.exec.linksExit = 0
+
+	// Not for a pod session without links, nor another runtime's.
+	for _, profile := range []string{"plain", "claude"} {
+		s, err := h.mgr.Start(ctx, StartOptions{User: alice, Repo: "r", Name: profile, Profile: profile})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.mgr.Resume(ctx, StartOptions{User: alice, Name: profile}); err != nil {
+			t.Fatal(err)
+		}
+		if calls, _ := h.exec.scriptRuns(s.Sandbox, sharedLinksName); len(calls) != 0 {
+			t.Fatalf("%s: links ran: %v", profile, calls)
+		}
 	}
 }

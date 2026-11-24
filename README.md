@@ -683,6 +683,63 @@ The image then points mise at it (`ENV MISE_DATA_DIR=/mise`, and
 `MISE_CACHE_DIR=/mise/cache`). The Helm chart can create such a claim
 (`podRuntime.sharedVolumes`, see its README).
 
+**Shared logins.** A shared volume's `links` are symlinks Sundae makes in
+the sandbox container at every session start and attach, so tool logins live
+on one ReadWriteMany volume for all sessions. With the chart, for pi in the
+Sundae sandbox image (`HOME=/sandbox`, pi's default directory
+`~/.pi/agent`):
+
+```yaml
+podRuntime:
+  sharedVolumes:
+    - name: auth
+      create: true
+      storageClass: cephfs-rwx
+      size: 1Gi
+      accessModes: [ReadWriteMany]
+      mountPath: /auth
+      links:
+        - { path: /sandbox/.pi/agent/auth.json, target: pi/auth.json }
+        - { path: /sandbox/.pi/agent/mcp-auth.json, target: pi/mcp-auth.json }
+```
+
+(`pod.shared_volumes[].links` in the config file.) `path` is where the tool
+in *your* image keeps the file: with the Sundae sandbox image `HOME` is
+`/sandbox`; an image that sets `PI_CODING_AGENT_DIR` (e.g.
+`/home/<user>/.config/pi`) uses that directory instead, and it must be
+writable by the pod's UID. `path` is absolute, not `/`, and neither at or
+under a mount (another shared volume, `volume_mounts`; `/sandbox` is fine)
+nor at, under or above another link's `path`. `target` is relative to what
+is mounted (after `sub_path`), without `..`; a volume with links needs a
+`mount_path` without spaces, backslashes or control characters.
+
+At each start and attach, for each link:
+
+- The volume must be mounted in the session (a volume added after the
+  session was created is not, until it is recreated); else it is skipped.
+- A file already at `path` moves to the volume if the volume has none yet.
+  If the volume has one, the volume's copy wins, whatever its age: the local
+  file is kept as `<path>.sundae-bak.<time>.<pid>` with a warning. Two
+  sessions migrating at once both keep their files: one lands on the volume,
+  the other in a backup.
+- A symlink elsewhere is replaced (and reported); a directory, or a file
+  where the target is a directory, is left alone with a warning. A `path`
+  that already is the target (through a linked parent directory) is left
+  alone.
+- New directories on the volume are mode 0700, and a failed link is a
+  warning: the session still starts.
+
+- Pod runtime only; not on a `read_only` volume.
+- Links are made by exec, not in the Pod spec, so changing them recreates no
+  Pod; a container restart without an attach loses them until the next
+  attach.
+- **The logins are shared with every session, of every user, that mounts
+  the volume through that pod config or profile** (and so is a logout): all
+  session pods run as the same UID, so the 0700 directories only keep other
+  UIDs out. Sundae is single-user by design for now; give a profile its own
+  volume (or `sub_path`) to keep its logins apart.
+- The credentials are only on the volume, never in the image.
+
 Sundae sets no workload-specific settings: what a workload needs (another
 RuntimeClass, a relaxed seccomp profile, capabilities, a device volume) goes
 into `pod:` or a profile's `pod:`, and what it needs in the image goes into

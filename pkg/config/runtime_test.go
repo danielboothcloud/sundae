@@ -484,3 +484,176 @@ func TestPodSharedVolumesFileRoundTrip(t *testing.T) {
 	is.Equal(got.Pod.SharedVolumes, cfg.Pod.SharedVolumes)
 	is.Equal(got.Sessions.Profiles["p"].Pod.SharedVolumes, []SharedVolume{{Name: "x", ClaimName: "x", MountPath: "/x"}})
 }
+
+func TestPodSharedLinks(t *testing.T) {
+	is := is.New(t)
+	cfg := DefaultConfig()
+	cfg.DataPath = t.TempDir()
+	cfg.Sessions.Runtime = RuntimePod
+	cfg.Pod.Image = "img"
+	cfg.Pod.SharedVolumes = []SharedVolume{{Name: "auth", ClaimName: "auth", MountPath: "/auth", SubPath: "v1", Links: []SharedLink{
+		{Path: " /home/me/.config/pi//auth.json ", Target: "./pi/auth.json"},
+		{Path: "/home/me/my \"dir\"/x", Target: "x/"},
+	}}}
+	cfg.Sessions.Profiles = map[string]SessionProfile{
+		"other": {Pod: &PodSettings{SharedVolumes: []SharedVolume{{Name: "auth", ClaimName: "auth2", MountPath: "/auth", Links: []SharedLink{{Path: "/home/me/.claude.json", Target: "claude.json"}}}}}},
+		"extra": {Pod: &PodSettings{SharedVolumes: []SharedVolume{{Name: "more", ClaimName: "more", MountPath: "/more", Links: []SharedLink{{Path: "/etc/more", Target: "m"}}}}}},
+	}
+	is.NoErr(cfg.Validate())
+	links := cfg.Pod.SharedVolumes[0].Links
+	is.Equal(links, []SharedLink{{Path: "/home/me/.config/pi/auth.json", Target: "pi/auth.json"}, {Path: "/home/me/my \"dir\"/x", Target: "x"}}) // cleaned
+	is.Equal(cfg.Pod.SharedVolumes[0].TargetPath(links[0]), "/auth/pi/auth.json")                                                                // sub_path is already mounted
+
+	// A profile's entry of the same name replaces the links too; others add theirs.
+	is.Equal(cfg.PodSettingsFor("other").SharedVolumes[0].Links, []SharedLink{{Path: "/home/me/.claude.json", Target: "claude.json"}})
+	extra := cfg.PodSettingsFor("extra").SharedVolumes
+	is.Equal(len(extra), 2)
+	is.Equal(extra[0].Links, links)
+	is.Equal(extra[1].Links, []SharedLink{{Path: "/etc/more", Target: "m"}})
+
+	// The effective settings share no links with the config.
+	extra[0].Links[0].Path = "/changed"
+	is.Equal(cfg.Pod.SharedVolumes[0].Links[0].Path, "/home/me/.config/pi/auth.json")
+	other := cfg.PodSettingsFor("other").SharedVolumes
+	other[0].Links[0].Target = "changed"
+	is.Equal(cfg.Sessions.Profiles["other"].Pod.SharedVolumes[0].Links[0].Target, "claude.json")
+
+	// Links are applied by exec: the pod spec does not change.
+	withLinks, err := cfg.PodSettingsFor("").Decode()
+	is.NoErr(err)
+	noLinks := cfg.PodSettingsFor("")
+	noLinks.SharedVolumes[0].Links = nil
+	without, err := noLinks.Decode()
+	is.NoErr(err)
+	is.Equal(withLinks, without)
+
+	vol := func(links ...SharedLink) SharedVolume {
+		return SharedVolume{Name: "auth", ClaimName: "c", MountPath: "/auth", Links: links}
+	}
+	vol2 := func(links ...SharedLink) SharedVolume {
+		return SharedVolume{Name: "two", ClaimName: "c", MountPath: "/two", Links: links}
+	}
+	for name, tc := range map[string]struct {
+		vols []SharedVolume
+		want string
+	}{
+		"relative path":  {[]SharedVolume{vol(SharedLink{Path: "home/x", Target: "x"})}, `shared_volumes[0].links[0].path "home/x" must be absolute`},
+		"no path":        {[]SharedVolume{vol(SharedLink{Target: "x"})}, "shared_volumes[0].links[0].path is required"},
+		"root path":      {[]SharedVolume{vol(SharedLink{Path: "/x/..", Target: "x"})}, `links[0].path "/x/.." cannot be /`},
+		"mount path":     {[]SharedVolume{vol(SharedLink{Path: "/auth/", Target: "x"})}, `links[0].path "/auth" is at or under the mount path "/auth" of shared_volumes[0]`},
+		"own target":     {[]SharedVolume{vol(SharedLink{Path: "/auth/x", Target: "x"})}, `links[0].path "/auth/x" is at or under the mount path "/auth" of shared_volumes[0]`},
+		"control path":   {[]SharedVolume{vol(SharedLink{Path: "/x\ny", Target: "x"})}, "links[0].path \"/x\\ny\" has a control character"},
+		"dotdot target":  {[]SharedVolume{vol(SharedLink{Path: "/x", Target: "a/../../etc"})}, `links[0].target "a/../../etc" must be a path relative to mount_path, without ..`},
+		"abs target":     {[]SharedVolume{vol(SharedLink{Path: "/x", Target: "/etc/x"})}, `links[0].target "/etc/x" must be a path relative`},
+		"empty target":   {[]SharedVolume{vol(SharedLink{Path: "/x", Target: " "})}, "links[0].target is required"},
+		"dot target":     {[]SharedVolume{vol(SharedLink{Path: "/x", Target: "./"})}, "links[0].target is required"},
+		"control target": {[]SharedVolume{vol(SharedLink{Path: "/x", Target: "a\tb"})}, `links[0].target "a\tb" has a control character`},
+		"read only": {
+			[]SharedVolume{{Name: "auth", ClaimName: "c", MountPath: "/auth", ReadOnly: true, Links: []SharedLink{{Path: "/x", Target: "x"}}}},
+			"pod.shared_volumes[0].links: a read_only volume cannot have links",
+		},
+		"duplicate path": {
+			[]SharedVolume{vol(SharedLink{Path: "/x", Target: "a"}), {Name: "b", ClaimName: "c", MountPath: "/b", Links: []SharedLink{{Path: "/x/", Target: "b"}}}},
+			`pod.shared_volumes[1].links[0].path "/x" is also the path of shared_volumes[0].links[0]`,
+		},
+		"duplicate in one": {
+			[]SharedVolume{vol(SharedLink{Path: "/x", Target: "a"}, SharedLink{Path: "/x", Target: "b"})},
+			`pod.shared_volumes[0].links[1].path "/x" is also the path of shared_volumes[0].links[0]`,
+		},
+		"under another link": {
+			[]SharedVolume{vol(SharedLink{Path: "/h/.config/pi", Target: "pi"}), {Name: "b", ClaimName: "c", MountPath: "/b", Links: []SharedLink{{Path: "/h/.config/pi/auth.json", Target: "a"}}}},
+			`pod.shared_volumes[1].links[0].path "/h/.config/pi/auth.json" is at or under, or holds, the path "/h/.config/pi" of shared_volumes[0].links[0]: links cannot nest`,
+		},
+		"holds another link": {
+			[]SharedVolume{vol(SharedLink{Path: "/h/.config/pi/auth.json", Target: "a"}, SharedLink{Path: "/h/.config/", Target: "c"})},
+			`pod.shared_volumes[0].links[1].path "/h/.config" is at or under, or holds, the path "/h/.config/pi/auth.json"`,
+		},
+		"under own mount": {
+			[]SharedVolume{vol(SharedLink{Path: "/auth/pi/x", Target: "x"})},
+			`pod.shared_volumes[0].links[0].path "/auth/pi/x" is at or under the mount path "/auth" of shared_volumes[0]`,
+		},
+		"under another mount": {
+			[]SharedVolume{vol(SharedLink{Path: "/x", Target: "a"}), {Name: "b", ClaimName: "c", MountPath: "/b"}, vol2(SharedLink{Path: "/b/x", Target: "x"})},
+			`pod.shared_volumes[2].links[0].path "/b/x" is at or under the mount path "/b" of shared_volumes[1]`,
+		},
+		"mount path with space": {
+			[]SharedVolume{{Name: "auth", ClaimName: "c", MountPath: "/my auth", Links: []SharedLink{{Path: "/x", Target: "x"}}}},
+			`pod.shared_volumes[0].mount_path "/my auth": a volume with links needs a mount_path without spaces`,
+		},
+		"mount path with backslash": {
+			[]SharedVolume{{Name: "auth", ClaimName: "c", MountPath: `/a\b`, Links: []SharedLink{{Path: "/x", Target: "x"}}}},
+			`a volume with links needs a mount_path without spaces, backslashes`,
+		},
+	} {
+		bad := DefaultConfig()
+		bad.DataPath = t.TempDir()
+		bad.Pod.SharedVolumes = tc.vols
+		err := bad.Validate()
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v, want %q", name, err, tc.want)
+		}
+	}
+
+	// A link under a volume_mounts path is rejected; /sandbox paths, and a
+	// space in a mount path without links, are fine.
+	bad := DefaultConfig()
+	bad.DataPath = t.TempDir()
+	bad.Pod.Volumes = []map[string]any{{"name": "cache", "emptyDir": map[string]any{}}}
+	bad.Pod.VolumeMounts = []map[string]any{{"name": "cache", "mountPath": "/cache/"}}
+	bad.Pod.SharedVolumes = []SharedVolume{vol(SharedLink{Path: "/cache/pi/auth.json", Target: "a"}, SharedLink{Path: "/sandbox/.pi/agent/auth.json", Target: "b"}), {Name: "sp", ClaimName: "c", MountPath: "/my cache"}}
+	err = bad.Validate()
+	if err == nil || !strings.Contains(err.Error(), `pod.shared_volumes[0].links[0].path "/cache/pi/auth.json" is at or under the mount path "/cache/" of volume_mounts[0]`) || strings.Contains(err.Error(), "/sandbox/.pi") || strings.Contains(err.Error(), "my cache") {
+		t.Errorf("volume_mounts clash: %v", err)
+	}
+
+	// A profile's link clashing with a global one is reported under it.
+	bad = DefaultConfig()
+	bad.DataPath = t.TempDir()
+	bad.Pod.SharedVolumes = []SharedVolume{vol(SharedLink{Path: "/x", Target: "a"})}
+	bad.Sessions.Profiles = map[string]SessionProfile{"p": {Pod: &PodSettings{SharedVolumes: []SharedVolume{{Name: "b", ClaimName: "c", MountPath: "/b", Links: []SharedLink{{Path: "/x", Target: "b"}}}}}}}
+	err = bad.Validate()
+	if err == nil || !strings.Contains(err.Error(), `sessions.profiles.p.pod.shared_volumes[1].links[0].path "/x" is also the path of shared_volumes[0].links[0]`) {
+		t.Errorf("profile clash: %v", err)
+	}
+}
+
+func TestPodSharedLinksFile(t *testing.T) {
+	is := is.New(t)
+	td := t.TempDir()
+	p := filepath.Join(td, "config.yaml")
+	is.NoErr(os.WriteFile(p, []byte(`sessions:
+  runtime: pod
+  profiles:
+    p:
+      pod:
+        shared_volumes:
+          - name: auth
+            claim_name: auth
+            mount_path: /auth
+            links:
+              - { path: /home/me/.config/pi/mcp-auth.json, target: pi/mcp-auth.json }
+pod:
+  image: img
+  shared_volumes:
+    - name: auth
+      claim_name: auth
+      mount_path: /auth
+      links:
+        - { path: "/home/me/a b/auth.json", target: pi/auth.json }
+        - path: /home/me/.claude.json
+          target: claude.json
+`), 0o600))
+	cfg := &Config{DataPath: td}
+	is.NoErr(parseFile(cfg, p))
+	want := []SharedLink{{Path: "/home/me/a b/auth.json", Target: "pi/auth.json"}, {Path: "/home/me/.claude.json", Target: "claude.json"}}
+	is.Equal(cfg.Pod.SharedVolumes[0].Links, want)
+	is.NoErr(cfg.Validate())
+
+	// The written file keeps them.
+	is.NoErr(cfg.WriteConfig())
+	got := &Config{DataPath: cfg.DataPath}
+	is.NoErr(parseFile(got, cfg.ConfigPath()))
+	is.Equal(got.Pod.SharedVolumes, cfg.Pod.SharedVolumes)
+	is.Equal(got.Sessions.Profiles["p"].Pod.SharedVolumes[0].Links, []SharedLink{{Path: "/home/me/.config/pi/mcp-auth.json", Target: "pi/mcp-auth.json"}})
+	is.NoErr(got.Validate())
+}

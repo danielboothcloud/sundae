@@ -340,7 +340,7 @@ config:
     volumes: []
     volume_mounts: []
     # Existing PVCs mounted into every session's Pod (name, claim_name,
-    # mount_path, read_only, sub_path), e.g. a shared ReadWriteMany cache.
+    # mount_path, read_only, sub_path, links), e.g. a shared ReadWriteMany cache.
     # A profile's entries are merged with these by name, the profile's
     # winning. mount_path must be outside /sandbox. podRuntime.sharedVolumes
     # adds entries here, and can create the PVCs.
@@ -727,6 +727,20 @@ podRuntime:
   #    mountPath: /mise
   #    readOnly: false
   #    subPath: ""
+  #  # Tool logins shared by every session, of every user, that mounts it
+  #  # (all pods run as one UID): at every start and attach Sundae symlinks
+  #  # each path to <mountPath>/<target>. path is where the tool in your
+  #  # image keeps the file: HOME is /sandbox in the Sundae sandbox image;
+  #  # with PI_CODING_AGENT_DIR set, that directory (writable by the pod UID).
+  #  # Not with readOnly; a session runtime of pod only.
+  #  - name: auth
+  #    create: true
+  #    storageClass: cephfs-rwx
+  #    size: 1Gi
+  #    accessModes: [ReadWriteMany]
+  #    mountPath: /auth
+  #    links:
+  #      - { path: /sandbox/.pi/agent/auth.json, target: pi/auth.json }
 
 # Chart-side wiring for config.notifications. Only used when
 # config.notifications.ntfy.enabled is true.

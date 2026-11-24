@@ -532,6 +532,54 @@ the cache read-only or another claim at the same name. A session's Pod
 template is fixed when it is created: a shared volume added later reaches it
 once it is deleted and started again.
 
+#### Shared logins (`links`)
+
+A shared volume's `links` keep tool logins on one ReadWriteMany volume for
+every session, e.g. pi's in the Sundae sandbox image (`HOME=/sandbox`, pi's
+default directory `~/.pi/agent`):
+
+```yaml
+podRuntime:
+  sharedVolumes:
+    - name: auth
+      create: true
+      storageClass: cephfs-rwx
+      size: 1Gi
+      accessModes: [ReadWriteMany]
+      mountPath: /auth
+      links:
+        - { path: /sandbox/.pi/agent/auth.json, target: pi/auth.json }
+        - { path: /sandbox/.pi/agent/mcp-auth.json, target: pi/mcp-auth.json }
+```
+
+At every session start and attach Sundae symlinks each `path` (absolute, in
+the sandbox container) to `<mountPath>/<target>` (`target` is relative to
+what is mounted, after `subPath`). `path` is where the tool in *your* image
+keeps the file: an image that sets `PI_CODING_AGENT_DIR` (e.g.
+`/home/<user>/.config/pi`) uses that directory, which must be writable by
+the pod's UID (10001 by default).
+
+- A file already at `path` moves to the volume if the volume has none yet;
+  else the volume's copy wins, whatever its age, and the local file is kept
+  as `<path>.sundae-bak.<time>.<pid>` with a warning. Two sessions migrating
+  at once both keep their files (one on the volume, one in a backup).
+- A symlink elsewhere is replaced; a directory, or a file where the target
+  is a directory, is left alone with a warning; a volume not mounted in the
+  session (added after it was created) is skipped.
+- New directories on the volume are mode 0700. Problems are warnings: the
+  session still starts.
+- Pod runtime only; not with `readOnly`. A `path` cannot be at or under a
+  mount (another shared volume, `volumeMounts`; `/sandbox` is fine), nor at,
+  under or above another link's `path`; a volume with links needs a
+  `mountPath` without spaces or backslashes.
+- Links are made by exec, not in the Pod spec: a container restart without
+  an attach loses them until the next attach. Changing them recreates no Pod.
+- **Every session, of every user, that mounts the volume through that pod
+  config or profile shares the logins** (and a logout): all session pods run
+  as the same UID, so 0700 only keeps other UIDs out. Sundae is single-user
+  by design for now.
+- The credentials live only on the volume, never in the image.
+
 ### Security settings
 
 The defaults (`values.yaml`, the same as Sundae's built-in ones) match the

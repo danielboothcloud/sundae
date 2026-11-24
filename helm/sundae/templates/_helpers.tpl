@@ -255,7 +255,8 @@ The Sundae config file: .Values.config, plus
     an empty notifications.ntfy.token_file pointed at the mounted key;
   - with podRuntime.storageClass.create, an empty pod.storage_class set to
     that StorageClass;
-  - podRuntime.sharedVolumes appended to pod.shared_volumes;
+  - podRuntime.sharedVolumes (with their links) appended to
+    pod.shared_volumes;
   - when any sessions use the pod runtime, an empty pod.namespace set to the
     release namespace and an empty openshell.clone_url (which pod sandboxes
     clone over too) set to this release's HTTP Service, with or without
@@ -342,6 +343,13 @@ Sundae itself would reject at startup.
 {{- end -}}
 {{- with $v.subPath -}}
 {{- $_ := set $sv "sub_path" . -}}
+{{- end -}}
+{{- $links := list -}}
+{{- range $l := $v.links | default list -}}
+{{- $links = append $links (dict "path" (required (printf "podRuntime.sharedVolumes[%s].links[].path is required" $name) $l.path) "target" (required (printf "podRuntime.sharedVolumes[%s].links[].target is required" $name) $l.target)) -}}
+{{- end -}}
+{{- if $links -}}
+{{- $_ := set $sv "links" $links -}}
 {{- end -}}
 {{- $shared = append $shared $sv -}}
 {{- end -}}

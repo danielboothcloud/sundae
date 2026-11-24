@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -120,6 +122,34 @@ type SharedVolume struct {
 	ReadOnly bool `json:"read_only,omitempty" yaml:"read_only"`
 	// SubPath mounts a directory of the volume instead of its root.
 	SubPath string `json:"sub_path,omitempty" yaml:"sub_path"`
+	// Links are symlinks into the volume that Sundae makes in the sandbox
+	// container at every start and attach. Not on a read-only volume.
+	Links []SharedLink `json:"links,omitempty" yaml:"links"`
+}
+
+// SharedLink is a symlink at Path, in the sandbox container, to Target on
+// a shared volume, e.g. a tool's login file shared by every session.
+type SharedLink struct {
+	// Path is the link: absolute, not /, outside every mount but /sandbox,
+	// and neither at, under nor above another link.
+	Path string `json:"path" yaml:"path"`
+	// Target is relative to what is mounted at mount_path (after
+	// sub_path), without "..".
+	Target string `json:"target" yaml:"target"`
+}
+
+// TargetPath returns the absolute target of a link of v.
+func (v SharedVolume) TargetPath(l SharedLink) string {
+	return path.Join(v.MountPath, l.Target)
+}
+
+// cloneSharedVolumes returns a copy of vols that shares no Links with it.
+func cloneSharedVolumes(vols []SharedVolume) []SharedVolume {
+	out := slices.Clone(vols)
+	for i := range out {
+		out[i].Links = slices.Clone(out[i].Links)
+	}
+	return out
 }
 
 // DefaultContainerSecurityContext is pod.security_context when unset: no
@@ -249,7 +279,7 @@ func (c *Config) PodSettingsFor(profile string) PodSettings {
 	s.Annotations = maps.Clone(s.Annotations)
 	s.Labels = maps.Clone(s.Labels)
 	s.StorageAccessModes = slices.Clone(s.StorageAccessModes)
-	s.SharedVolumes = slices.Clone(s.SharedVolumes)
+	s.SharedVolumes = cloneSharedVolumes(s.SharedVolumes)
 	p := c.Sessions.Profiles[profile].Pod
 	if p == nil {
 		return s
@@ -296,6 +326,7 @@ func (c *Config) PodSettingsFor(profile string) PodSettings {
 // one with a name in base replaces it in place, the others are appended.
 func mergeSharedVolumes(base, over []SharedVolume) []SharedVolume {
 	for _, v := range over {
+		v.Links = slices.Clone(v.Links)
 		if i := slices.IndexFunc(base, func(b SharedVolume) bool { return b.Name == v.Name }); i >= 0 {
 			base[i] = v
 		} else {
@@ -531,15 +562,70 @@ func validateSharedVolume(v *SharedVolume, key string) error {
 	if v.SubPath != "" && (filepath.IsAbs(v.SubPath) || slices.Contains(strings.Split(v.SubPath, "/"), "..")) {
 		fail("sub_path %q must be a relative path without ..", v.SubPath)
 	}
+	errs = append(errs, validateSharedLinks(v, key))
 	return errors.Join(errs...)
 }
 
+// validateSharedLinks checks v's links and cleans them up.
+func validateSharedLinks(v *SharedVolume, key string) error {
+	var errs []error
+	if v.ReadOnly && len(v.Links) > 0 {
+		errs = append(errs, fmt.Errorf("%s.links: a read_only volume cannot have links: their targets live on it", key))
+	}
+	// NOTE: the link script finds the mount in /proc/self/mountinfo, which escapes these.
+	if len(v.Links) > 0 && (strings.ContainsAny(v.MountPath, " \\") || hasControl(v.MountPath)) {
+		errs = append(errs, fmt.Errorf("%s.mount_path %q: a volume with links needs a mount_path without spaces, backslashes or control characters", key, v.MountPath))
+	}
+	for i := range v.Links {
+		errs = append(errs, validateSharedLink(&v.Links[i], fmt.Sprintf("%s.links[%d]", key, i)))
+	}
+	return errors.Join(errs...)
+}
+
+// validateSharedLink checks one link and cleans it up; validatePodMounts
+// checks it against the mounts. Container paths are POSIX whatever Sundae runs on.
+func validateSharedLink(l *SharedLink, key string) error {
+	var errs []error
+	fail := func(format string, args ...any) { errs = append(errs, fmt.Errorf(key+"."+format, args...)) }
+	l.Path = strings.TrimSpace(l.Path)
+	l.Target = strings.TrimSpace(l.Target)
+	switch p := path.Clean(l.Path); {
+	case l.Path == "":
+		fail("path is required")
+	case hasControl(l.Path):
+		fail("path %q has a control character", l.Path)
+	case !path.IsAbs(l.Path):
+		fail("path %q must be absolute", l.Path)
+	case p == "/":
+		fail("path %q cannot be /", l.Path)
+	default:
+		l.Path = p
+	}
+	switch t := path.Clean(l.Target); {
+	case l.Target == "" || t == ".":
+		fail("target is required: a file or directory on the volume")
+	case hasControl(l.Target):
+		fail("target %q has a control character", l.Target)
+	case path.IsAbs(l.Target) || slices.Contains(strings.Split(l.Target, "/"), ".."):
+		fail("target %q must be a path relative to mount_path, without ..", l.Target)
+	default:
+		l.Target = t
+	}
+	return errors.Join(errs...)
+}
+
+func hasControl(s string) bool {
+	return strings.IndexFunc(s, unicode.IsControl) >= 0
+}
+
 // validatePodMounts checks that the effective settings' shared volumes
-// clash neither with each other nor with volumes and volume_mounts.
+// clash neither with each other nor with volumes and volume_mounts, and
+// that no link path is at or under another link or a mount but /sandbox.
 func validatePodMounts(s PodSettings, key string) error {
 	var errs []error
 	names := map[string]string{SandboxVolumeName: "the /sandbox volume"}
 	paths := map[string]string{SandboxPath: "the /sandbox volume"}
+	var mounts, links []namedPath
 	for i, v := range s.Volumes {
 		if n, ok := v["name"].(string); ok {
 			names[n] = fmt.Sprintf("volumes[%d]", i)
@@ -548,6 +634,12 @@ func validatePodMounts(s PodSettings, key string) error {
 	for i, m := range s.VolumeMounts {
 		if p, ok := m["mountPath"].(string); ok {
 			paths[filepath.Clean(p)] = fmt.Sprintf("volume_mounts[%d]", i)
+			mounts = append(mounts, namedPath{p, fmt.Sprintf("volume_mounts[%d]", i)})
+		}
+	}
+	for i, v := range s.SharedVolumes {
+		if v.MountPath != "" {
+			mounts = append(mounts, namedPath{v.MountPath, fmt.Sprintf("shared_volumes[%d]", i)})
 		}
 	}
 	for i, v := range s.SharedVolumes {
@@ -564,8 +656,51 @@ func validatePodMounts(s PodSettings, key string) error {
 			}
 			paths[v.MountPath] = fmt.Sprintf("shared_volumes[%d]", i)
 		}
+		for j, l := range v.Links {
+			if l.Path == "" {
+				continue
+			}
+			lkey := fmt.Sprintf("%s.links[%d].path %q", at, j, l.Path)
+			// The script would mkdir in, or link over, an unmounted volume or another link.
+			if m, ok := clashingPath(l.Path, mounts, false); ok {
+				errs = append(errs, fmt.Errorf("%s is at or under the mount path %q of %s: link only outside mounts (but %s)", lkey, m.path, m.name, SandboxPath))
+			}
+			switch other, ok := clashingPath(l.Path, links, true); {
+			case !ok:
+			case posixClean(other.path) == posixClean(l.Path):
+				errs = append(errs, fmt.Errorf("%s is also the path of %s", lkey, other.name))
+			default:
+				errs = append(errs, fmt.Errorf("%s is at or under, or holds, the path %q of %s: links cannot nest", lkey, other.path, other.name))
+			}
+			links = append(links, namedPath{l.Path, fmt.Sprintf("shared_volumes[%d].links[%d]", i, j)})
+		}
 	}
 	return errors.Join(errs...)
+}
+
+// namedPath is a container path and what it belongs to.
+type namedPath struct{ path, name string }
+
+// clashingPath returns the first of paths that p is at or under, or with
+// either also the first that is under p.
+func clashingPath(p string, paths []namedPath, either bool) (namedPath, bool) {
+	for _, o := range paths {
+		if pathWithin(p, o.path) || either && pathWithin(o.path, p) {
+			return o, true
+		}
+	}
+	return namedPath{}, false
+}
+
+// pathWithin reports whether the container path p is dir or under it.
+func pathWithin(p, dir string) bool {
+	p, dir = posixClean(p), posixClean(dir)
+	return p == dir || strings.HasPrefix(p, strings.TrimSuffix(dir, "/")+"/")
+}
+
+// posixClean cleans a container path, which is POSIX whatever Sundae runs on.
+func posixClean(p string) string {
+	return path.Clean(filepath.ToSlash(p))
 }
 
 // unjoin returns the errors joined in err.

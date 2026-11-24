@@ -612,6 +612,9 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 			}
 		}
 	}
+	// Every start and attach, as a restarted container has lost them; after
+	// the clones, so a link under a checkout does not make it look cloned.
+	m.applySharedLinks(ctx, sandbox, s.Runtime, profile, progress)
 	for _, r := range opts.RemoveRepos {
 		if !slices.Contains(s.Repos, r) {
 			fmt.Fprintf(progress, "Removed %s from session %s; its checkout %s stays in the sandbox\n", r, name, repoDir(r)) //nolint:errcheck

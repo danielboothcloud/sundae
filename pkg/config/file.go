@@ -357,6 +357,10 @@ pod:
   #     mount_path: /mise
   #     read_only: false
   #     sub_path: ""
+  #     # Symlinks Sundae makes in the sandbox at every start and attach,
+  #     # to a target relative to mount_path; not on a read_only volume.
+  #     links:
+  #       - { path: /home/me/.config/pi/auth.json, target: pi/auth.json }
   shared_volumes: {{ json .Pod.SharedVolumes }}
 
 # The docker session runtime (sessions.runtime: docker): each session is a

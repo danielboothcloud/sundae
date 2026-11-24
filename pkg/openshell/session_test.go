@@ -193,6 +193,9 @@ type fakeExec struct {
 	// saveExit makes the private save script fail; saveOut is its output.
 	saveExit int
 	saveOut  string
+	// linksExit makes the shared links script fail; linksOut is its output.
+	linksExit int
+	linksOut  string
 }
 
 func newFakeExec() *fakeExec {
@@ -423,6 +426,11 @@ func (f *fakeExec) RunStdin(_ context.Context, _, sandbox string, command []stri
 		if a[0] == "jj" {
 			b.jjIdentity[a[2]] = env(o, "SUNDAE_JJ_USER_NAME") + " " + env(o, "SUNDAE_JJ_USER_EMAIL")
 		}
+	case sharedLinksName:
+		if f.linksExit != 0 {
+			return fail(f.linksExit, "sh: boom")
+		}
+		return ok(f.linksOut)
 	case gitIdentityName:
 		if f.identityExit != 0 {
 			return fail(f.identityExit, "error: could not lock config file")
