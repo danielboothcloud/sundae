@@ -18,7 +18,7 @@ const (
 	VCSGit VCS = "git"
 	// VCSJJ is a Jujutsu (jj) repository backed by Git.
 	VCSJJ VCS = "jj"
-	// DefaultVCS is the VCS used for new and imported repositories when none
+	// DefaultVCS is the VCS used for new repositories when none
 	// is specified.
 	DefaultVCS = VCSJJ
 )

@@ -1,8 +1,9 @@
 {{- /*
 Egress for the pod runtime's sandbox Pods (opt-in): no ingress at all (the
 terminal runs through exec, via the kubelet), egress only to Sundae's HTTP
-port (clone and push over config.openshell.clone_url), DNS, and
-podRuntime.networkPolicy.extraEgress.
+port (clone and push over config.openshell.clone_url), DNS, with
+podRuntime.networkPolicy.allowForgeEgress TCP 443 anywhere but
+forgeEgressExcept (forges), and podRuntime.networkPolicy.extraEgress.
 */}}
 {{- $np := .Values.podRuntime.networkPolicy }}
 {{- if and (include "sundae.podRuntime" .) $np.enabled }}
@@ -48,6 +49,28 @@ spec:
         - port: 53
           protocol: UDP
         - port: 53
+          protocol: TCP
+    {{- end }}
+    {{- if $np.allowForgeEgress }}
+    # Forges over HTTPS (git fetch of origin, gh, glab). NetworkPolicy
+    # cannot match host names, so this is any address on 443 but the
+    # cluster-internal and metadata ranges.
+    {{- $except := $np.forgeEgressExcept | default dict }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            {{- with $except.ipv4 }}
+            except:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+        - ipBlock:
+            cidr: ::/0
+            {{- with $except.ipv6 }}
+            except:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+      ports:
+        - port: 443
           protocol: TCP
     {{- end }}
     {{- with $np.extraEgress }}

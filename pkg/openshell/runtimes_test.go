@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 
@@ -44,6 +45,15 @@ func unwrapPodExec(command []string) ([]string, v1.ExecOptions) {
 		command = command[5:]
 	}
 	return command, o
+}
+
+// readStdin returns what r holds; "" for nil.
+func readStdin(r io.Reader) string {
+	if r == nil {
+		return ""
+	}
+	b, _ := io.ReadAll(r)
+	return string(b)
 }
 
 // podHarness is a harness whose sessions run in the pod runtime (a fake
@@ -89,7 +99,7 @@ func newPodHarness(t *testing.T, mutate func(*config.Config)) *podHarness {
 	pr := pod.NewWithClient(cfg, cs, "sundae")
 	pr.SetStream(func(ctx context.Context, name string, o pod.StreamOptions) error {
 		command, opts := unwrapPodExec(o.Command)
-		res, err := ex.Run(ctx, "", name, command, opts)
+		res, err := ex.RunStdin(ctx, "", name, command, readStdin(o.Stdin), opts)
 		if err != nil {
 			return err
 		}
@@ -154,7 +164,7 @@ func TestPodRuntimeSession(t *testing.T) {
 	}
 
 	// Suspend: the pod goes, the volume stays.
-	if suspended, err := h.mgr.Suspend(ctx, alice, "main"); err != nil || !suspended {
+	if suspended, err := h.mgr.Suspend(ctx, alice, "main", nil); err != nil || !suspended {
 		t.Fatalf("suspend: %v %v", suspended, err)
 	}
 	if _, err := h.cs.CoreV1().Pods("sundae").Get(ctx, s.Sandbox, metav1.GetOptions{}); err == nil {
@@ -179,7 +189,7 @@ func TestPodRuntimeSession(t *testing.T) {
 	}
 
 	// Delete: pod and volume go.
-	if existed, err := h.mgr.Delete(ctx, alice, "main"); err != nil || !existed {
+	if existed, err := h.mgr.Delete(ctx, alice, "main", DeleteOptions{}); err != nil || !existed {
 		t.Fatalf("delete: %v %v", existed, err)
 	}
 	if _, err := h.cs.CoreV1().PersistentVolumeClaims("sundae").Get(ctx, s.Sandbox, metav1.GetOptions{}); err == nil {
@@ -236,7 +246,7 @@ func TestDockerRuntimeSession(t *testing.T) {
 		if len(command) > 3 && command[0] == "/bin/sh" && command[2] == docker.LoginWrapper {
 			command, opts.NoLoginShell = command[4:], false
 		}
-		res, err := ex.Run(ctx, "", name, command, opts)
+		res, err := ex.RunStdin(ctx, "", name, command, readStdin(o.Stdin), opts)
 		if err != nil {
 			return 0, err
 		}
@@ -267,7 +277,7 @@ func TestDockerRuntimeSession(t *testing.T) {
 		t.Fatalf("list: %+v %v", infos, err)
 	}
 
-	if suspended, err := mgr.Suspend(ctx, alice, "main"); err != nil || !suspended {
+	if suspended, err := mgr.Suspend(ctx, alice, "main", nil); err != nil || !suspended {
 		t.Fatalf("suspend: %v %v", suspended, err)
 	}
 	progress.Reset()
@@ -278,7 +288,7 @@ func TestDockerRuntimeSession(t *testing.T) {
 	if !strings.Contains(progress.String(), "a suspended docker session keeps /sandbox") {
 		t.Fatalf("progress = %q", progress.String())
 	}
-	if existed, err := mgr.Delete(ctx, alice, "main"); err != nil || !existed || len(engine.Containers)+len(engine.Volumes) != 0 {
+	if existed, err := mgr.Delete(ctx, alice, "main", DeleteOptions{}); err != nil || !existed || len(engine.Containers)+len(engine.Volumes) != 0 {
 		t.Fatalf("delete: %v %v", existed, err)
 	}
 }

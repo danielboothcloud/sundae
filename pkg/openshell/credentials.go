@@ -2,8 +2,11 @@ package openshell
 
 import (
 	"context"
-	"encoding/base64"
+	"fmt"
+	"io"
 	"strings"
+
+	"github.com/danielboothcloud/sundae/pkg/config"
 )
 
 // Git credentials in a sandbox.
@@ -37,34 +40,50 @@ const (
 
 const (
 	gitCredentialsName = "sundae-git-credentials"
-	// $1: the credential directory, $2: the credential file.
-	// SUNDAE_GITCONFIG: its content, base64. Writes the file and makes sure
-	// ~/.gitconfig includes it.
+	// $1: dir, $2: credential file, $3: forge env file. Contents (base64) in
+	// SUNDAE_GITCONFIG/SUNDAE_FORGE_ENV, or as two stdin lines when SUNDAE_CREDENTIALS_STDIN=1.
 	gitCredentialsScript = `set -e
 umask 077
 mkdir -p "$1"
 [ -O "$1" ] || { echo "$1 is not owned by uid $(id -u)" >&2; exit 1; }
 chmod 0700 "$1"
+if [ "$SUNDAE_CREDENTIALS_STDIN" = 1 ]; then
+	IFS= read -r SUNDAE_GITCONFIG
+	IFS= read -r SUNDAE_FORGE_ENV
+fi
 printf '%s' "$SUNDAE_GITCONFIG" | base64 -d > "$2.part"
 mv -f "$2.part" "$2"
+printf '%s' "$SUNDAE_FORGE_ENV" | base64 -d > "$3.part"
+mv -f "$3.part" "$3"
 git config --global --get-all include.path 2>/dev/null | grep -qxF "$2" || git config --global --add include.path "$2"`
 )
 
-// writeGitCredentials writes the git credential file for token into the
-// sandbox and makes ~/.gitconfig include it.
-func (m *Manager) writeGitCredentials(ctx context.Context, sandbox, username, token string) error {
-	_, err := m.script(ctx, sandbox, gitCredentialsName, gitCredentialsScript,
-		map[string]string{"SUNDAE_GITCONFIG": execEnvValue(gitCredentialConfig(m.cloneURL, username, token))},
-		gitCredentialDir, gitCredentialFile)
+// writeGitCredentials writes the credential and forge env files. Pod and docker
+// get them on stdin, kept out of exec URLs and audit logs; OpenShell has no stdin.
+func (m *Manager) writeGitCredentials(ctx context.Context, sandbox, runtime, username, token string, forges []forgeCredential, progress io.Writer) error {
+	forgeConfig, warnings := forgeGitConfig(forges)
+	env, envWarnings := forgeEnv(forges)
+	for _, w := range append(warnings, envWarnings...) {
+		fmt.Fprintf(progress, "Warning: %s\n", w) //nolint:errcheck
+	}
+	gitconfig := execEnvValue(gitCredentialConfig(m.cloneURL, username, token) + forgeConfig)
+	forgeEnvValue := execEnvValue(env)
+	if runtime == config.RuntimeOpenShell {
+		_, err := m.script(ctx, sandbox, gitCredentialsName, gitCredentialsScript,
+			map[string]string{"SUNDAE_GITCONFIG": gitconfig, "SUNDAE_FORGE_ENV": forgeEnvValue},
+			gitCredentialDir, gitCredentialFile, forgeEnvFile)
+		return err
+	}
+	_, err := m.scriptStdin(ctx, sandbox, gitCredentialsName, gitCredentialsScript,
+		map[string]string{"SUNDAE_CREDENTIALS_STDIN": "1"},
+		strings.NewReader(gitconfig+"\n"+forgeEnvValue+"\n"),
+		gitCredentialDir, gitCredentialFile, forgeEnvFile)
 	return err
 }
 
 // gitCredentialConfig returns a git config file that makes git send the
 // token as basic-auth credentials to cloneURL only.
 func gitCredentialConfig(cloneURL, username, token string) string {
-	cred := base64.StdEncoding.EncodeToString([]byte(username + ":" + token))
-	url := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(cloneURL + "/")
 	return "# Written by Sundae on every session start and attach.\n" +
-		"[http \"" + url + "\"]\n" +
-		"\textraHeader = Authorization: Basic " + cred + "\n"
+		httpExtraHeader(cloneURL+"/", username, token)
 }

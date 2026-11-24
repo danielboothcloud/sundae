@@ -231,7 +231,7 @@ func TestServiceImportSyncPush(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !repo.IsPrivate() || repo.IsMirror() || repo.Vcs() != proto.DefaultVCS || repo.Description() != "about me/proj" {
+	if !repo.IsPrivate() || repo.IsMirror() || repo.Vcs() != proto.VCSJJ || repo.Description() != "about me/proj" {
 		t.Errorf("repo = private %v mirror %v vcs %s desc %q", repo.IsPrivate(), repo.IsMirror(), repo.Vcs(), repo.Description())
 	}
 	gr, _ := repo.Open()
@@ -292,7 +292,7 @@ func TestServiceImportSyncPush(t *testing.T) {
 	}
 
 	// --all imports what the filter lets through and is not imported yet.
-	results, err = fx.svc.Import(ctx, fx.user, "gh", ImportOptions{All: true, Vcs: proto.VCSGit})
+	results, err = fx.svc.Import(ctx, fx.user, "gh", ImportOptions{All: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +304,7 @@ func TestServiceImportSyncPush(t *testing.T) {
 			t.Errorf("--all touched %s: %+v", r.Path, r)
 		}
 	}
-	if o, _ := fx.be.Repository(ctx, "gh/me/other"); o.Vcs() != proto.VCSGit || o.IsPrivate() {
+	if o, _ := fx.be.Repository(ctx, "gh/me/other"); o.Vcs() != proto.VCSJJ || o.IsPrivate() {
 		t.Errorf("gh/me/other vcs %s private %v", o.Vcs(), o.IsPrivate())
 	}
 

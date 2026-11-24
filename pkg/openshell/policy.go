@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/netip"
 	"slices"
+	"strings"
 
 	v1 "github.com/NVIDIA/OpenShell/sdk/go/openshell/v1"
 	"github.com/danielboothcloud/sundae/pkg/config"
@@ -47,6 +48,8 @@ func restrictiveDefaultPolicy() *SandboxPolicy {
 //
 //   - sundae_git: Sundae's HTTP git endpoint (cfg.OpenShellCloneURL), the
 //     host and port git and jj clone, fetch and push over;
+//   - sundae_forge_<name>: each forge's web host (and API host) for
+//     forgeBinaries only, so sessions fetch origin and run gh and glab;
 //   - each of openshell.network_policies.
 //
 // Sundae's own rules allow any program ("/**") and inspect nothing (no
@@ -65,6 +68,14 @@ func BuildSandboxPolicy(cfg *config.Config) (*SandboxPolicy, error) {
 		return nil, fmt.Errorf("openshell: sandbox policy: clone URL %q %w", cfg.OpenShellCloneURL(), err)
 	}
 	p.NetworkPolicies[config.NetworkPolicyGit] = builtinRule(config.NetworkPolicyGit, host, port)
+
+	for _, f := range cfg.Forges {
+		rule, err := forgeRule(f)
+		if err != nil {
+			return nil, err
+		}
+		p.NetworkPolicies[rule.Name] = rule
+	}
 
 	for _, r := range cfg.OpenShell.NetworkPolicies {
 		if _, ok := p.NetworkPolicies[r.Name]; ok {
@@ -125,4 +136,42 @@ func configuredRule(r config.OpenShellNetworkPolicy) v1.NetworkPolicyRule {
 		rule.Binaries = append(rule.Binaries, v1.PolicyNetworkBinary{Path: b})
 	}
 	return rule
+}
+
+// forgeBinaries are the programs that reach a forge: git's HTTPS helper
+// (Fedora and Debian paths), jj, gh and glab.
+var forgeBinaries = []string{
+	"/usr/bin/git",
+	"/usr/libexec/git-core/git-remote-https",
+	"/usr/lib/git-core/git-remote-https",
+	"/usr/bin/jj",
+	"/usr/bin/gh",
+	"/usr/bin/glab",
+}
+
+// forgeRule returns the rule letting forgeBinaries reach forge f: its web
+// host, plus api.github.com for github.com and api.<host> for *.ghe.com.
+// GitHub Enterprise Server and GitLab serve their API on the web host.
+func forgeRule(f config.ForgeConfig) (v1.NetworkPolicyRule, error) {
+	name := config.NetworkPolicyReservedPrefix + "forge_" + f.Name
+	host, port, err := config.URLHostPort(f.URL)
+	if err != nil {
+		return v1.NetworkPolicyRule{}, fmt.Errorf("openshell: sandbox policy: forge %s url %q %w", f.Name, f.URL, err)
+	}
+	hosts := []string{host}
+	switch lower := strings.ToLower(host); {
+	case f.Kind != config.ForgeKindGitHub:
+	case lower == "github.com":
+		hosts = append(hosts, "api.github.com")
+	case strings.HasSuffix(lower, ".ghe.com"):
+		hosts = append(hosts, "api."+lower)
+	}
+	rule := v1.NetworkPolicyRule{Name: name}
+	for _, h := range hosts {
+		rule.Endpoints = append(rule.Endpoints, builtinRule(name, h, port).Endpoints...)
+	}
+	for _, b := range forgeBinaries {
+		rule.Binaries = append(rule.Binaries, v1.PolicyNetworkBinary{Path: b})
+	}
+	return rule, nil
 }

@@ -55,7 +55,7 @@ type Source interface {
 	// on the session until it is closed.
 	Prepare(ctx context.Context, req sessionctl.Request) (Attacher, error)
 	// Delete deletes a session, its sandbox and its storage. It reports
-	// whether there was one.
+	// whether there was one. It refuses when the private files cannot be saved.
 	Delete(ctx context.Context, name string) (bool, error)
 	// Suspend suspends a running session, keeping its storage. It reports
 	// whether it suspended it.
@@ -246,7 +246,7 @@ func (s *source) Prepare(ctx context.Context, req sessionctl.Request) (Attacher,
 
 func (s *source) Delete(ctx context.Context, name string) (existed bool, err error) {
 	err = s.withClient(func(mgr *openshell.Manager) error {
-		existed, err = mgr.Delete(ctx, s.user, name)
+		existed, err = mgr.Delete(ctx, s.user, name, openshell.DeleteOptions{})
 		return err //nolint:wrapcheck
 	})
 	return existed, err
@@ -254,7 +254,7 @@ func (s *source) Delete(ctx context.Context, name string) (existed bool, err err
 
 func (s *source) Suspend(ctx context.Context, name string) (suspended bool, err error) {
 	err = s.withClient(func(mgr *openshell.Manager) error {
-		suspended, err = mgr.Suspend(ctx, s.user, name)
+		suspended, err = mgr.Suspend(ctx, s.user, name, nil)
 		return err //nolint:wrapcheck
 	})
 	return suspended, err

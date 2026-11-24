@@ -118,7 +118,7 @@ func exitCode(err error) (int, bool) {
 
 func (r *Runtime) Run(ctx context.Context, name string, command []string, opts sbx.ExecOptions) (*sbx.ExecResult, error) {
 	var stdout, stderr bytes.Buffer
-	err := r.stream(ctx, name, StreamOptions{Command: wrapCommand(command, opts), Stdout: &stdout, Stderr: &stderr})
+	err := r.stream(ctx, name, StreamOptions{Command: wrapCommand(command, opts), Stdin: opts.Stdin, Stdout: &stdout, Stderr: &stderr})
 	res := &sbx.ExecResult{Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}
 	if err != nil {
 		code, ok := exitCode(err)

@@ -151,6 +151,10 @@ type Monitor struct {
 	reposMu   sync.Mutex
 	repoLists map[string][]string
 
+	// savePrivate saves a session's private files before an idle suspend;
+	// nil saves nothing.
+	savePrivate func(ctx context.Context, client Client, userID int64, sandbox string)
+
 	// suspends tracks background suspends; suspendSem bounds them.
 	suspends   sync.WaitGroup
 	suspendSem chan struct{}
@@ -615,7 +619,7 @@ func (m *Monitor) autoSuspend(ctx context.Context, sandbox string) {
 
 	ctx, cancel := context.WithTimeout(ctx, suspendTimeout)
 	defer cancel()
-	err = m.suspendSandbox(ctx, client, sandbox, true)
+	err = m.suspendSandbox(ctx, client, sandbox, true, m.beforeAutoSuspend(client, sandbox))
 	switch {
 	case err == nil:
 		m.mu.Lock()
@@ -652,7 +656,7 @@ var errNotDue = errors.New("not due")
 // to suspend it before. auto suspends re-check that the session is still
 // due. Commands that open a bridge meanwhile wait for the suspend to finish
 // (see OpenBridge), then resume it.
-func (m *Monitor) suspendSandbox(ctx context.Context, client Client, sandbox string, auto bool) error {
+func (m *Monitor) suspendSandbox(ctx context.Context, client Client, sandbox string, auto bool, before func(context.Context)) error {
 	m.mu.Lock()
 	if m.bridges[sandbox] > 0 {
 		m.mu.Unlock()
@@ -687,6 +691,9 @@ func (m *Monitor) suspendSandbox(ctx context.Context, client Client, sandbox str
 		close(done)
 	}()
 
+	if before != nil {
+		before(ctx)
+	}
 	sb, err := client.SuspendSandbox(ctx, sandbox)
 	switch {
 	case IsSuspendUnsupported(err):
@@ -724,14 +731,43 @@ func (m *Monitor) markUnsuspendable(sandbox string, err error) {
 }
 
 // Suspend suspends a session for the user's `session suspend`: see
-// suspendSandbox. It is the caller's job to check ownership and publish. A
-// nil Monitor only suspends.
-func (m *Monitor) Suspend(ctx context.Context, client Client, sandbox string) error {
+// suspendSandbox. before, if not nil, runs just before the sandbox is
+// suspended, with bridges held off. It is the caller's job to check
+// ownership and publish. A nil Monitor only runs before and suspends.
+func (m *Monitor) Suspend(ctx context.Context, client Client, sandbox string, before func(context.Context)) error {
 	if m == nil {
+		if before != nil {
+			before(ctx)
+		}
 		_, err := client.SuspendSandbox(ctx, sandbox)
 		return err //nolint:wrapcheck
 	}
-	return m.suspendSandbox(ctx, client, sandbox, false)
+	return m.suspendSandbox(ctx, client, sandbox, false, before)
+}
+
+// WithMonitorSavePrivate makes idle suspends save the session's private
+// files first (see Manager.SavePrivate); save gets the session owner's id.
+func WithMonitorSavePrivate(save func(ctx context.Context, client Client, userID int64, sandbox string)) MonitorOption {
+	return func(m *Monitor) { m.savePrivate = save }
+}
+
+// beforeAutoSuspend is the save an idle suspend of sandbox runs first; nil
+// for none.
+func (m *Monitor) beforeAutoSuspend(client Client, sandbox string) func(context.Context) {
+	if m.savePrivate == nil {
+		return nil
+	}
+	return func(ctx context.Context) {
+		m.mu.Lock()
+		var userID int64
+		if e := m.entries[sandbox]; e != nil {
+			userID = e.st.UserID
+		}
+		m.mu.Unlock()
+		if userID != 0 {
+			m.savePrivate(ctx, client, userID, sandbox)
+		}
+	}
 }
 
 // OpenBridge counts a bridge open on the sandbox's session until the

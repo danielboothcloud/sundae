@@ -26,14 +26,6 @@ func (m *Forges) View() string {
 		return ""
 	}
 	w, h := m.common.Width, m.common.Height
-	if m.importForm != nil {
-		// Placed as the Sessions tab places its forms.
-		lines := strings.Split(m.importForm.View(w-1), "\n")
-		for i, l := range lines {
-			lines[i] = " " + l
-		}
-		return lipgloss.NewStyle().Width(w).Height(h).MaxHeight(h).Render("\n" + strings.Join(lines, "\n"))
-	}
 	desc := m.common.Styles.RepoSelector.Normal.Desc
 	lines := []string{""}
 	switch {
@@ -188,15 +180,31 @@ func (m *Forges) headerRow(g group, selected bool, w int) []string {
 		return strings.Join(out, sel.Desc.Render(" · "))
 	}
 
-	title := sel.Title.Render(common.TruncateString(name, cw))
+	// An import-all confirm asked here ends the first line, as in repoRow.
+	var confirm *prompt.Confirm
+	lw := cw
+	if m.confirm != nil && m.confirmKey == hk {
+		confirm = m.confirm
+		lw -= confirm.AskWidth()
+	}
+	withConfirm := func(lines []string) []string {
+		if confirm != nil {
+			lines[0] = confirm.EndLine(lines[0], cw)
+			for _, l := range confirm.Lines(cw-2, 0) {
+				lines = append(lines, "  "+l)
+			}
+		}
+		return append(lines, m.groupNote(g, cw)...)
+	}
+
+	title := sel.Title.Render(common.TruncateString(name, lw))
 	if m.narrow() {
 		right := ansi.Truncate(join(doing, counts, last), cw-2, "…")
-		lines := []string{title, "  " + right}
-		lines = append(lines, m.groupNote(g, cw)...)
+		lines := withConfirm([]string{title, "  " + right})
 		return strings.Split(base.Render(strings.Join(lines, "\n")), "\n")
 	}
 	right := join(doing, counts, last)
-	room := cw - lipgloss.Width(title) - 2
+	room := lw - lipgloss.Width(title) - 2
 	if lipgloss.Width(right) > room {
 		// Drop the counts before cutting what went wrong.
 		right = join(doing, last)
@@ -204,9 +212,8 @@ func (m *Forges) headerRow(g group, selected bool, w int) []string {
 	if lipgloss.Width(right) > room {
 		right = ansi.Truncate(right, max(room, 0), "…")
 	}
-	gap := max(cw-lipgloss.Width(title)-lipgloss.Width(right), 1)
-	lines := []string{title + strings.Repeat(" ", gap) + right}
-	lines = append(lines, m.groupNote(g, cw)...)
+	gap := max(lw-lipgloss.Width(title)-lipgloss.Width(right), 1)
+	lines := withConfirm([]string{title + strings.Repeat(" ", gap) + right})
 	return strings.Split(base.Render(strings.Join(lines, "\n")), "\n")
 }
 
@@ -282,7 +289,7 @@ func (m *Forges) repoRow(g group, r forge.RepoStatus, selected bool, w int) []st
 	}
 
 	// An open confirm ends the first line with its question; its lines
-	// follow the row's, which say what a push would send.
+	// follow the row's, which say what a push or import would do.
 	var confirm *prompt.Confirm
 	lw := cw
 	if m.confirm != nil && m.confirmKey == rk {

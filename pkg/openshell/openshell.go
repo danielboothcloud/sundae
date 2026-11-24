@@ -522,6 +522,10 @@ func (c *sdkClient) syncProviders(ctx context.Context, name string, have, want [
 }
 
 func (c *sdkClient) Run(ctx context.Context, name string, command []string, opts ExecOptions) (*ExecResult, error) {
+	if opts.Stdin != nil {
+		// The gateway's Run has no input channel; dropping it would run the command without its data.
+		return nil, fmt.Errorf("openshell: exec in %q: %w", name, sbx.ErrStdinUnsupported)
+	}
 	res, err := c.exec.Run(ctx, c.workspace, name, command, toSDKExec(opts))
 	if err != nil {
 		return nil, err //nolint:wrapcheck

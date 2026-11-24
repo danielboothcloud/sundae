@@ -71,6 +71,9 @@ type Manager struct {
 	providerSync *ProviderReconciler
 	// logger reports what does not fail a command.
 	logger *log.Logger
+	// resolveRepo returns a session repository's spec; nil saves no
+	// private files (WithRepoResolver).
+	resolveRepo func(repo string) (RepoSpec, error)
 }
 
 // ManagerOption configures a Manager.
@@ -516,15 +519,6 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 	}
 	s.setRepos(repos)
 
-	// Renew the git credentials first: the clone uses them too.
-	token, err := m.issueToken(ctx, opts.User, sandbox)
-	if err != nil {
-		return nil, err
-	}
-	if err := m.writeGitCredentials(ctx, sandbox, opts.User.Username(), token); err != nil {
-		return nil, err
-	}
-
 	// The session's current list: what the Monitor knows, else the
 	// sandbox's list file (`session repos` may have changed it since the
 	// sandbox was created), else the list the sandbox was created with. The file is only
@@ -555,6 +549,7 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 	m.monitor.rememberRepos(sandbox, s.Repos)
 	repos = s.Repos
 
+	var sessionSpecs []RepoSpec
 	for _, repo := range s.Repos {
 		sp, ok := specOf[repo]
 		if !ok {
@@ -567,6 +562,18 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 				continue
 			}
 		}
+		sp.Name = repo
+		sessionSpecs = append(sessionSpecs, sp)
+	}
+
+	// Renew the credentials before cloning, which uses them.
+	tokens, err := m.renewCredentials(ctx, opts.User, sandbox, s.Runtime, sessionSpecs, progress)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, sp := range sessionSpecs {
+		repo := sp.Name
 		dir := repoDir(repo)
 		exists, err := m.dirExists(ctx, sandbox, dir)
 		if err != nil {
@@ -574,10 +581,24 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 		}
 		if !exists {
 			fmt.Fprintf(progress, "Cloning %s into %s...\n", repo, dir) //nolint:errcheck
-			if err := m.clone(ctx, sandbox, sp.VCS, repo, dir, sp.GitIdentity); err != nil {
+			if err := m.clone(ctx, sandbox, sp, dir); err != nil {
 				return nil, err
 			}
 			s.Cloned = append(s.Cloned, repo)
+		}
+
+		// Every start and attach, so older checkouts are fixed up; not fatal.
+		if sp.Forge != nil {
+			fetchOrigin := tokens[sp.Forge.Forge]
+			if !fetchOrigin {
+				fmt.Fprintf(progress, "Warning: no %s token in the session: jj git fetch in %s fetches sundae only, not origin\n", sp.Forge.Forge, dir) //nolint:errcheck
+			}
+			if err := m.setupForgeRemotes(ctx, sandbox, dir, repo, sp.Forge, fetchOrigin); err != nil {
+				m.logger.Warn("cannot set up the forge remotes", "sandbox", sandbox, "repo", repo, "err", err)
+				fmt.Fprintf(progress, "Warning: could not set up the sundae and origin remotes in %s: %v\n", dir, err) //nolint:errcheck
+			} else if sp.hasPrivatePaths() {
+				m.restorePrivate(ctx, sandbox, dir, sp, progress)
+			}
 		}
 
 		// Set the repository's git identity in its checkout on every
@@ -749,10 +770,14 @@ func (m *Manager) missingProviderError(profile string, err *MissingProviderError
 // no-op. It refuses a session with an open bridge, one that is not running,
 // sandboxes Sundae did not create, and a runtime that cannot suspend, and
 // publishes suspended (Op SuspendManual) on success. start, attach and
-// resume start the session again.
-func (m *Manager) Suspend(ctx context.Context, user proto.User, name string) (bool, error) {
+// resume start the session again. It saves the private files first; a
+// failed save is a warning on progress (may be nil): the storage keeps them.
+func (m *Manager) Suspend(ctx context.Context, user proto.User, name string, progress io.Writer) (bool, error) {
 	if user == nil {
 		return false, proto.ErrUnauthorized
+	}
+	if progress == nil {
+		progress = io.Discard
 	}
 	name, err := sessionName(name)
 	if err != nil {
@@ -779,7 +804,12 @@ func (m *Manager) Suspend(ctx context.Context, user proto.User, name string) (bo
 		return false, fmt.Errorf("session %s is %s; only a running session can be suspended", name, sb.Phase)
 	}
 
-	if err := m.monitor.Suspend(ctx, m.client, sandbox); err != nil {
+	save := func(ctx context.Context) {
+		if _, err := m.savePrivate(ctx, user, sb, progress); err != nil {
+			fmt.Fprintf(progress, "Warning: could not save the private files; the session's storage keeps them: %v\n", err) //nolint:errcheck
+		}
+	}
+	if err := m.monitor.Suspend(ctx, m.client, sandbox, save); err != nil {
 		if IsSuspendUnsupported(err) {
 			return false, fmt.Errorf("session %s cannot be suspended: its %s runtime cannot suspend this sandbox, so it keeps running (\"session delete %s\" deletes it and its storage): %w", name, SandboxRuntime(sb), name, err)
 		}
@@ -859,15 +889,32 @@ func (m *Manager) Attach(ctx context.Context, s *Session, cols, rows uint32) (In
 	return is, nil
 }
 
+// DeleteOptions configures Delete.
+type DeleteOptions struct {
+	// DiscardPrivate deletes the session even when its private files
+	// could not be saved.
+	DiscardPrivate bool
+	// Progress receives warnings. May be nil.
+	Progress io.Writer
+}
+
 // Delete deletes the sandbox of the user's named session and its storage,
 // and revokes its git credentials. Deleting an absent session is a
 // successful no-op; it reports whether there was one.
 //
+// A running session's private files are saved first; a failed save, or a
+// session that is not running and has private files, refuses the delete
+// (ErrPrivateNotSaved) unless opts.DiscardPrivate.
+//
 // It publishes deleted once the sandbox is deleted, and failed when the
 // sandbox could not be looked up or deleted.
-func (m *Manager) Delete(ctx context.Context, user proto.User, name string) (bool, error) {
+func (m *Manager) Delete(ctx context.Context, user proto.User, name string, opts DeleteOptions) (bool, error) {
 	if user == nil {
 		return false, proto.ErrUnauthorized
+	}
+	progress := opts.Progress
+	if progress == nil {
+		progress = io.Discard
 	}
 	name, err := sessionName(name)
 	if err != nil {
@@ -894,6 +941,9 @@ func (m *Manager) Delete(ctx context.Context, user proto.User, name string) (boo
 	}
 
 	if existed {
+		if err := m.savePrivateBeforeDelete(ctx, user, name, sb, opts.DiscardPrivate, progress); err != nil {
+			return failed(err)
+		}
 		if err := m.client.DeleteSandbox(ctx, sandbox); err != nil {
 			return failed(err)
 		}
@@ -906,6 +956,35 @@ func (m *Manager) Delete(ctx context.Context, user proto.User, name string) (boo
 		return existed, err
 	}
 	return existed, nil
+}
+
+// savePrivateBeforeDelete saves sb's private files, or says why it cannot;
+// an error refuses the delete.
+func (m *Manager) savePrivateBeforeDelete(ctx context.Context, user proto.User, name string, sb *Sandbox, discard bool, progress io.Writer) error {
+	if sb.Phase != sbx.Ready {
+		// NOTE: its suspend-time save may have failed, and nothing records that; so refuse.
+		repos := m.unsavedPrivate(sb)
+		switch {
+		case len(repos) == 0:
+			return nil
+		case discard:
+			fmt.Fprintf(progress, "Warning: session %s is %s; deleting it loses the private files of %s not saved before\n", //nolint:errcheck
+				name, sb.Phase, strings.Join(repos, ", "))
+			return nil
+		}
+		return fmt.Errorf("session %s was not deleted: %w: it is %s, so the private files of %s cannot be saved; resume it and run \"session save-private %s\", or delete it anyway, losing any unsaved ones, with \"session delete --discard-private %s\"",
+			name, ErrPrivateNotSaved, sb.Phase, strings.Join(repos, ", "), name, name)
+	}
+	_, err := m.savePrivate(ctx, user, sb, progress)
+	switch {
+	case err == nil:
+		return nil
+	case discard:
+		fmt.Fprintf(progress, "Warning: deleting session %s loses its unsaved private files: %v\n", name, err) //nolint:errcheck
+		return nil
+	}
+	return fmt.Errorf("session %s was not deleted: %w: %w; retry with \"session save-private %s\", or delete it anyway, losing them, with \"session delete --discard-private %s\"",
+		name, ErrPrivateNotSaved, err, name, name)
 }
 
 // List returns the user's sessions sorted by session name.
@@ -945,6 +1024,25 @@ func (m *Manager) List(ctx context.Context, user proto.User) ([]Info, error) {
 		return strings.Compare(a.Sandbox, b.Sandbox)
 	})
 	return infos, nil
+}
+
+// renewCredentials writes a fresh Sundae token and the forge tokens of
+// specs into the sandbox's git credential file; only the session's forges
+// get tokens. It returns the forges that got one.
+func (m *Manager) renewCredentials(ctx context.Context, user proto.User, sandbox, runtime string, specs []RepoSpec, progress io.Writer) (map[string]bool, error) {
+	token, err := m.issueToken(ctx, user, sandbox)
+	if err != nil {
+		return nil, err
+	}
+	creds := m.forgeCredentials(specs, progress)
+	if err := m.writeGitCredentials(ctx, sandbox, runtime, user.Username(), token, creds, progress); err != nil {
+		return nil, err
+	}
+	forges := make(map[string]bool, len(creds))
+	for _, c := range creds {
+		forges[c.forge] = true
+	}
+	return forges, nil
 }
 
 // issueToken creates a fresh short-lived access token for the sandbox after
@@ -1007,21 +1105,23 @@ func (m *Manager) dirExists(ctx context.Context, sandbox, dir string) (bool, err
 	}
 }
 
-// clone clones the repository into workDir, with id as the clone's git
-// identity when it is set. The credentials come from the credential file
-// writeGitCredentials wrote; neither the URL nor the environment carries
-// any.
-func (m *Manager) clone(ctx context.Context, sandbox string, vcs proto.VCS, repo, workDir string, id config.GitIdentity) error {
+// clone clones sp into workDir; credentials come from the credential file,
+// never the URL or environment.
+func (m *Manager) clone(ctx context.Context, sandbox string, sp RepoSpec, workDir string) error {
 	if parent := path.Dir(workDir); parent != SandboxRoot {
 		if err := m.run(ctx, sandbox, []string{"mkdir", "-p", parent}); err != nil {
 			return err
 		}
 	}
 
-	if id.IsSet() {
-		return m.cloneWithIdentity(ctx, sandbox, vcs, m.repoURL(repo), workDir, id)
+	url := m.repoURL(sp.Name)
+	if sp.GitIdentity.IsSet() {
+		return m.cloneWithIdentity(ctx, sandbox, sp, url, workDir)
 	}
-	return m.run(ctx, sandbox, CloneCommand(vcs, m.repoURL(repo), workDir))
+	if sp.Forge != nil {
+		return m.run(ctx, sandbox, ForgeCloneCommand(url, workDir))
+	}
+	return m.run(ctx, sandbox, CloneCommand(sp.VCS, url, workDir))
 }
 
 func (m *Manager) run(ctx context.Context, sandbox string, command []string) error {

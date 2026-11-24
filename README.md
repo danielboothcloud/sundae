@@ -387,6 +387,7 @@ ssh    -p 23231 localhost session signals                           # what your 
 ssh    -p 23231 localhost session signals --attention --follow      # keep printing what needs you (Ctrl-C to stop)
 ssh    -p 23231 localhost session suspend review                    # stop that session's sandbox now, keeping its storage
 ssh    -p 23231 localhost session resume review                     # start it again without attaching
+ssh    -p 23231 localhost session save-private review               # save its private files (forge-linked repositories)
 ssh    -p 23231 localhost session delete review                     # delete its sandbox and storage, and revoke its token
 ```
 
@@ -397,7 +398,7 @@ NAME --repo R...` creates one holding the repositories given, in order;
 after the repository's last path segment (or a numbered name such as `tool-2`
 when a session of that name holds other repositories), or `--name`. Starting
 an existing session resumes it and adds any repository it lacks. Commands
-that take `SESSION` (attach, suspend, resume, delete, repos) accept the session's
+that take `SESSION` (attach, suspend, resume, delete, repos, save-private) accept the session's
 name, or a repository held by exactly one of your sessions.
 
 Each session is its own sandbox, named `sd-` and 16 hex digits of a hash of
@@ -423,8 +424,9 @@ running). `session attach`, `session start` and `session resume` start a
 suspended session again on the kept storage. `session delete` deletes the
 sandbox and its storage (the Pod and the PVC, the container and the volume,
 or the OpenShell sandbox) and revokes the session's git credentials: work
-that was not pushed is gone. Earlier releases called these `park` and `end`;
-the old names are gone.
+that was not pushed is gone. Both save the private files of forge-linked
+repositories first (see "Private paths"). Earlier releases called these
+`park` and `end`; the old names are gone.
 
 **Leave and re-attach.** `session start` and `session attach` need a
 terminal, so pass `-t`. While attached, the bottom row of your terminal is a
@@ -1137,13 +1139,126 @@ and adds that file to the sandbox user's `~/.gitconfig` as an
 sessions, which start with a clean environment, uses the newest token. The
 token is never in `.git/config`, `~/.gitconfig`, anything under `/sandbox`
 (so never on the session's storage), a command line Sundae builds, or the
-sandbox's spec; it reaches the sandbox in the environment of the exec that
-writes the file. It grants your read/write access, so agents can push.
-Processes inside the sandbox can read it. `session delete` revokes it.
+sandbox's spec. In the OpenShell runtime it reaches the sandbox in the
+environment of the exec that writes the file; the pod and docker runtimes
+send it on that exec's standard input, so it is not in the pod exec request
+(and the API server's audit log) or the exec's environment. It grants your
+read/write access, so agents can push. Processes inside the sandbox can
+read it. `session delete` revokes it.
+
+**Forge-linked repositories.** A repository imported from a forge (see
+[Forges](#forges)) whose forge is still configured is cloned with jj, and
+its checkout gets two remotes:
+
+| Remote | Fetch | Push |
+|---|---|---|
+| `sundae` | the Sundae replica | the Sundae replica (the default) |
+| `origin` | the forge repository, over HTTPS | refused: `pushurl` is `file:///sundae-forwards-pushes/use-jj-git-push-to-sundae` |
+
+and repository jj config `git.push = "sundae"`, `git.fetch = ["sundae",
+"origin"]` and `remotes.sundae.auto-track-bookmarks = "*"`. `jj git fetch`
+fails as a whole when one remote fails, so a session without the forge's
+token (its `token_file` unset or unreadable) gets `git.fetch = ["sundae"]`
+instead, with a warning; the next start or attach with the token adds
+`origin` back. `origin` is the
+forge's web URL plus `<path>.git`, even when the server syncs over
+`ssh_key_file`. Sundae sets the remotes and the config on every `session
+start` and `session attach`, so a checkout cloned earlier (whose `origin`
+was Sundae) is fixed up: its `origin` is renamed `sundae` (jj moves its
+bookmarks and `trunk()` along) and a new `origin` is added. A failure is a
+warning, not a failed start. Repositories without a forge link are cloned
+as before.
+
+The session also gets the forge's token, read again from `token_file` on
+every start and attach, for each forge of the session's repositories and no
+other:
+
+- in `/tmp/sundae/gitconfig`, an `http.<forge url>/.extraHeader` basic-auth
+  header (`x-access-token:<token>` for GitHub, `oauth2:<token>` for
+  GitLab), so `jj git fetch` and `git fetch origin` work;
+- in `/tmp/sundae/forge-env` (mode 0600), which the session's shell sources
+  before it starts the program: `GH_TOKEN` for github.com (plus `GH_HOST`
+  for `*.ghe.com`), `GH_ENTERPRISE_TOKEN` and `GH_HOST` for GitHub
+  Enterprise Server, `GITLAB_TOKEN` and `GITLAB_HOST` for GitLab. Two
+  forges that need the same variable or URL: the first repository's wins,
+  with a warning.
+
+They travel like the Sundae token above: never in an argument, the
+sandbox's or pod's spec, `/sandbox`, or the logs. In the OpenShell runtime
+the real forge token (not an OpenShell provider placeholder) is in the
+environment of the exec that writes the two files, base64-encoded, as the
+Sundae token is; the pod and docker runtimes send it on standard input. Either
+way processes in the sandbox can read it from the files. A running program keeps
+the `GH_TOKEN` it started with; git reads the renewed file. The token can
+push to the forge directly, outside Sundae's forward rules: that is an
+accepted risk, and branch protection on the forge is the hard guard.
+
+Sessions need egress to the forge: OpenShell sandboxes get a
+`sundae_forge_<name>` rule (see "Sandbox egress"). Pod sessions need
+`podRuntime.networkPolicy.allowForgeEgress` (TCP 443 to any address but the
+private, link-local and loopback ranges of
+`podRuntime.networkPolicy.forgeEgressExcept`) or an `extraEgress` rule when
+the chart's NetworkPolicy is enabled; without either, `jj git fetch` fails
+because `origin` is unreachable. The sandbox image (`deploy/sandbox/Containerfile`)
+ships `gh` and `glab`.
+
+Agent hint, for your `AGENTS.md` or prompt: push with `jj git push` (it
+goes to `sundae`, which forwards to the forge); open a pull request with
+`gh pr create --head <bookmark>` (or `glab mr create --source-branch
+<bookmark>`), because jj leaves `HEAD` detached; see the forge's state with
+`jj git fetch` and `<bookmark>@origin`.
 
 A program left running longer than `token_ttl` after the last start or
 attach loses git access until the next one renews the file. Attach again, or
 raise `token_ttl` for long-running agents.
+
+**Private paths.** Files a forge-linked repository needs in sessions but the
+forge must never receive (e.g. `AGENTS.md`, `_bmad/`, `.claude/`) are its
+private paths: the forge's `private_paths`, or the repository's own list,
+which replaces it:
+
+```sh
+ssh -p 23231 localhost repo private-paths gh/me/tool                       # the effective list and its source (repo or forge)
+ssh -p 23231 localhost repo private-paths gh/me/tool AGENTS.md _bmad/      # replace the repository's list (write access)
+ssh -p 23231 localhost repo private-paths gh/me/tool --clear               # back to the forge's private_paths
+```
+
+The repository's list is kept in its git config (`sundae.privatepath`,
+multi-valued); paths are relative, without `..`, and not inside `.git` or
+`.jj`. The command refuses repositories without a forge link. Sundae keeps
+the files on `refs/sundae/private` in its repository: one commit chain
+built with git plumbing (a temporary index, `write-tree`, `commit-tree`), so
+no branch ever contains them, `jj git fetch` and `jj git push` ignore the ref,
+and the forward never sends it.
+
+- **Restore**, on every `session start` and `session attach`: each path is
+  added to `.git/info/exclude` as `/<path>` (so `jj status` and `git status`
+  do not show the files), `refs/sundae/private` is fetched from `sundae`
+  (into the checkout's `refs/sundae/private-remote`), and files missing from
+  the work tree are checked out of it. A file that exists is never
+  overwritten: local edits win. The checkout records in
+  `refs/sundae/private-base` the version of each file it last synced: the
+  fetched one where the work tree matches it, else the one it had.
+- **Save**, on `session suspend` (also the idle suspend), `session delete`
+  and `session save-private`: only the files this checkout added, changed or
+  deleted since `refs/sundae/private-base` are sent. They are applied to the
+  ref's current tip (fetched first) and committed on top of it, as the
+  session's git identity, else `Sundae <sundae@localhost>`, and pushed to
+  `sundae` without force. Nothing changed: no commit, no push. So an
+  unedited file, even an older copy, never replaces another session's newer
+  save, and two sessions editing different files both keep their edits. If
+  another session saved meanwhile, the push is redone once on the new tip;
+  for the files both changed, the later save wins, and the previous content
+  stays in the ref's history. Nothing is saved while no files exist and none
+  were synced before.
+- A path the repository tracks (in `HEAD`) is skipped with a warning, both
+  ways; a forwarded push that adds an untracked private path is refused.
+- A failed save on suspend is a warning: the session's storage keeps the
+  files. On delete it refuses the delete and nothing is lost; retry with
+  `session save-private`, or `session delete --discard-private` to delete
+  anyway. A session that is not running cannot save, and its suspend's save
+  may have failed, so deleting one with private paths is refused too: resume
+  it and run `session save-private`, or pass `--discard-private`.
 
 **Sandbox egress.** OpenShell denies a sandbox all network access its
 policy does not allow, and git (and jj, which runs git) in the sandbox must
@@ -1152,10 +1267,19 @@ sundae`, the default, Sundae gives every sandbox it creates a policy that
 allows it: OpenShell's restrictive default policy (`/sandbox` and `/tmp`
 writable, the system directories read-only, the default process identity;
 `restrictive_default_policy()` in OpenShell 0.1.8) with these network rules,
-each allowing any program in the sandbox and inspecting nothing:
+each inspecting nothing:
 
 - `sundae_git`: the host and port of `openshell.clone_url` (or
-  `http.public_url`), 80 or 443 by scheme when the URL has no port;
+  `http.public_url`), 80 or 443 by scheme when the URL has no port, for any
+  program;
+- `sundae_forge_<name>`, one per forge: the forge's web host and port, plus
+  `api.github.com` for github.com (`api.<host>` for `*.ghe.com`), for
+  `/usr/bin/git`, git's `git-remote-https` (`/usr/libexec/git-core` or
+  `/usr/lib/git-core`), `/usr/bin/jj`, `/usr/bin/gh` and `/usr/bin/glab`
+  only. Other forge endpoints (artifact downloads, for example) go in
+  `openshell.network_policies`. A sandbox keeps the policy it was created
+  with, so a forge added later reaches existing sessions only once they get
+  a new sandbox;
 - the rules in `openshell.network_policies`.
 
 Providers attached to a sandbox add their profiles' rules on the gateway.
@@ -1555,23 +1679,24 @@ Aliases:
   repo, repos, repository, repositories
 
 Available Commands:
-  blob         Print out the contents of file at path
-  branch       Manage repository branches (bookmarks in jj repositories)
-  collab       Manage collaborators
-  create       Create a new repository
-  delete       Delete a repository
-  description  Set or get the description for a repository
-  hide         Hide or unhide a repository
-  import       Import a new repository from remote
-  info         Get information about a repository
-  list         List repositories
-  mirror       Set or get a repository mirror property
-  private      Set or get a repository private property
-  profile      Set or get the default session profile of a repository
-  project-name Set or get the project name for a repository
-  rename       Rename an existing repository
-  tag          Manage repository tags
-  tree         Print repository tree at path
+  blob          Print out the contents of file at path
+  branch        Manage repository branches (bookmarks in jj repositories)
+  collab        Manage collaborators
+  create        Create a new repository
+  delete        Delete a repository
+  description   Set or get the description for a repository
+  hide          Hide or unhide a repository
+  import        Import a new repository from remote
+  info          Get information about a repository
+  list          List repositories
+  mirror        Set or get a repository mirror property
+  private       Set or get a repository private property
+  private-paths Set or get the Sundae-only paths of a forge-linked repository
+  profile       Set or get the default session profile of a repository
+  project-name  Set or get the project name for a repository
+  rename        Rename an existing repository
+  tag           Manage repository tags
+  tree          Print repository tree at path
 
 Flags:
   -h, --help   help for repo
@@ -1761,6 +1886,9 @@ forges:
   `sessions.git_identity`. It is server-wide like the token: every user's
   sessions of those repositories use it. See "Git identity" under
   [OpenShell Agent Sessions](#openshell-agent-sessions).
+- Agent sessions of imported repositories fetch the forge as `origin` and
+  run `gh`/`glab` with this forge's token; see "Forge-linked repositories"
+  under [OpenShell Agent Sessions](#openshell-agent-sessions).
 - `ssh_key_file`, `ssh_known_hosts_file` and `ssh_url` (optional) switch git
   operations to SSH; see "Git over SSH" below.
 - Changing forges means editing the file and restarting (the Helm chart rolls
@@ -1793,9 +1921,8 @@ ssh -p 23231 localhost forge push github/me/tool [main] [--force-with-lease]
 a repository that was not imported from the same forge path is a collision:
 that repository is left untouched and its import fails. Importing an
 already-imported repository does nothing. A repository private (or GitLab
-internal) on the forge is private on Sundae. Imported repositories get the
-server's default VCS kind, `jj`, like any other new repository; pass `--vcs
-git` to `forge import` for git presentation.
+internal) on the forge is private on Sundae. Imported repositories are
+always `jj`.
 
 **Sync.** Upstream branches and tags are fetched into the forge's own
 namespace, `refs/remotes/<forge>/heads/*` and `refs/remotes/<forge>/tags/*`,
@@ -1925,8 +2052,8 @@ ssh -p 23231 localhost repo private icecream true
 ### Jujutsu (jj) Repositories
 
 Repositories have a VCS kind, `jj` or `git`, set with `--vcs` when you create
-or import them. **When `--vcs` is omitted, new and imported repositories are
-`jj`.** Repositories that existed before this option was added are `git`. The
+them. **When `--vcs` is omitted, new repositories are `jj`; imported
+repositories (`repo import`, `forge import`) are always `jj`.** Repositories that existed before this option was added are `git`. The
 kind is set once and can't be changed afterwards.
 
 ```sh
@@ -2071,7 +2198,7 @@ Results show on the line above the help, on every page: `✓ Deleted infra /
 claude-1.` in green, `✗ …` in red, `Deleting me/dotfiles …` while it runs.
 A key inside a message reads as on the help line (`r retry`, `u sync`).
 
-**Forms are modal.** The new-session, new-repository and import forms open in
+**Forms are modal.** The new-session and new-repository forms open in
 NORMAL mode (the badge at the top right): <kbd>j</kbd>/<kbd>k</kbd> move
 between fields (or rows of a repository list), <kbd>h</kbd>/<kbd>l</kbd>
 change a choice or a yes/no, <kbd>space</kbd> picks, <kbd>enter</kbd>
@@ -2173,8 +2300,8 @@ repositories, each `imported` (with ahead/behind and last sync) or `not
 imported`. A forge that cannot be listed says why once, in its header; a
 rejected token points at `forges[].token_file`.
 <kbd>i</kbd> imports the highlighted repository, <kbd>I</kbd> imports all
-shown (the <kbd>/</kbd> filter narrows them); both ask whether to import
-them as jj or git repositories,
+shown (the <kbd>/</kbd> filter narrows them); both import jj repositories
+after a confirm in the highlighted row,
 <kbd>u</kbd> syncs the forge on its header or the repository on its row
 (<kbd>r</kbd> only reads the tab again),
 <kbd>p</kbd> pushes the repository's branch to the forge after a confirm
@@ -2198,6 +2325,13 @@ You can find per-repository hooks under the repository `hooks` directory.
 
 Globs hooks can be found in your `SUNDAE_DATA_PATH` directory under
 `hooks`. Defining global hooks is useful if you want to run CI/CD for example.
+
+For forge-linked repositories (see [Forges](#forges)), Sundae forwards a
+push to the forge in `pre-receive`, after the global `pre-receive` hook
+accepts it. Custom `update` hooks run after the forward, and extra
+`pre-receive.d` scripts cannot stop it (every script runs), so neither should
+refuse refs of those repositories: the forge would keep a branch Sundae
+refused (an `update` hook refusal is reported to the pusher and logged).
 
 Here's an example of sending a message after receiving a push event. Create an
 executable file `<data path>/hooks/update`:

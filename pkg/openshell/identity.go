@@ -31,15 +31,14 @@ import (
 // name such as 1 or true is then still a string.
 const (
 	gitIdentityCloneName = "sundae-clone"
-	// $1: "jj" or "git", $2: the clone URL, $3: the checkout. Clones
-	// with the identity: a colocated jj clone for jj, whose working-copy
-	// commit is then authored by it, and a git clone that records it in
-	// the new .git/config.
+	// $1: "jj" or "git", $2: the clone URL, $3: the checkout, $4: jj's remote
+	// name (optional). Clones with the identity so jj's first commit has it.
 	gitIdentityCloneScript = `set -e
 dec() { printf '%s' "$1" | base64 -d; }
 if [ "$1" = jj ]; then
 	name=$(dec "$SUNDAE_JJ_USER_NAME")
 	email=$(dec "$SUNDAE_JJ_USER_EMAIL")
+	[ -z "$4" ] || exec jj git clone --colocate --remote "$4" --config "user.name=$name" --config "user.email=$email" "$2" "$3"
 	exec jj git clone --colocate --config "user.name=$name" --config "user.email=$email" "$2" "$3"
 fi
 name=$(dec "$SUNDAE_GIT_USER_NAME")
@@ -106,10 +105,14 @@ func cloneTool(vcs proto.VCS) string {
 	return "git"
 }
 
-// cloneWithIdentity clones url into workDir like CloneCommand, with id as
-// the clone's identity.
-func (m *Manager) cloneWithIdentity(ctx context.Context, sandbox string, vcs proto.VCS, url, workDir string, id config.GitIdentity) error {
-	_, err := m.script(ctx, sandbox, gitIdentityCloneName, gitIdentityCloneScript, gitIdentityEnv(id), cloneTool(vcs), url, workDir)
+// cloneWithIdentity clones url into workDir like CloneCommand (or
+// ForgeCloneCommand), with sp's identity as the clone's.
+func (m *Manager) cloneWithIdentity(ctx context.Context, sandbox string, sp RepoSpec, url, workDir string) error {
+	args := []string{cloneTool(sp.VCS), url, workDir}
+	if sp.Forge != nil {
+		args = []string{"jj", url, workDir, ForgeRemoteSundae}
+	}
+	_, err := m.script(ctx, sandbox, gitIdentityCloneName, gitIdentityCloneScript, gitIdentityEnv(sp.GitIdentity), args...)
 	return err
 }
 

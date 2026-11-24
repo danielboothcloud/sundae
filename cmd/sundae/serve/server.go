@@ -25,6 +25,7 @@ import (
 	"github.com/danielboothcloud/sundae/pkg/notify"
 	"github.com/danielboothcloud/sundae/pkg/openshell"
 	"github.com/danielboothcloud/sundae/pkg/proto"
+	"github.com/danielboothcloud/sundae/pkg/sessionctl"
 	"github.com/danielboothcloud/sundae/pkg/signals"
 	sshsrv "github.com/danielboothcloud/sundae/pkg/ssh"
 	"github.com/danielboothcloud/sundae/pkg/stats"
@@ -136,7 +137,11 @@ func NewServer(ctx context.Context) (*Server, error) {
 	if cfg.SessionsEnabled() {
 		monitor = openshell.NewMonitor(func() (openshell.Client, error) {
 			return openshell.NewClient(cfg)
-		}, cfg, openshell.WithMonitorEvents(bus), openshell.WithMonitorLogger(log.FromContext(ctx)))
+		}, cfg, openshell.WithMonitorEvents(bus), openshell.WithMonitorLogger(log.FromContext(ctx)),
+			// Resolved lazily: the save's Manager needs the context holding the monitor.
+			openshell.WithMonitorSavePrivate(func(sctx context.Context, c openshell.Client, userID int64, sandbox string) {
+				sessionctl.SavePrivateForMonitor(openshell.ContextWithMonitor(ctx, monitor), log.FromContext(ctx))(sctx, c, userID, sandbox)
+			}))
 		ctx = openshell.ContextWithMonitor(ctx, monitor)
 	}
 

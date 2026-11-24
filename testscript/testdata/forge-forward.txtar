@@ -1,0 +1,57 @@
+# vi: set ft=conf
+
+# Pushes to a forge-linked repository go through the forward rules in the
+# pre-receive hook. The forge URL is unreachable: only rules that refuse or
+# keep a branch before contacting the forge can succeed.
+env SUNDAE_FORGES_0_NAME=gh
+env SUNDAE_FORGES_0_KIND=github
+env SUNDAE_FORGES_0_URL=http://127.0.0.1:1
+env SUNDAE_FORGES_0_KEEP=push-*
+
+exec sundae serve &
+ensureserverrunning SSH_PORT
+
+# an unlinked repository takes pushes as usual
+sundae repo create proj
+git clone ssh://localhost:$SSH_PORT/proj proj
+mkfile ./proj/README.md 'hello'
+git -C proj add -A
+git -C proj commit -m 'first'
+git -C proj push origin HEAD:main
+! stderr 'sundae:'
+
+# link it to the forge, the way an import does
+exec git config --file $DATA_PATH/repos/proj.git/config forge.name gh
+exec git config --file $DATA_PATH/repos/proj.git/config forge.path me/proj
+exec git config --file $DATA_PATH/repos/proj.git/config forge.defaultbranch main
+exec git config --file $DATA_PATH/repos/proj.git/config remote.gh.url http://127.0.0.1:1/me/proj.git
+
+# the default branch is protected: the push is refused and main stays put
+git -C proj rev-parse HEAD
+cp stdout before.txt
+mkfile ./proj/second.txt 'second'
+git -C proj add -A
+git -C proj commit -m 'second'
+! git -C proj push origin HEAD:main
+stderr 'remote: sundae: main is protected; pushes to it are refused'
+stderr 'pre-receive hook declined'
+git clone ssh://localhost:$SSH_PORT/proj check
+git -C check rev-parse HEAD
+cmp stdout before.txt
+
+# kept branches and tags stay in Sundae without contacting the forge
+git -C proj push origin HEAD:refs/heads/push-abc
+stderr 'remote: sundae: push-abc kept in sundae only'
+git -C proj tag v1
+git -C proj push origin v1
+! stderr 'sundae:'
+
+# a forwarded branch the forge cannot take is refused
+! git -C proj push origin HEAD:refs/heads/develop
+stderr 'remote: sundae: '
+stderr 'pre-receive hook declined'
+! git -C check ls-remote --exit-code origin refs/heads/develop
+
+# stop the server
+[windows] stopserver
+[windows] ! stderr .

@@ -344,6 +344,11 @@ func TestRunUploadInteractive(t *testing.T) {
 	if _, err := r.Run(ctx, "sd-a", []string{"broken"}, sbx.ExecOptions{NoLoginShell: true}); err == nil {
 		t.Fatal("transport error: none")
 	}
+	// Stdin reaches the exec's input, not its command.
+	res, err = r.Run(ctx, "sd-a", []string{"cat"}, sbx.ExecOptions{NoLoginShell: true, Stdin: strings.NewReader("secret")})
+	if err != nil || string(res.Stdout) != "SECRET" || slices.Contains(got[len(got)-1].Command, "secret") {
+		t.Fatalf("stdin: %+v %v %q", res, err, got[len(got)-1].Command)
+	}
 
 	// Upload streams the file to the upload script.
 	f := filepath.Join(t.TempDir(), "f")

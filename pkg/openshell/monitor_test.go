@@ -63,7 +63,7 @@ func (c *monitorClient) Run(ctx context.Context, sandbox string, command []strin
 	if err := gatewayLimits(command, toSDKExec(opts)); err != nil {
 		return nil, err
 	}
-	call := execCall{sandbox, command, toSDKExec(opts)}
+	call := execCall{sandbox: sandbox, command: command, opts: toSDKExec(opts)}
 	if call.script() != osewaStatusName || opts.Env["HOME"] != SandboxRoot || opts.Env["OSEWA_HOME"] != SandboxRoot {
 		return nil, fmt.Errorf("unexpected exec %q %v", command, opts.Env)
 	}
@@ -933,7 +933,7 @@ func TestMonitorSuspendUnsupported(t *testing.T) {
 		t.Fatalf("published %s", describe(evs))
 	}
 	// Manual suspends are refused at once.
-	if err := h.mon.Suspend(t.Context(), h.mc, a); !IsSuspendUnsupported(err) || h.mc.suspendCount(a) != 1 {
+	if err := h.mon.Suspend(t.Context(), h.mc, a, nil); !IsSuspendUnsupported(err) || h.mc.suspendCount(a) != 1 {
 		t.Fatalf("manual suspend: %v", err)
 	}
 
@@ -985,7 +985,7 @@ func TestMonitorBridges(t *testing.T) {
 	if got := h.status(t, sb); got.Bridges != 2 {
 		t.Fatalf("status bridges = %d", got.Bridges)
 	}
-	if err := h.mon.Suspend(t.Context(), h.mc, sb); !errors.Is(err, ErrBridgeOpen) {
+	if err := h.mon.Suspend(t.Context(), h.mc, sb, nil); !errors.Is(err, ErrBridgeOpen) {
 		t.Fatalf("suspend with a bridge: %v", err)
 	}
 	c1()
@@ -997,7 +997,7 @@ func TestMonitorBridges(t *testing.T) {
 	if n := h.mon.Bridges(sb); n != 0 {
 		t.Fatalf("bridges after both = %d", n)
 	}
-	if err := h.mon.Suspend(t.Context(), h.mc, sb); err != nil || h.mc.phase(t, sb) != types.SandboxSuspended {
+	if err := h.mon.Suspend(t.Context(), h.mc, sb, nil); err != nil || h.mc.phase(t, sb) != types.SandboxSuspended {
 		t.Fatalf("suspend: %v", err)
 	}
 
@@ -1030,7 +1030,7 @@ func TestOpenBridgeWaitsForSuspend(t *testing.T) {
 
 	bs := &blockingSuspend{monitorClient: h.mc, entered: make(chan struct{}), release: make(chan struct{})}
 	suspended := make(chan error, 1)
-	go func() { suspended <- h.mon.Suspend(t.Context(), bs, sb) }()
+	go func() { suspended <- h.mon.Suspend(t.Context(), bs, sb, nil) }()
 	<-bs.entered
 
 	opened := make(chan func())
@@ -1041,7 +1041,7 @@ func TestOpenBridgeWaitsForSuspend(t *testing.T) {
 	default:
 	}
 	// A second suspend meanwhile is refused.
-	if err := h.mon.Suspend(t.Context(), h.mc, sb); !errors.Is(err, ErrSuspendInProgress) && !errors.Is(err, ErrBridgeOpen) {
+	if err := h.mon.Suspend(t.Context(), h.mc, sb, nil); !errors.Is(err, ErrSuspendInProgress) && !errors.Is(err, ErrBridgeOpen) {
 		t.Fatalf("concurrent suspend: %v", err)
 	}
 	close(bs.release)

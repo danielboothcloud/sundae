@@ -98,6 +98,38 @@ type ForgeConfig struct {
 	// noreply address. Optional: without it those sessions use
 	// sessions.git_identity.
 	GitIdentity ForgeGitIdentity `envPrefix:"GIT_IDENTITY_" yaml:"git_identity"`
+
+	// Forward lists glob patterns of the branches (jj bookmarks) a session
+	// push forwards to the forge. Case-sensitive; "*" does not cross "/",
+	// "**" does. Defaults to ["*"].
+	Forward []string `env:"FORWARD" yaml:"forward"`
+
+	// Keep lists glob patterns, like Forward, of branches that stay in
+	// Sundae only. Keep wins over Forward.
+	Keep []string `env:"KEEP" yaml:"keep"`
+
+	// ProtectDefaultBranch refuses session pushes of the forge repository's
+	// default branch. Defaults to true; see ProtectsDefaultBranch.
+	ProtectDefaultBranch *bool `env:"PROTECT_DEFAULT_BRANCH" yaml:"protect_default_branch"`
+
+	// Protect restricts session pushes of matching branches.
+	Protect ForgeProtect `envPrefix:"PROTECT_" yaml:"protect"`
+
+	// PrivatePaths lists repository-relative files and directories (trailing
+	// "/") that Sundae keeps but the forge never receives. Stored without
+	// the trailing "/".
+	PrivatePaths []string `env:"PRIVATE_PATHS" yaml:"private_paths"`
+}
+
+// ForgeProtect is the protect section of a forge: glob patterns, like
+// ForgeConfig.Forward, of branches that session pushes may not change freely.
+type ForgeProtect struct {
+	// Deny lists branches sessions cannot push at all.
+	Deny []string `env:"DENY" yaml:"deny"`
+
+	// FastForwardOnly lists branches sessions can only fast-forward: no
+	// rewrite and no delete.
+	FastForwardOnly []string `env:"FAST_FORWARD_ONLY" yaml:"fast_forward_only"`
 }
 
 // Token returns the forge access token: the contents of TokenFile with
@@ -206,11 +238,13 @@ func (c *Config) validateForges() error {
 			patterns []string
 		}{{"include", f.Include}, {"exclude", f.Exclude}} {
 			for j, p := range list.patterns {
-				if err := validateForgeGlob(p); err != nil {
+				if err := validateForgeGlob(p, false); err != nil {
 					fail("%s[%d] %q: %v", list.key, j, p, err)
 				}
 			}
 		}
+
+		validateForgeRules(f, fail)
 
 		switch {
 		case f.Sync == 0:
@@ -259,8 +293,8 @@ func validateForgeURL(raw string) error {
 	return nil
 }
 
-// validateForgeGlob checks one include or exclude pattern.
-func validateForgeGlob(p string) error {
+// validateForgeGlob checks one glob pattern of a forge.
+func validateForgeGlob(p string, caseSensitive bool) error {
 	if strings.TrimSpace(p) == "" {
 		return errors.New("pattern is empty")
 	}
@@ -269,10 +303,19 @@ func validateForgeGlob(p string) error {
 	if strings.Contains(p, ",") {
 		return errors.New("pattern must not contain a comma; list alternatives as separate entries")
 	}
-	if _, err := glob.Compile(p, '/'); err != nil {
+	if _, err := compileGlob(p, caseSensitive); err != nil {
 		return fmt.Errorf("invalid glob: %w", err)
 	}
 	return nil
+}
+
+// compileGlob compiles a pattern where "*" does not cross "/" and "**"
+// does. A case-insensitive glob must be matched against a lowercased string.
+func compileGlob(p string, caseSensitive bool) (glob.Glob, error) {
+	if !caseSensitive {
+		p = strings.ToLower(p)
+	}
+	return glob.Compile(p, '/')
 }
 
 // validateRepoPrefix checks a repository name prefix: one or more segments
@@ -306,7 +349,16 @@ func (c *Config) forgeEnviron() []string {
 			p+"PREFIX="+f.Prefix,
 			p+"GIT_IDENTITY_NAME="+f.GitIdentity.Name,
 			p+"GIT_IDENTITY_EMAIL="+f.GitIdentity.Email,
+			p+"FORWARD="+strings.Join(f.Forward, ","),
+			p+"KEEP="+strings.Join(f.Keep, ","),
+			p+"PROTECT_DENY="+strings.Join(f.Protect.Deny, ","),
+			p+"PROTECT_FAST_FORWARD_ONLY="+strings.Join(f.Protect.FastForwardOnly, ","),
+			p+"PRIVATE_PATHS="+strings.Join(f.PrivatePaths, ","),
 		)
+		// Unset means the default (true), so only an explicit value is passed on.
+		if f.ProtectDefaultBranch != nil {
+			envs = append(envs, fmt.Sprintf("%sPROTECT_DEFAULT_BRANCH=%t", p, *f.ProtectDefaultBranch))
+		}
 	}
 	return envs
 }

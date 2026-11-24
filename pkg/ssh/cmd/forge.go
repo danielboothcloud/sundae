@@ -171,7 +171,6 @@ patterns exclude.`,
 
 func forgeImportCommand() *cobra.Command {
 	var all bool
-	var vcsFlag string
 	cmd := &cobra.Command{
 		Use:   "import FORGE [OWNER/REPO...]",
 		Short: "Import forge repositories",
@@ -189,10 +188,6 @@ that repository is left alone and the import of it fails.`,
 			if all == (len(args) > 1) {
 				return errors.New("give either repository paths or --all")
 			}
-			vcs, err := proto.ParseVCS(vcsFlag)
-			if err != nil {
-				return err
-			}
 			svc, err := forgeService(cmd)
 			if err != nil {
 				return err
@@ -200,7 +195,6 @@ that repository is left alone and the import of it fails.`,
 			results, err := svc.Import(cmd.Context(), proto.UserFromContext(cmd.Context()), args[0], forge.ImportOptions{
 				Paths: args[1:],
 				All:   all,
-				Vcs:   vcs,
 			})
 			if err != nil {
 				return err
@@ -228,7 +222,6 @@ that repository is left alone and the import of it fails.`,
 		},
 	}
 	cmd.Flags().BoolVarP(&all, "all", "a", false, "import every listed repository the include/exclude patterns let through")
-	cmd.Flags().StringVar(&vcsFlag, "vcs", string(proto.DefaultVCS), "VCS kind of the new repositories (git or jj)")
 	return cmd
 }
 

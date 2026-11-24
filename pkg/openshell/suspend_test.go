@@ -223,7 +223,7 @@ func TestManagerSuspend(t *testing.T) {
 	}
 	drain(t, sub)
 
-	suspended, err := h.mgr.Suspend(ctx, alice, "two")
+	suspended, err := h.mgr.Suspend(ctx, alice, "two", nil)
 	if err != nil || !suspended {
 		t.Fatalf("suspend: %v %v", suspended, err)
 	}
@@ -236,7 +236,7 @@ func TestManagerSuspend(t *testing.T) {
 		t.Fatalf("lifecycle %+v", got)
 	}
 	// Suspending again is a no-op.
-	if suspended, err := h.mgr.Suspend(ctx, alice, "two"); err != nil || suspended {
+	if suspended, err := h.mgr.Suspend(ctx, alice, "two", nil); err != nil || suspended {
 		t.Fatalf("suspend again: %v %v", suspended, err)
 	}
 	if got := drain(t, sub); len(got) != 0 {
@@ -244,10 +244,10 @@ func TestManagerSuspend(t *testing.T) {
 	}
 
 	// Absent, someone else's, not running, not Sundae's, bad name.
-	if _, err := h.mgr.Suspend(ctx, alice, "nope"); !errors.Is(err, ErrNoSession) {
+	if _, err := h.mgr.Suspend(ctx, alice, "nope", nil); !errors.Is(err, ErrNoSession) {
 		t.Fatalf("absent: %v", err)
 	}
-	if _, err := h.mgr.Suspend(ctx, testUser{id: 9, name: "alice"}, "two"); !errors.Is(err, ErrNotOwned) {
+	if _, err := h.mgr.Suspend(ctx, testUser{id: 9, name: "alice"}, "two", nil); !errors.Is(err, ErrNotOwned) {
 		t.Fatalf("foreign: %v", err)
 	}
 	h.fc.AddSandbox("default", &types.Sandbox{
@@ -255,7 +255,7 @@ func TestManagerSuspend(t *testing.T) {
 		Labels: ownerLabels(alice), Annotations: sessionAnnotations("alice", []string{"r"}, "stopped", "", nil),
 		Status: types.SandboxStatus{Phase: types.SandboxStopped},
 	})
-	if _, err := h.mgr.Suspend(ctx, alice, "stopped"); err == nil || !strings.Contains(err.Error(), "only a running session can be suspended") {
+	if _, err := h.mgr.Suspend(ctx, alice, "stopped", nil); err == nil || !strings.Contains(err.Error(), "only a running session can be suspended") {
 		t.Fatalf("stopped: %v", err)
 	}
 	h.fc.AddSandbox("default", &types.Sandbox{
@@ -264,13 +264,13 @@ func TestManagerSuspend(t *testing.T) {
 		Annotations: map[string]string{AnnotationRepo: "r"},
 		Status:      types.SandboxStatus{Phase: types.SandboxReady},
 	})
-	if _, err := h.mgr.Suspend(ctx, alice, "foreign"); err == nil || !strings.Contains(err.Error(), "not created by Sundae") {
+	if _, err := h.mgr.Suspend(ctx, alice, "foreign", nil); err == nil || !strings.Contains(err.Error(), "not created by Sundae") {
 		t.Fatalf("unmanaged: %v", err)
 	}
-	if _, err := h.mgr.Suspend(ctx, alice, "Bad"); !errors.Is(err, ErrInvalidSessionName) {
+	if _, err := h.mgr.Suspend(ctx, alice, "Bad", nil); !errors.Is(err, ErrInvalidSessionName) {
 		t.Fatalf("bad name: %v", err)
 	}
-	if _, err := h.mgr.Suspend(ctx, nil, ""); err == nil {
+	if _, err := h.mgr.Suspend(ctx, nil, "", nil); err == nil {
 		t.Fatal("anonymous suspend")
 	}
 
@@ -283,16 +283,16 @@ func TestManagerSuspend(t *testing.T) {
 		t.Fatal(err)
 	}
 	closeBridge := mon.OpenBridge(ctx, main.Sandbox)
-	if _, err := h.mgr.Suspend(ctx, alice, ""); !errors.Is(err, ErrBridgeOpen) {
+	if _, err := h.mgr.Suspend(ctx, alice, "", nil); !errors.Is(err, ErrBridgeOpen) {
 		t.Fatalf("bridge open: %v", err)
 	}
 	closeBridge()
 	mon.unsuspendable[main.Sandbox] = "compute driver does not support sandbox suspend"
-	if _, err := h.mgr.Suspend(ctx, alice, ""); !IsSuspendUnsupported(err) || !strings.Contains(err.Error(), "cannot suspend") {
+	if _, err := h.mgr.Suspend(ctx, alice, "", nil); !IsSuspendUnsupported(err) || !strings.Contains(err.Error(), "cannot suspend") {
 		t.Fatalf("unsupported: %v", err)
 	}
 	delete(mon.unsuspendable, main.Sandbox)
-	if suspended, err := h.mgr.Suspend(ctx, alice, ""); err != nil || !suspended {
+	if suspended, err := h.mgr.Suspend(ctx, alice, "", nil); err != nil || !suspended {
 		t.Fatalf("suspend main: %v %v", suspended, err)
 	}
 	if got := drain(t, sub); steps(got) != "created,ready,suspended" {

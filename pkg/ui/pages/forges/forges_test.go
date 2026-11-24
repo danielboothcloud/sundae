@@ -17,7 +17,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/danielboothcloud/sundae/pkg/events"
 	"github.com/danielboothcloud/sundae/pkg/forge"
-	"github.com/danielboothcloud/sundae/pkg/proto"
 	"github.com/danielboothcloud/sundae/pkg/ui/common"
 )
 
@@ -36,7 +35,6 @@ type fakeSource struct {
 	repos     map[string][]forge.RepoStatus
 	discovers []string
 	imports   [][]string
-	vcs       []proto.VCS
 	syncs     []string
 	pushes    []string
 	feed      *fakeFeed
@@ -67,11 +65,10 @@ func (f *fakeSource) Discover(_ context.Context, name string) error {
 	return nil
 }
 
-func (f *fakeSource) Import(_ context.Context, name string, paths []string, vcs proto.VCS) ([]forge.ImportResult, error) {
+func (f *fakeSource) Import(_ context.Context, name string, paths []string) ([]forge.ImportResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.imports = append(f.imports, append([]string{name}, paths...))
-	f.vcs = append(f.vcs, vcs)
 	var out []forge.ImportResult
 	for _, p := range paths {
 		if p == "me/broken" {
@@ -339,7 +336,7 @@ func TestForgesInProgressGolden(t *testing.T) {
 	go func() { done <- syncCmd() }()
 	// i on a repository imports it alongside.
 	selectRow(t, m, "danielboothcloud/dotfiles")
-	importCmd := keys(m, "i", "enter")
+	importCmd := keys(m, "i", "y")
 	// A sync event of the running sync counts as progress, live.
 	_, cmd := m.Update(feedMsg{evs: []events.Event{events.ForgeEvent(0, events.ForgeOutcome{Kind: "sync", Forge: "github", Repo: "github/danielboothcloud/pi-aio", Path: "danielboothcloud/pi-aio", OK: true})}})
 	if cmd == nil {
@@ -353,8 +350,8 @@ func TestForgesInProgressGolden(t *testing.T) {
 	// The UI was never blocked: keys still work while both run.
 	keys(m, "j")
 	run(m, importCmd, 2)
-	if fmt.Sprint(src.imports) != "[[github danielboothcloud/dotfiles]]" || fmt.Sprint(src.vcs) != "[jj]" {
-		t.Fatalf("imports %v as %v", src.imports, src.vcs)
+	if fmt.Sprint(src.imports) != "[[github danielboothcloud/dotfiles]]" {
+		t.Fatalf("imports %v", src.imports)
 	}
 	if !strings.Contains(screen(m), "✓ Imported as github/danielboothcloud/dotfiles.") {
 		t.Fatalf("import result:\n%s", view(m))
@@ -389,14 +386,14 @@ func TestForgesImportAllRespectsFilter(t *testing.T) {
 	src.repos["gitlab"] = append(src.repos["gitlab"], forge.RepoStatus{Path: "ops/dot-tools", Repo: "gitlab/ops/dot-tools", Listed: true})
 	m := started(t, 76, 20, src)
 	keys(m, "I")
-	if m.importForm == nil || !m.Capturing() {
+	if m.confirm == nil || !m.Capturing() {
 		t.Fatal("I did not ask")
 	}
-	if got := ansi.Strip(view(m)); !strings.Contains(got, "Import 3 repositories (github 2, gitlab 1)") || !strings.Contains(got, "‹ jj ›") {
-		t.Fatalf("form:\n%s", got)
+	if got := ansi.Strip(view(m)); !strings.Contains(got, "import 3 repositories?") || !strings.Contains(got, "github 2, gitlab 1, as jj repositories") {
+		t.Fatalf("confirm:\n%s", got)
 	}
 	keys(m, "esc")
-	if m.importForm != nil || len(src.imports) != 0 {
+	if m.confirm != nil || len(src.imports) != 0 {
 		t.Fatal("esc did not cancel")
 	}
 	// The filter narrows what I imports.
@@ -406,11 +403,10 @@ func TestForgesImportAllRespectsFilter(t *testing.T) {
 	}
 	keys(m, "enter")
 	keys(m, "I")
-	if got := ansi.Strip(view(m)); !strings.Contains(got, "Import 2 repositories matching “dot” (github 1, gitlab 1)") {
-		t.Fatalf("form:\n%s", got)
+	if got := ansi.Strip(view(m)); !strings.Contains(got, "import 2 repositories?") || !strings.Contains(got, "github 1, gitlab 1 matching “dot”") {
+		t.Fatalf("confirm:\n%s", got)
 	}
-	// → picks git.
-	cmd := keys(m, "right", "enter")
+	cmd := keys(m, "y")
 	if m.busy[rowKey("github", "danielboothcloud/dotfiles")] != "importing …" {
 		t.Fatalf("busy %v", m.busy)
 	}
@@ -419,15 +415,12 @@ func TestForgesImportAllRespectsFilter(t *testing.T) {
 		fmt.Sprint(src.imports) != "[[gitlab ops/dot-tools] [github danielboothcloud/dotfiles]]" {
 		t.Fatalf("imports %v", src.imports)
 	}
-	if fmt.Sprint(src.vcs) != "[git git]" {
-		t.Fatalf("vcs %v", src.vcs)
-	}
 	// Nothing left to import among the rows shown once they are imported.
 	src.repos["github"][0].Imported = true
 	src.repos["gitlab"][1].Imported = true
 	run(m, m.loadCmd(""), 1)
 	keys(m, "I")
-	if m.importForm != nil || !strings.Contains(screen(m), "Every repository shown is imported.") {
+	if m.confirm != nil || !strings.Contains(screen(m), "Every repository shown is imported.") {
 		t.Fatalf("view:\n%s", view(m))
 	}
 }
@@ -437,7 +430,7 @@ func TestForgesImportFailureStaysInTheRow(t *testing.T) {
 	src.repos["github"] = append(src.repos["github"], forge.RepoStatus{Path: "me/broken", Repo: "github/me/broken", Listed: true})
 	m := started(t, 76, 20, src)
 	selectRow(t, m, "me/broken")
-	run(m, keys(m, "i", "enter"), 2)
+	run(m, keys(m, "i", "y"), 2)
 	got := screen(m)
 	if !strings.Contains(got, "✗ import failed") || !strings.Contains(got, "✗ Import failed: git fetch: repository not found") {
 		t.Fatalf("view:\n%s", got)
@@ -704,7 +697,7 @@ func TestForgesImportTellsHomeToReload(t *testing.T) {
 		{"me/broken", false},
 	} {
 		m := started(t, 80, 20, newFakeSource())
-		cmd := m.importCmd("github", []forge.RepoStatus{{Path: tc.path}}, proto.VCSJJ)
+		cmd := m.importCmd("github", []forge.RepoStatus{{Path: tc.path}})
 		op, ok := cmd().(opMsg)
 		if !ok {
 			t.Fatalf("%s: import did not end with an opMsg", tc.path)

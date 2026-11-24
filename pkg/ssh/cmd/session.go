@@ -50,6 +50,7 @@ func SessionCommand() *cobra.Command {
 		sessionSuspendCommand(),
 		sessionResumeCommand(),
 		sessionDeleteCommand(),
+		sessionSavePrivateCommand(),
 	)
 
 	return cmd
@@ -635,6 +636,9 @@ A session with an open bridge is not suspended; detach first. Sessions are
 also suspended automatically after sessions.suspend.after with nobody
 attached and no working status.
 
+Suspending first saves the private files of forge-linked repositories (see
+"session save-private"); a failed save is a warning, as the storage keeps them.
+
 ` + sessionArgHelp,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -649,7 +653,7 @@ attached and no working status.
 			}
 			defer client.Close() //nolint:errcheck
 
-			suspended, err := newManager(ctx, client).Suspend(ctx, proto.UserFromContext(ctx), n)
+			suspended, err := newManager(ctx, client).Suspend(ctx, proto.UserFromContext(ctx), n, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
@@ -689,7 +693,10 @@ its program again if it is not running. It never creates a session.
 }
 
 func sessionDeleteCommand() *cobra.Command {
-	var name string
+	var (
+		name    string
+		discard bool
+	)
 	cmd := &cobra.Command{
 		Use:   "delete SESSION",
 		Short: "Delete an agent session, its sandbox and its storage",
@@ -697,6 +704,12 @@ func sessionDeleteCommand() *cobra.Command {
 runtime's Pod and PersistentVolumeClaim, the docker runtime's container and
 volume, the OpenShell sandbox) and revoke its git credentials. Work that was
 not pushed is lost.
+
+A running session's private files of forge-linked repositories are saved
+first (see "session save-private"). If that fails, nothing is deleted;
+--discard-private deletes anyway and loses the unsaved private files. A
+session that is not running cannot save, so it is not deleted either: resume
+it and run "session save-private", or pass --discard-private.
 
 ` + sessionArgHelp,
 		Args: cobra.ExactArgs(1),
@@ -716,7 +729,8 @@ not pushed is lost.
 			}
 			defer client.Close() //nolint:errcheck
 
-			existed, err := newManager(ctx, client).Delete(ctx, proto.UserFromContext(ctx), n)
+			existed, err := newManager(ctx, client).Delete(ctx, proto.UserFromContext(ctx), n,
+				openshell.DeleteOptions{DiscardPrivate: discard, Progress: cmd.ErrOrStderr()})
 			if err != nil {
 				return err
 			}
@@ -724,6 +738,56 @@ not pushed is lost.
 				cmd.PrintErrln("Session deleted")
 			} else {
 				cmd.PrintErrln("No session to delete")
+			}
+			return nil
+		},
+	}
+	addLegacyNameFlag(cmd, &name)
+	cmd.Flags().BoolVar(&discard, "discard-private", false, "delete even if the private files cannot be saved, losing them")
+	return cmd
+}
+
+func sessionSavePrivateCommand() *cobra.Command {
+	var name string
+	cmd := &cobra.Command{
+		Use:   "save-private SESSION",
+		Short: "Save the private files of a session's forge-linked repositories",
+		Long: `Save the private files of a running session's forge-linked repositories:
+their private paths (forge private_paths, or "repo private-paths") are
+committed to refs/sundae/private in the Sundae repository, never to a branch,
+so the forge never receives them. New sessions restore them. Paths the
+repository tracks are skipped with a warning. Suspend and delete save too.
+
+` + sessionArgHelp,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			n, err := resolveSession(cmd, args[0], name)
+			if err != nil {
+				return err
+			}
+			client, err := newOpenShellClient(config.FromContext(ctx))
+			if err != nil {
+				return err
+			}
+			defer client.Close() //nolint:errcheck
+
+			saves, err := newManager(ctx, client).SavePrivate(ctx, proto.UserFromContext(ctx), n, cmd.ErrOrStderr())
+			for _, s := range saves {
+				switch s.Result {
+				case openshell.PrivateSaved:
+					cmd.Printf("%s: saved %s (%s)\n", s.Repo, short(s.Commit), strings.Join(s.Paths, ", "))
+				case openshell.PrivateUnchanged:
+					cmd.Printf("%s: unchanged %s (%s)\n", s.Repo, short(s.Commit), strings.Join(s.Paths, ", "))
+				default:
+					cmd.Printf("%s: nothing to save (%s)\n", s.Repo, strings.Join(s.Paths, ", "))
+				}
+			}
+			if err != nil {
+				return err
+			}
+			if len(saves) == 0 {
+				cmd.PrintErrf("Session %s has no forge-linked repositories with private paths\n", n)
 			}
 			return nil
 		},

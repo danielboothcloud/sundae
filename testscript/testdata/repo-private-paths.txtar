@@ -1,0 +1,86 @@
+# vi: set ft=conf
+
+# Private paths of a forge-linked repository: the forge's private_paths,
+# replaced per repository with `repo private-paths`. The forge URL is
+# unreachable: nothing here may contact it.
+env SUNDAE_FORGES_0_NAME=gh
+env SUNDAE_FORGES_0_KIND=github
+env SUNDAE_FORGES_0_URL=http://127.0.0.1:1
+env SUNDAE_FORGES_0_PRIVATE_PATHS=AGENTS.md,_bmad/
+
+exec sundae serve &
+ensureserverrunning SSH_PORT
+
+sundae repo create proj
+sundae user create user1 -k "$USER1_AUTHORIZED_KEY"
+
+# forge-linked repositories only
+! sundae repo private-paths proj
+stderr 'proj is not linked to a configured forge; private paths apply to forge-linked repositories only'
+
+# a branch, pushed before the link (the default branch is protected after)
+git clone ssh://localhost:$SSH_PORT/proj proj
+mkfile ./proj/README.md 'hello'
+git -C proj add -A
+git -C proj commit -m 'first'
+git -C proj push origin HEAD:main
+
+# link it to the forge, the way an import does
+exec git config --file $DATA_PATH/repos/proj.git/config forge.name gh
+exec git config --file $DATA_PATH/repos/proj.git/config forge.path me/proj
+exec git config --file $DATA_PATH/repos/proj.git/config forge.defaultbranch main
+exec git config --file $DATA_PATH/repos/proj.git/config remote.gh.url http://127.0.0.1:1/me/proj.git
+
+# the forge's list
+sundae repo private-paths proj
+cmp stdout forge.txt
+
+# readers see it; only writers change it
+usundae repo private-paths proj
+cmp stdout forge.txt
+! usundae repo private-paths proj notes
+stderr 'unauthorized'
+! usundae repo private-paths proj --clear
+stderr 'unauthorized'
+
+# paths are checked, then replace the list
+! sundae repo private-paths proj ../up
+stderr 'must not contain ".."'
+! sundae repo private-paths proj .jj/x
+stderr 'must not be inside .git or .jj'
+sundae repo private-paths proj notes/ .claude/
+sundae repo private-paths proj
+cmp stdout repo.txt
+exec git config --file $DATA_PATH/repos/proj.git/config --get-all sundae.privatepath
+stdout 'notes\n.claude'
+
+# --clear brings back the forge's list
+! sundae repo private-paths proj --clear AGENTS.md
+stderr '--clear takes no PATH'
+sundae repo private-paths proj --clear
+sundae repo private-paths proj
+cmp stdout forge.txt
+
+# refs/sundae/private is taken and kept in Sundae: the unreachable forge is never contacted
+mkfile ./proj/AGENTS.md 'private rules'
+git -C proj add -A
+git -C proj commit -m 'private files'
+git -C proj push origin HEAD:refs/sundae/private
+! stderr 'sundae:'
+git -C proj ls-remote origin refs/sundae/private
+stdout 'refs/sundae/private'
+
+# stop the server
+[windows] stopserver
+[windows] ! stderr .
+
+-- forge.txt --
+Source: forge
+Paths:
+  - AGENTS.md
+  - _bmad
+-- repo.txt --
+Source: repo
+Paths:
+  - notes
+  - .claude

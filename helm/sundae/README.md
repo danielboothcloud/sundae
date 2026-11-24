@@ -443,7 +443,17 @@ renders by default):
   default kube-dns in kube-system, ports 53 UDP and TCP), and to the rules
   in `networkPolicy.extraEgress`, appended as they are. Everything else
   must go there: package registries, model APIs,
-  forges, and a `clone_url` that is not this release's Service. Without
+  forges, and a `clone_url` that is not this release's Service.
+  `networkPolicy.allowForgeEgress: true` (default `false`) adds TCP 443 to
+  any address except `networkPolicy.forgeEgressExcept`, which sessions of
+  forge-linked repositories need to fetch `origin` and run `gh` and `glab`.
+  `forgeEgressExcept` defaults to the private, link-local (cloud metadata),
+  CGNAT and loopback ranges: `ipv4` `10.0.0.0/8`, `172.16.0.0/12`,
+  `192.168.0.0/16`, `169.254.0.0/16`, `100.64.0.0/10`, `127.0.0.0/8`;
+  `ipv6` `fc00::/7`, `fe80::/10`, `::1/128`. Override either list (`[]`
+  drops the exceptions), e.g. for a forge on a private address. A
+  NetworkPolicy cannot match host names, so list the forge's address ranges
+  in `extraEgress` instead to keep egress narrower. Without
   the policy, sandbox Pods have the cluster's default network access.
   Unlike OpenShell there is no per-program or L7 filtering.
 - **StorageClass** (`podRuntime.storageClass.create`, default `false`). See

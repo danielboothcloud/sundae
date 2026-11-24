@@ -620,6 +620,19 @@ projects:
 #               this forge's repositories, e.g. the account's noreply address
 #               (default: sessions.git_identity). Server-wide, like the
 #               token: every user's sessions use it.
+#   forward     branch (bookmark) globs a session push forwards to the forge
+#               (default ["**"], every branch). "*" does not cross "/", "**" does. Case-sensitive.
+#   keep        branch globs that stay in Sundae only, e.g. "push-*"; wins over
+#               forward
+#   protect_default_branch
+#               refuse session pushes of the default branch (default true)
+#   protect     deny: branch globs sessions cannot push;
+#               fast_forward_only: branch globs sessions cannot rewrite or delete
+#   private_paths
+#               repository-relative files, or directories with a trailing "/",
+#               kept in Sundae (refs/sundae/private) but never sent to the
+#               forge; sessions restore and save them. Per repository:
+#               "repo private-paths <repo> [paths...]"
 {{- if .Forges }}
 forges:
 {{- range .Forges }}
@@ -649,6 +662,27 @@ forges:
       name: {{ printf "%q" .GitIdentity.Name }}
       email: {{ printf "%q" .GitIdentity.Email }}
     {{- end }}
+    {{- if .Forward }}
+    forward: [{{ range $i, $p := .Forward }}{{ if $i }}, {{ end }}{{ printf "%q" $p }}{{ end }}]
+    {{- end }}
+    {{- if .Keep }}
+    keep: [{{ range $i, $p := .Keep }}{{ if $i }}, {{ end }}{{ printf "%q" $p }}{{ end }}]
+    {{- end }}
+    {{- if .ProtectDefaultBranch }}
+    protect_default_branch: {{ .ProtectsDefaultBranch }}
+    {{- end }}
+    {{- if or .Protect.Deny .Protect.FastForwardOnly }}
+    protect:
+      {{- if .Protect.Deny }}
+      deny: [{{ range $i, $p := .Protect.Deny }}{{ if $i }}, {{ end }}{{ printf "%q" $p }}{{ end }}]
+      {{- end }}
+      {{- if .Protect.FastForwardOnly }}
+      fast_forward_only: [{{ range $i, $p := .Protect.FastForwardOnly }}{{ if $i }}, {{ end }}{{ printf "%q" $p }}{{ end }}]
+      {{- end }}
+    {{- end }}
+    {{- if .PrivatePaths }}
+    private_paths: [{{ range $i, $p := .PrivatePaths }}{{ if $i }}, {{ end }}{{ printf "%q" $p }}{{ end }}]
+    {{- end }}
 {{- end }}
 {{- else }}
 #forges:
@@ -661,6 +695,13 @@ forges:
 #    git_identity:
 #      name: Jane Doe
 #      email: 12345+jane@users.noreply.github.com
+#    forward: ["**"]
+#    keep: ["push-*"]
+#    protect_default_branch: true
+#    protect:
+#      deny: []
+#      fast_forward_only: ["develop"]
+#    private_paths: ["AGENTS.md", "_bmad/", ".claude/"]
 #  - name: gitlab
 #    kind: gitlab
 #    url: https://gitlab.com

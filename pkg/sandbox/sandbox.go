@@ -8,6 +8,7 @@ package sandbox
 import (
 	"context"
 	"errors"
+	"io"
 	"time"
 )
 
@@ -122,7 +123,14 @@ type ExecOptions struct {
 	// NoLoginShell runs the command without sourcing the shell's login
 	// files first.
 	NoLoginShell bool
+	// Stdin feeds Run's input, keeping secrets out of exec args and env;
+	// runtimes without exec input refuse it.
+	Stdin io.Reader
 }
+
+// ErrStdinUnsupported is returned by Run when ExecOptions.Stdin is set and
+// the runtime cannot feed an exec's standard input.
+var ErrStdinUnsupported = errors.New("sandbox exec standard input is not supported")
 
 // ExecResult is the collected output of a completed command.
 type ExecResult struct {

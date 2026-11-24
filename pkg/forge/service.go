@@ -155,7 +155,8 @@ func (s *Service) Forge(name string) (*Forge, error) {
 	return f, nil
 }
 
-// lock serialises operations on one repository and returns the unlock.
+// lock serialises operations on one repository, across processes too (see
+// fileLock), and returns the unlock.
 func (s *Service) lock(repo string) func() {
 	s.mu.Lock()
 	m, ok := s.locks[repo]
@@ -165,7 +166,11 @@ func (s *Service) lock(repo string) func() {
 	}
 	s.mu.Unlock()
 	m.Lock()
-	return m.Unlock
+	release := s.fileLock(repo)
+	return func() {
+		release()
+		m.Unlock()
+	}
 }
 
 // Link is a Sundae repository's link to its forge repository, read from
@@ -617,9 +622,6 @@ type ImportOptions struct {
 	// All imports every listed repository include/exclude let through that
 	// is not imported yet.
 	All bool
-	// Vcs is the VCS kind of the new repositories; empty is
-	// proto.DefaultVCS.
-	Vcs proto.VCS
 }
 
 // ImportStatus is the outcome of importing one repository.
@@ -649,9 +651,6 @@ type ImportResult struct {
 func (s *Service) Import(ctx context.Context, user proto.User, name string, opts ImportOptions) ([]ImportResult, error) {
 	f, err := s.Forge(name)
 	if err != nil {
-		return nil, err
-	}
-	if _, err := proto.ParseVCS(string(opts.Vcs)); err != nil {
 		return nil, err
 	}
 	if user == nil {
@@ -707,13 +706,13 @@ func (s *Service) Import(ctx context.Context, user proto.User, name string, opts
 			continue
 		}
 		seen[strings.ToLower(rr.Path)] = true
-		results = append(results, s.importOne(ctx, user, f, rr, opts.Vcs))
+		results = append(results, s.importOne(ctx, user, f, rr))
 	}
 	return results, nil
 }
 
 // importOne imports one listed repository.
-func (s *Service) importOne(ctx context.Context, user proto.User, f *Forge, rr RemoteRepo, vcs proto.VCS) (res ImportResult) {
+func (s *Service) importOne(ctx context.Context, user proto.User, f *Forge, rr RemoteRepo) (res ImportResult) {
 	res = ImportResult{Path: rr.Path, Status: ImportFailed}
 	defer func() {
 		ev := Event{Kind: EventImport, Forge: f.Name(), Repo: res.Repo, Path: rr.Path, Sync: res.Sync}
@@ -764,7 +763,7 @@ func (s *Service) importOne(ctx context.Context, user proto.User, f *Forge, rr R
 	repo, err := s.be.CreateRepository(ctx, name, user, proto.RepositoryOptions{
 		Private:     rr.Private,
 		Description: rr.Description,
-		Vcs:         vcs,
+		Vcs:         proto.VCSJJ,
 	})
 	if err != nil {
 		if errors.Is(err, proto.ErrRepoExist) {

@@ -188,6 +188,10 @@ func TestRunUploadInteractive(t *testing.T) {
 	if _, err := r.Run(ctx, "sd-a", []string{"x"}, sbx.ExecOptions{NoLoginShell: true}); err != nil || !slices.Equal(got[1].Command, []string{"x"}) {
 		t.Fatalf("no login shell: %q", got[1].Command)
 	}
+	// Stdin reaches the exec's input, not its command or environment.
+	if res, err := r.Run(ctx, "sd-a", []string{"cat"}, sbx.ExecOptions{NoLoginShell: true, Stdin: strings.NewReader("secret")}); err != nil || string(res.Stdout) != "SECRET" || len(got[2].Env) != 0 {
+		t.Fatalf("stdin: %+v %v", res, err)
+	}
 
 	f := filepath.Join(t.TempDir(), "f")
 	_ = os.WriteFile(f, []byte("data"), 0o600)

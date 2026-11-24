@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -121,6 +122,8 @@ type execCall struct {
 	sandbox string
 	command []string
 	opts    v1.ExecOptions
+	// stdin is what the pod and docker runtimes fed the exec.
+	stdin string
 }
 
 // script returns the name of a `sh -c script name args...` call, or "".
@@ -152,6 +155,20 @@ type fakeSandbox struct {
 	// "name <email>", and jjIdentity to the TOML values given to jj.
 	identity   map[string]string
 	jjIdentity map[string]string
+	// remotes maps a checkout to the arguments of its last forge remotes
+	// setup, and cloneRemote to the remote its identity clone named.
+	remotes     map[string][]string
+	cloneRemote map[string]string
+	// restores maps a checkout to the paths of its last private restore;
+	// saves are the arguments and identity of each private save.
+	restores map[string][]string
+	saves    []privateSaveCall
+}
+
+// privateSaveCall is one run of the private save script.
+type privateSaveCall struct {
+	args     []string
+	identity string
 }
 
 // fakeExec simulates the sandboxes the commands Start runs act on. The
@@ -171,6 +188,11 @@ type fakeExec struct {
 	probeExit int
 	// identityExit makes the git identity script fail.
 	identityExit int
+	// remotesExit makes the forge remotes script fail.
+	remotesExit int
+	// saveExit makes the private save script fail; saveOut is its output.
+	saveExit int
+	saveOut  string
 }
 
 func newFakeExec() *fakeExec {
@@ -184,6 +206,8 @@ func (f *fakeExec) box(sandbox string) *fakeSandbox {
 		b = &fakeSandbox{
 			files: map[string]string{}, dirs: map[string]bool{}, sessions: map[string]bool{},
 			identity: map[string]string{}, jjIdentity: map[string]string{},
+			remotes: map[string][]string{}, cloneRemote: map[string]string{},
+			restores: map[string][]string{},
 		}
 		f.boxes[sandbox] = b
 	}
@@ -242,14 +266,25 @@ func gatewayLimits(command []string, o v1.ExecOptions) error {
 
 // env returns the decoded value of a base64 exec environment variable.
 func env(o v1.ExecOptions, k string) string {
-	b, err := base64.StdEncoding.DecodeString(o.Env[k])
+	return decode(o.Env[k])
+}
+
+// decode returns the decoded value of base64 s.
+func decode(s string) string {
+	b, err := base64.StdEncoding.DecodeString(s)
 	if err != nil {
-		panic(fmt.Sprintf("%s is not base64: %v", k, err))
+		panic(fmt.Sprintf("%q is not base64: %v", s, err))
 	}
 	return string(b)
 }
 
-func (f *fakeExec) Run(_ context.Context, _, sandbox string, command []string, opts ...v1.ExecOptions) (*types.ExecResult, error) {
+func (f *fakeExec) Run(ctx context.Context, ws, sandbox string, command []string, opts ...v1.ExecOptions) (*types.ExecResult, error) {
+	return f.RunStdin(ctx, ws, sandbox, command, "", opts...)
+}
+
+// RunStdin is Run with standard input, as the pod and docker runtimes
+// feed it.
+func (f *fakeExec) RunStdin(_ context.Context, _, sandbox string, command []string, stdin string, opts ...v1.ExecOptions) (*types.ExecResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var o v1.ExecOptions
@@ -259,7 +294,7 @@ func (f *fakeExec) Run(_ context.Context, _, sandbox string, command []string, o
 	if err := gatewayLimits(command, o); err != nil {
 		return nil, err
 	}
-	call := execCall{sandbox, command, o}
+	call := execCall{sandbox: sandbox, command: command, opts: o, stdin: stdin}
 	f.runs = append(f.runs, call)
 	b := f.box(sandbox)
 
@@ -359,7 +394,16 @@ func (f *fakeExec) Run(_ context.Context, _, sandbox string, command []string, o
 		b.newEnvFile = a[4]
 		return ok("created " + id + "\n")
 	case gitCredentialsName:
-		b.files[a[1]] = env(o, "SUNDAE_GITCONFIG")
+		gitconfig, forgeEnv := env(o, "SUNDAE_GITCONFIG"), env(o, "SUNDAE_FORGE_ENV")
+		if o.Env["SUNDAE_CREDENTIALS_STDIN"] == "1" {
+			lines := strings.Split(stdin, "\n")
+			if len(lines) != 3 || lines[2] != "" {
+				return fail(1, "read: short input")
+			}
+			gitconfig, forgeEnv = decode(lines[0]), decode(lines[1])
+		}
+		b.files[a[1]] = gitconfig
+		b.files[a[2]] = forgeEnv
 		found := false
 		for _, inc := range b.includes {
 			found = found || inc == a[1]
@@ -372,6 +416,9 @@ func (f *fakeExec) Run(_ context.Context, _, sandbox string, command []string, o
 			return fail(f.cloneExit, "fatal: boom")
 		}
 		b.dirs[a[2]] = true
+		if len(a) > 3 {
+			b.cloneRemote[a[2]] = a[3]
+		}
 		b.identity[a[2]] = env(o, "SUNDAE_GIT_USER_NAME") + " <" + env(o, "SUNDAE_GIT_USER_EMAIL") + ">"
 		if a[0] == "jj" {
 			b.jjIdentity[a[2]] = env(o, "SUNDAE_JJ_USER_NAME") + " " + env(o, "SUNDAE_JJ_USER_EMAIL")
@@ -384,6 +431,26 @@ func (f *fakeExec) Run(_ context.Context, _, sandbox string, command []string, o
 			b.identity[a[0]] = env(o, "SUNDAE_GIT_USER_NAME") + " <" + env(o, "SUNDAE_GIT_USER_EMAIL") + ">"
 			b.jjIdentity[a[0]] = env(o, "SUNDAE_JJ_USER_NAME") + " " + env(o, "SUNDAE_JJ_USER_EMAIL")
 		}
+	case forgeRemotesName:
+		if f.remotesExit != 0 {
+			return fail(f.remotesExit, a[0]+" is not a git or colocated jj checkout")
+		}
+		if !b.dirs[a[0]] {
+			return fail(2, "cd: "+a[0]+": No such file or directory")
+		}
+		b.remotes[a[0]] = slices.Clone(a)
+	case privateRestoreName:
+		b.restores[a[0]] = slices.Clone(a[1:])
+		return ok("warning: AGENTS.md is tracked by the repository; not restored\nrestored\n")
+	case privateSaveName:
+		if f.saveExit != 0 {
+			return fail(f.saveExit, "error: failed to push some refs")
+		}
+		b.saves = append(b.saves, privateSaveCall{args: slices.Clone(a), identity: env(o, "SUNDAE_GIT_USER_NAME") + " <" + env(o, "SUNDAE_GIT_USER_EMAIL") + ">"})
+		if f.saveOut != "" {
+			return ok(f.saveOut)
+		}
+		return ok("saved 0123456789abcdef\n")
 	case readReposName:
 		return ok(b.files[a[0]])
 	case writeReposName:
@@ -404,7 +471,7 @@ func (f *fakeExec) Interactive(_ context.Context, _, sandbox string, command []s
 	if err := gatewayLimits(command, opts[0]); err != nil {
 		return nil, err
 	}
-	f.interactive = append(f.interactive, execCall{sandbox, command, opts[0]})
+	f.interactive = append(f.interactive, execCall{sandbox: sandbox, command: command, opts: opts[0]})
 	return newFakeInteractive(), nil
 }
 
@@ -1197,7 +1264,7 @@ func TestNamedSessions(t *testing.T) {
 	}
 
 	// Ending one named session leaves the others.
-	existed, err := h.mgr.Delete(ctx, alice, "review")
+	existed, err := h.mgr.Delete(ctx, alice, "review", DeleteOptions{})
 	if err != nil || !existed {
 		t.Fatalf("delete review: existed=%v err=%v", existed, err)
 	}
@@ -1381,7 +1448,7 @@ func TestEndIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	existed, err := h.mgr.Delete(ctx, alice, "")
+	existed, err := h.mgr.Delete(ctx, alice, "", DeleteOptions{})
 	if err != nil || !existed {
 		t.Fatalf("delete: existed=%v err=%v", existed, err)
 	}
@@ -1395,11 +1462,11 @@ func TestEndIsIdempotent(t *testing.T) {
 		t.Fatal("unrelated token revoked")
 	}
 
-	existed, err = h.mgr.Delete(ctx, alice, "main")
+	existed, err = h.mgr.Delete(ctx, alice, "main", DeleteOptions{})
 	if err != nil || existed {
 		t.Fatalf("second delete: existed=%v err=%v", existed, err)
 	}
-	if _, err := h.mgr.Delete(ctx, alice, "-bad"); !errors.Is(err, ErrInvalidSessionName) {
+	if _, err := h.mgr.Delete(ctx, alice, "-bad", DeleteOptions{}); !errors.Is(err, ErrInvalidSessionName) {
 		t.Fatalf("invalid name: err = %v", err)
 	}
 }
@@ -1410,7 +1477,7 @@ func TestEndRejectsForeignSandbox(t *testing.T) {
 		Name:   SessionSandboxName("alice", "main"),
 		Labels: map[string]string{LabelUserID: "99"},
 	})
-	if _, err := h.mgr.Delete(context.Background(), alice, ""); !errors.Is(err, ErrNotOwned) {
+	if _, err := h.mgr.Delete(context.Background(), alice, "", DeleteOptions{}); !errors.Is(err, ErrNotOwned) {
 		t.Fatalf("err = %v", err)
 	}
 }

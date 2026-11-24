@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/danielboothcloud/sundae/pkg/hooks"
 )
 
 func TestRunCustomHookPropagatesExitError(t *testing.T) {
@@ -55,6 +57,50 @@ func TestRunCustomHookIgnoresMissingOrNonExecutableHook(t *testing.T) {
 	}
 	if err := runCustomHook(context.Background(), nonExecutable, nil, io.Discard, io.Discard); err != nil {
 		t.Fatalf("runCustomHook(non-executable) error = %v", err)
+	}
+}
+
+// recordingHooks records PreReceive calls and returns err from them.
+type recordingHooks struct {
+	hooks.Hooks
+	calls int
+	err   error
+}
+
+func (h *recordingHooks) PreReceive(context.Context, io.Writer, io.Writer, string, []hooks.HookArg) error {
+	h.calls++
+	return h.err
+}
+
+// TestRunPreReceiveCustomHookFirst checks the builtin pre-receive, which
+// forwards to the forge, runs only once the custom hook accepts the push.
+func TestRunPreReceiveCustomHookFirst(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SUNDAE_TEST_HELPER", "1")
+	run := func(h *recordingHooks) error {
+		return runPreReceive(context.Background(), h, executable, []byte("a b refs/heads/x\n"), io.Discard, io.Discard,
+			"repo", nil, "-test.run=TestCustomHookHelperProcess")
+	}
+
+	t.Setenv("SUNDAE_TEST_HELPER_EXIT", "1")
+	refusing := &recordingHooks{}
+	if err := run(refusing); err == nil || refusing.calls != 0 {
+		t.Fatalf("custom hook refused: err = %v, builtin calls = %d; want an error and no builtin call", err, refusing.calls)
+	}
+
+	t.Setenv("SUNDAE_TEST_HELPER_EXIT", "0")
+	accepting := &recordingHooks{}
+	if err := run(accepting); err != nil || accepting.calls != 1 {
+		t.Fatalf("custom hook accepted: err = %v, builtin calls = %d", err, accepting.calls)
+	}
+
+	builtin := &recordingHooks{err: errors.New("sundae: refused")}
+	var refused *preReceiveError
+	if err := run(builtin); !errors.As(err, &refused) {
+		t.Fatalf("builtin refused: err = %T %v, want a preReceiveError", err, err)
 	}
 }
 

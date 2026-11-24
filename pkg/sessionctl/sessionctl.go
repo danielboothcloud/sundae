@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/log/v2"
 	"github.com/danielboothcloud/sundae/pkg/access"
 	"github.com/danielboothcloud/sundae/pkg/backend"
 	"github.com/danielboothcloud/sundae/pkg/config"
@@ -33,12 +34,31 @@ import (
 var ErrSessionLost = errors.New("session ended without an exit status")
 
 // NewManager returns a Manager for an SSH connection, publishing on the
-// context's event bus and coordinating with the context's Monitor.
+// context's event bus, coordinating with the context's Monitor, and
+// resolving repositories (for their private files) as the context's user.
 func NewManager(ctx context.Context, client openshell.Client) *openshell.Manager {
 	return openshell.NewManager(client, backend.FromContext(ctx), config.FromContext(ctx),
 		openshell.WithEvents(events.FromContext(ctx)),
 		openshell.WithMonitor(openshell.MonitorFromContext(ctx)),
-		openshell.WithProviderReconciler(openshell.ProviderReconcilerFromContext(ctx)))
+		openshell.WithProviderReconciler(openshell.ProviderReconcilerFromContext(ctx)),
+		openshell.WithRepoResolver(func(repo string) (openshell.RepoSpec, error) { return RepoSpec(ctx, repo) }))
+}
+
+// SavePrivateForMonitor returns the save an idle suspend runs first
+// (openshell.WithMonitorSavePrivate): as the session's owner, from ctx's
+// backend and config. Failures are logged: the session's storage keeps the files.
+func SavePrivateForMonitor(ctx context.Context, logger *log.Logger) func(context.Context, openshell.Client, int64, string) {
+	return func(sctx context.Context, client openshell.Client, userID int64, sandbox string) {
+		user, err := backend.FromContext(ctx).UserByID(sctx, userID)
+		if err != nil {
+			logger.Warn("cannot save private files before suspending", "sandbox", sandbox, "err", err)
+			return
+		}
+		uctx := proto.WithUserContext(ctx, user)
+		if _, err := NewManager(uctx, client).SavePrivateSandbox(sctx, user, sandbox, io.Discard); err != nil {
+			logger.Warn("cannot save private files before suspending; the session's storage keeps them", "sandbox", sandbox, "err", err)
+		}
+	}
 }
 
 // Row is one of a user's sessions: what the gateway lists, and what the
@@ -233,11 +253,37 @@ func RepoSpec(ctx context.Context, repo string) (openshell.RepoSpec, error) {
 	}
 	// Commits in the session are made as the repository's forge
 	// identity, else the default one, else as whatever the sandbox says.
-	identity, err := GitIdentity(config.FromContext(ctx), rr)
+	cfg := config.FromContext(ctx)
+	identity, err := GitIdentity(cfg, rr)
 	if err != nil {
 		return openshell.RepoSpec{}, err
 	}
-	return openshell.RepoSpec{Name: rr.Name(), VCS: rr.Vcs(), GitIdentity: identity}, nil
+	fr, err := ForgeRemote(cfg, rr)
+	if err != nil {
+		return openshell.RepoSpec{}, err
+	}
+	sp := openshell.RepoSpec{Name: rr.Name(), VCS: rr.Vcs(), GitIdentity: identity, Forge: fr}
+	if fr != nil {
+		pp, err := forge.PrivatePathsOf(ctx, cfg, rr)
+		if err != nil {
+			return openshell.RepoSpec{}, fmt.Errorf("read the private paths of %s: %w", rr.Name(), err)
+		}
+		sp.PrivatePaths = pp.Paths
+	}
+	return sp, nil
+}
+
+// ForgeRemote returns the forge a session of rr fetches as origin; nil
+// when rr is not linked to a configured forge.
+func ForgeRemote(cfg *config.Config, rr proto.Repository) (*openshell.ForgeRemote, error) {
+	sr, err := forge.SessionRemoteOf(cfg, rr)
+	if err != nil {
+		return nil, fmt.Errorf("read the forge link of %s: %w", rr.Name(), err)
+	}
+	if sr == nil {
+		return nil, nil //nolint:nilnil
+	}
+	return &openshell.ForgeRemote{Forge: sr.Forge, Kind: sr.Kind, URL: sr.URL, CloneURL: sr.CloneURL}, nil
 }
 
 // ErrAmbiguous is returned by Resolve when several sessions hold the

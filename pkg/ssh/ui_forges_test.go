@@ -62,7 +62,7 @@ func (f *fakeForges) Repos(_ context.Context, name string) ([]forge.RepoStatus, 
 	}, nil
 }
 func (f *fakeForges) Discover(context.Context, string) error { return nil }
-func (f *fakeForges) Import(context.Context, string, []string, proto.VCS) ([]forge.ImportResult, error) {
+func (f *fakeForges) Import(context.Context, string, []string) ([]forge.ImportResult, error) {
 	return nil, nil
 }
 

@@ -29,6 +29,7 @@ var allScripts = map[string]string{
 	gitCredentialsName:   gitCredentialsScript,
 	gitIdentityName:      gitIdentityScript,
 	gitIdentityCloneName: gitIdentityCloneScript,
+	forgeRemotesName:     forgeRemotesScript,
 }
 
 func TestScriptsParse(t *testing.T) {
@@ -44,7 +45,7 @@ func TestScriptsParse(t *testing.T) {
 		if regexp.MustCompile(`\$\{?SUNDAE_[A-Z_]+`).MatchString(script) {
 			for _, v := range regexp.MustCompile(`\$\{?(SUNDAE_[A-Z_]+)`).FindAllStringSubmatch(script, -1) {
 				switch v[1] {
-				case "SUNDAE_OSEWA_KEY", "SUNDAE_OSEWA_HOSTS", "SUNDAE_GITCONFIG",
+				case "SUNDAE_OSEWA_KEY", "SUNDAE_OSEWA_HOSTS", "SUNDAE_GITCONFIG", "SUNDAE_FORGE_ENV", "SUNDAE_CREDENTIALS_STDIN",
 					"SUNDAE_GIT_USER_NAME", "SUNDAE_GIT_USER_EMAIL", "SUNDAE_JJ_USER_NAME", "SUNDAE_JJ_USER_EMAIL":
 				default:
 					t.Errorf("%s reads unexpected variable %s", name, v[1])
@@ -54,8 +55,10 @@ func TestScriptsParse(t *testing.T) {
 	}
 }
 
-// The credential script, run for real: a private file, included once from
-// ~/.gitconfig, which git then applies to the clone URL only.
+// The credential script, run for real: private files, the git config
+// included once from ~/.gitconfig, which git then applies to the clone URL
+// and each forge's URL only. The contents come from the environment
+// (OpenShell) or standard input (pod, docker).
 func TestGitCredentialsScript(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("no git")
@@ -63,23 +66,38 @@ func TestGitCredentialsScript(t *testing.T) {
 	home := t.TempDir()
 	dir := filepath.Join(home, "tmp", "sundae")
 	file := filepath.Join(dir, "gitconfig")
-	run := func(content string) {
+	envFile := filepath.Join(dir, "forge-env")
+	forges := []forgeCredential{
+		{forge: "github", kind: "github", url: "https://github.com", token: "gh-secret"},
+		{forge: "gitlab", kind: "gitlab", url: "https://gitlab.example.com", token: "gl-'secret"},
+	}
+	run := func(content string, stdin bool) {
 		t.Helper()
-		cmd := exec.CommandContext(t.Context(), "sh", "-c", gitCredentialsScript, gitCredentialsName, dir, file)
-		cmd.Env = []string{"HOME=" + home, "PATH=" + os.Getenv("PATH"), "SUNDAE_GITCONFIG=" + execEnvValue(content)}
+		fc, _ := forgeGitConfig(forges)
+		fe, _ := forgeEnv(forges)
+		cmd := exec.CommandContext(t.Context(), "sh", "-c", gitCredentialsScript, gitCredentialsName, dir, file, envFile)
+		cmd.Env = []string{"HOME=" + home, "PATH=" + os.Getenv("PATH")}
+		if stdin {
+			cmd.Env = append(cmd.Env, "SUNDAE_CREDENTIALS_STDIN=1")
+			cmd.Stdin = strings.NewReader(execEnvValue(content+fc) + "\n" + execEnvValue(fe) + "\n")
+		} else {
+			cmd.Env = append(cmd.Env, "SUNDAE_GITCONFIG="+execEnvValue(content+fc), "SUNDAE_FORGE_ENV="+execEnvValue(fe))
+		}
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("%v: %s", err, out)
 		}
 	}
-	run(gitCredentialConfig("http://sundae.svc:23232", "alice", "first"))
-	run(gitCredentialConfig("http://sundae.svc:23232", "alice", "second"))
+	run(gitCredentialConfig("http://sundae.svc:23232", "alice", "first"), false)
+	run(gitCredentialConfig("http://sundae.svc:23232", "alice", "second"), true)
 
 	st, err := os.Stat(dir)
 	if err != nil || st.Mode().Perm() != 0o700 {
 		t.Fatalf("dir mode = %v, err = %v", st.Mode(), err)
 	}
-	if st, err := os.Stat(file); err != nil || st.Mode().Perm() != 0o600 {
-		t.Fatalf("file mode = %v, err = %v", st.Mode(), err)
+	for _, f := range []string{file, envFile} {
+		if st, err := os.Stat(f); err != nil || st.Mode().Perm() != 0o600 {
+			t.Fatalf("%s mode = %v, err = %v", f, st.Mode(), err)
+		}
 	}
 	gitconfig, err := os.ReadFile(filepath.Join(home, ".gitconfig"))
 	if err != nil {
@@ -101,12 +119,24 @@ func TestGitCredentialsScript(t *testing.T) {
 		out, _ := cmd.Output()
 		return strings.TrimSpace(string(out))
 	}
-	want := "Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte("alice:second"))
-	if got := git("config", "--get-urlmatch", "http.extraHeader", "http://sundae.svc:23232/r.git"); got != want {
-		t.Fatalf("header for the clone URL = %q, want %q", got, want)
+	basic := func(s string) string { return "Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte(s)) }
+	for u, want := range map[string]string{
+		"http://sundae.svc:23232/r.git":               basic("alice:second"),
+		"https://github.com/o/r.git":                  basic("x-access-token:gh-secret"),
+		"https://gitlab.example.com/g/sub/p.git":      basic("oauth2:gl-'secret"),
+		"https://api.github.com/repos/o/r":            "",
+		"https://evil.example.com/github.com/o/r.git": "",
+		"http://github.com/o/r.git":                   "",
+	} {
+		if got := git("config", "--get-urlmatch", "http.extraHeader", u); got != want {
+			t.Errorf("header for %s = %q, want %q", u, got, want)
+		}
 	}
-	if got := git("config", "--get-urlmatch", "http.extraHeader", "https://github.com/r.git"); got != "" {
-		t.Fatalf("header leaks to another host: %q", got)
+
+	// The session's shell sources the forge env file.
+	out, err := exec.CommandContext(t.Context(), "sh", "-c", `. "$1"; printf '%s|%s|%s|%s' "$GH_TOKEN" "$GITLAB_TOKEN" "$GITLAB_HOST" "${GH_HOST-unset}"`, "x", envFile).Output()
+	if err != nil || string(out) != "gh-secret|gl-'secret|gitlab.example.com|unset" {
+		t.Fatalf("forge env = %q, %v", out, err)
 	}
 }
 

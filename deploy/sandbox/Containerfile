@@ -47,6 +47,9 @@
 # - Sundae writes the sandbox's short-lived git token to
 #   /tmp/sundae/gitconfig (mode 0600) on every session start and attach,
 #   and ~/.gitconfig includes that file; the token never lands in /sandbox.
+#   Sessions of forge-linked repositories also get the forge token there
+#   (an extraHeader for the forge URL) and in /tmp/sundae/forge-env
+#   (GH_TOKEN, GITLAB_TOKEN, ...), which the session's shell sources.
 #   The bootstrap uses sh, git, grep, gzip, sha256sum, base64, env and sed,
 #   and flock when present; all are in this image.
 # - The pod runtime's seed init container copies the image's /sandbox into
@@ -66,6 +69,20 @@ ARG BASE_IMAGE=docker.io/library/fedora:45@sha256:a7d72ba2745b100a3351087472e5ee
 ARG JJ_VERSION=0.47.1
 ARG JJ_SHA256_AMD64=d4b657f622ee50929c8916466dfa3d6a6c17a0a32b50e7b2c793707ec9ebcad7
 ARG JJ_SHA256_ARM64=0f300e1576de8dabe0a9dedf0b87ae44f8accea5cf54d9a342a51061c1fb1bcd
+
+# GitHub CLI release and the SHA-256 of its tarball per architecture, from
+# gh_2.105.0_checksums.txt of https://github.com/cli/cli/releases/tag/v2.105.0.
+# Change all three together.
+ARG GH_VERSION=2.105.0
+ARG GH_SHA256_AMD64=79e7ab5db738c48777b696e374f8b428f0647debfb424f44d2f426370407fe2f
+ARG GH_SHA256_ARM64=b1278c75107423d818f1937fd92cafc9e5e9b606631568f68d7fb816f5885a02
+
+# GitLab CLI release and the SHA-256 of its tarball per architecture, from
+# checksums.txt of https://gitlab.com/gitlab-org/cli/-/releases/v1.131.0.
+# Change all three together.
+ARG GLAB_VERSION=1.131.0
+ARG GLAB_SHA256_AMD64=580dbca43835b47267e512476a442f6b2e8785a82b26ccacee22bd7010662b2d
+ARG GLAB_SHA256_ARM64=7c4befd271203745b674caae2a69590ea5f9c6e5dee78bd3b40ba0e2a7c74749
 
 # osewa release and the SHA-256 of its gzipped static musl build per
 # architecture, from SHA256SUMS of
@@ -134,6 +151,55 @@ RUN set -eu; \
     chmod 0755 /out-osewa; \
     /out-osewa version
 
+# --- gh ------------------------------------------------------------------------
+# Download and verify the gh binary for the target architecture. Reuses the
+# jj stage, which has curl.
+FROM jj AS gh
+
+ARG TARGETARCH
+ARG GH_VERSION
+ARG GH_SHA256_AMD64
+ARG GH_SHA256_ARM64
+
+RUN set -eu; \
+    case "${TARGETARCH}" in \
+      amd64) sum="${GH_SHA256_AMD64}" ;; \
+      arm64) sum="${GH_SHA256_ARM64}" ;; \
+      *) echo "unsupported TARGETARCH '${TARGETARCH}' (want amd64 or arm64)" >&2; exit 1 ;; \
+    esac; \
+    dir="gh_${GH_VERSION}_linux_${TARGETARCH}"; \
+    curl -fsSL --proto '=https' --tlsv1.2 -o "/tmp/${dir}.tar.gz" \
+      "https://github.com/cli/cli/releases/download/v${GH_VERSION}/${dir}.tar.gz"; \
+    echo "${sum}  /tmp/${dir}.tar.gz" | sha256sum -c -; \
+    tar -xzf "/tmp/${dir}.tar.gz" -C /tmp "${dir}/bin/gh"; \
+    install -m 0755 "/tmp/${dir}/bin/gh" /out-gh; \
+    /out-gh --version
+
+# --- glab ----------------------------------------------------------------------
+# Download and verify the glab binary for the target architecture. Reuses the
+# jj stage, which has curl.
+FROM jj AS glab
+
+ARG TARGETARCH
+ARG GLAB_VERSION
+ARG GLAB_SHA256_AMD64
+ARG GLAB_SHA256_ARM64
+
+RUN set -eu; \
+    case "${TARGETARCH}" in \
+      amd64) sum="${GLAB_SHA256_AMD64}" ;; \
+      arm64) sum="${GLAB_SHA256_ARM64}" ;; \
+      *) echo "unsupported TARGETARCH '${TARGETARCH}' (want amd64 or arm64)" >&2; exit 1 ;; \
+    esac; \
+    tarball="glab_${GLAB_VERSION}_linux_${TARGETARCH}.tar.gz"; \
+    curl -fsSL --proto '=https' --tlsv1.2 -o "/tmp/${tarball}" \
+      "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/${tarball}"; \
+    echo "${sum}  /tmp/${tarball}" | sha256sum -c -; \
+    mkdir /tmp/glab; \
+    tar -xzf "/tmp/${tarball}" -C /tmp/glab bin/glab; \
+    install -m 0755 /tmp/glab/bin/glab /out-glab; \
+    /out-glab --version
+
 # --- sandbox -------------------------------------------------------------------
 FROM ${BASE_IMAGE}
 
@@ -169,6 +235,11 @@ RUN dnf -y install --setopt=install_weak_deps=False \
 # /usr/bin/jj matches the binary path in the README's example sandbox network
 # policy.
 COPY --from=jj /out-jj /usr/bin/jj
+
+# gh and glab for forge-linked sessions; /usr/bin matches the binaries of
+# the sundae_forge_* sandbox network rules.
+COPY --from=gh /out-gh /usr/bin/gh
+COPY --from=glab /out-glab /usr/bin/glab
 
 # The pinned osewa, under /usr (not /opt, which the default sandbox
 # filesystem policy does not expose) and on PATH, where Sundae looks for

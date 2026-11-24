@@ -25,8 +25,9 @@ func (d *Backend) PostReceive(_ context.Context, _ io.Writer, _ io.Writer, repo 
 // PreReceive is called by the git pre-receive hook.
 //
 // It implements Hooks.
-func (d *Backend) PreReceive(_ context.Context, _ io.Writer, _ io.Writer, repo string, args []hooks.HookArg) {
+func (d *Backend) PreReceive(_ context.Context, _ io.Writer, _ io.Writer, repo string, args []hooks.HookArg) error {
 	d.logger.Debug("pre-receive hook called", "repo", repo, "args", args)
+	return nil
 }
 
 // Update is called by the git update hook.

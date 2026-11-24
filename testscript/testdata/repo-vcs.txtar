@@ -24,8 +24,10 @@ stdout 'ssh://localhost:'$SSH_PORT'/gitrepo.git'
 # invalid --vcs value
 ! sundae repo create badrepo --vcs hg
 stderr 'invalid vcs'
-! sundae repo import badimport https://example.com/x.git --vcs hg
-stderr 'invalid vcs'
+
+# imports are always jj: repo import has no --vcs
+! sundae repo import badimport https://example.com/x.git --vcs git
+stderr 'unknown flag: --vcs'
 
 # bookmark is an alias of branch
 sundae repo bookmark list jjrepo

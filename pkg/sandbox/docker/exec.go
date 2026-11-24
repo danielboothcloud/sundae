@@ -131,7 +131,7 @@ func (r *Runtime) Run(ctx context.Context, name string, cmd []string, opts sbx.E
 	var stdout, stderr bytes.Buffer
 	code, err := r.stream(ctx, name, StreamOptions{
 		Command: command(cmd, opts), Env: opts.Env, WorkDir: opts.WorkDir,
-		Stdout: &stdout, Stderr: &stderr,
+		Stdin: opts.Stdin, Stdout: &stdout, Stderr: &stderr,
 	})
 	if err != nil {
 		return nil, err

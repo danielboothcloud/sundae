@@ -159,7 +159,7 @@ func TestEndPublishesLifecycle(t *testing.T) {
 	}
 	drain(t, sub)
 
-	if _, err := h.mgr.Delete(ctx, alice, ""); err != nil {
+	if _, err := h.mgr.Delete(ctx, alice, "", DeleteOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	got := drain(t, sub)
@@ -168,7 +168,7 @@ func TestEndPublishesLifecycle(t *testing.T) {
 	}
 
 	// Ending an absent session publishes nothing.
-	if _, err := h.mgr.Delete(ctx, alice, ""); err != nil {
+	if _, err := h.mgr.Delete(ctx, alice, "", DeleteOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := drain(t, sub); len(got) != 0 {
@@ -177,7 +177,7 @@ func TestEndPublishesLifecycle(t *testing.T) {
 
 	// A sandbox that is not alice's fails.
 	h.fc.AddSandbox("default", &types.Sandbox{Name: SessionSandboxName("alice", "main"), Labels: map[string]string{LabelUserID: "99"}})
-	if _, err := h.mgr.Delete(ctx, alice, ""); !errors.Is(err, ErrNotOwned) {
+	if _, err := h.mgr.Delete(ctx, alice, "", DeleteOptions{}); !errors.Is(err, ErrNotOwned) {
 		t.Fatalf("err = %v", err)
 	}
 	if got := drain(t, sub); steps(got) != "failed" || got[0].Op != "delete" {
@@ -195,7 +195,7 @@ func TestManagerWithoutBus(t *testing.T) {
 	if _, err := h.mgr.Start(context.Background(), StartOptions{User: alice, Repo: "r"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.mgr.Delete(context.Background(), alice, ""); err != nil {
+	if _, err := h.mgr.Delete(context.Background(), alice, "", DeleteOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	// WithEvents(nil) is the same.

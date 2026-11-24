@@ -205,7 +205,7 @@ exec "$bin" local ls`
 	// session's shell reads them and removes the file before it starts the
 	// program, which passes them on to everything it runs. The file holds
 	// placeholders, never credentials: the supervisor keeps the real
-	// values in its proxy.
+	// values in its proxy. forgeEnvFile is sourced first, so a provider's value wins.
 	osewaNewScript = `set -e
 bin=$1 idf=$2 seen=$3 dir=$4 envf=$5
 shift 5
@@ -227,7 +227,7 @@ if [ -n "$envf" ]; then
 	envf=$envf.$$
 	(umask 077; sundae_env > "$envf")
 fi
-id=$("$bin" new ` + osewaHost + ` -- /bin/sh -lc 'if [ -n "$2" ]; then if [ -r "$2" ]; then . "$2"; else echo "sundae: $2 is gone; starting without the OpenShell provider credentials" >&2; fi; rm -f "$2"; fi; cd "$1" || exit; shift 2; exec "$@"' sundae-session "$dir" "$envf" "$@") || { [ -z "$envf" ] || rm -f "$envf"; exit 1; }
+id=$("$bin" new ` + osewaHost + ` -- /bin/sh -lc '[ ! -r ` + forgeEnvFile + ` ] || . ` + forgeEnvFile + `; if [ -n "$2" ]; then if [ -r "$2" ]; then . "$2"; else echo "sundae: $2 is gone; starting without the OpenShell provider credentials" >&2; fi; rm -f "$2"; fi; cd "$1" || exit; shift 2; exec "$@"' sundae-session "$dir" "$envf" "$@") || { [ -z "$envf" ] || rm -f "$envf"; exit 1; }
 printf '%s\n' "$id" > "$idf.part"
 mv -f "$idf.part" "$idf"
 echo "created $id"`
@@ -486,8 +486,17 @@ func (m *Manager) script(ctx context.Context, sandbox, name, script string, env 
 	return runScript(ctx, m.client, sandbox, name, script, env, args...)
 }
 
+// scriptStdin is script with stdin as the script's standard input.
+func (m *Manager) scriptStdin(ctx context.Context, sandbox, name, script string, env map[string]string, stdin io.Reader, args ...string) (string, error) {
+	return runScriptInput(ctx, m.client, sandbox, name, script, env, stdin, args...)
+}
+
 // runScript is Manager.script for any client.
 func runScript(ctx context.Context, client Client, sandbox, name, script string, env map[string]string, args ...string) (string, error) {
+	return runScriptInput(ctx, client, sandbox, name, script, env, nil, args...)
+}
+
+func runScriptInput(ctx context.Context, client Client, sandbox, name, script string, env map[string]string, stdin io.Reader, args ...string) (string, error) {
 	e := osewaEnv()
 	maps.Copy(e, env)
 	command := append([]string{"sh", "-c", script, name}, args...)
@@ -495,6 +504,7 @@ func runScript(ctx context.Context, client Client, sandbox, name, script string,
 		Env:          e,
 		WorkDir:      SandboxRoot,
 		NoLoginShell: true,
+		Stdin:        stdin,
 	})
 	if err != nil {
 		return "", fmt.Errorf("openshell: %s: %w", name, err)

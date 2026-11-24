@@ -33,6 +33,7 @@ stdout 'signals'
 stdout 'suspend'
 stdout 'resume'
 stdout 'delete'
+stdout 'save-private'
 ! stdout 'park'
 ! stdout 'snapshot'
 

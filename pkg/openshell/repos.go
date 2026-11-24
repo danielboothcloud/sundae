@@ -40,6 +40,22 @@ type RepoSpec struct {
 	// start and attach, and given to the first clone. The zero value
 	// leaves the sandbox's identity alone.
 	GitIdentity config.GitIdentity
+	// Forge is the forge link; nil for none. Linked: jj clone, remotes sundae and fetch-only origin.
+	Forge *ForgeRemote
+	// PrivatePaths are the linked repository's Sundae-only paths, kept on
+	// refs/sundae/private; see private.go.
+	PrivatePaths []string
+}
+
+// ForgeRemote is the forge repository a session's origin remote fetches.
+type ForgeRemote struct {
+	// Forge names the forges entry whose token the session gets.
+	Forge string
+	// Kind is config.ForgeKindGitHub or config.ForgeKindGitLab.
+	Kind string
+	// URL is the forge's web base URL; CloneURL the repository's HTTPS one.
+	URL      string
+	CloneURL string
 }
 
 // annotatedRepos returns the repositories a sandbox was created with.

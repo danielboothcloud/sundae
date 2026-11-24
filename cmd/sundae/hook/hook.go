@@ -16,6 +16,7 @@ import (
 	"github.com/danielboothcloud/sundae/cmd"
 	"github.com/danielboothcloud/sundae/pkg/backend"
 	"github.com/danielboothcloud/sundae/pkg/config"
+	"github.com/danielboothcloud/sundae/pkg/forge"
 	"github.com/danielboothcloud/sundae/pkg/hooks"
 	"github.com/spf13/cobra"
 )
@@ -59,13 +60,22 @@ var (
 	// The --config flag is now deprecated.
 	hooksRunE = func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		hks := backend.FromContext(ctx)
+		be := backend.FromContext(ctx)
 		cfg := config.FromContext(ctx)
 
 		// This is set in the server before invoking git-receive-pack/git-upload-pack
 		repoName := os.Getenv("SUNDAE_REPO_NAME")
 
 		logger := log.FromContext(ctx).With("repo", repoName)
+
+		// NOTE: wrapped even without forges, so a push to a repository linked
+		// to a forge that is no longer configured warns the pusher.
+		svc, err := forge.NewService(cfg, be, logger)
+		if err != nil {
+			logger.Error("failed to start the forge service", "err", err)
+			return ErrInternalServerError
+		}
+		hks := svc.Hooks(be)
 
 		stdin := cmd.InOrStdin()
 		stdout := cmd.OutOrStdout()
@@ -97,7 +107,14 @@ var (
 
 			switch cmdName {
 			case hooks.PreReceiveHook:
-				hks.PreReceive(ctx, stdout, stderr, repoName, opts)
+				err := runPreReceive(ctx, hks, customHookPath, buf.Bytes(), stdout, stderr, repoName, opts, args...)
+				var refused *preReceiveError
+				if errors.As(err, &refused) {
+					cmd.SilenceErrors = true
+				} else if err != nil {
+					logger.Error("failed to run custom hook", "err", err)
+				}
+				return err
 			case hooks.PostReceiveHook:
 				hks.PostReceive(ctx, stdout, stderr, repoName, opts)
 			}
@@ -159,6 +176,26 @@ func init() {
 		postReceiveCmd,
 		postUpdateCmd,
 	)
+}
+
+// preReceiveError is a push refused by the builtin pre-receive hook.
+type preReceiveError struct{ error }
+
+func (e *preReceiveError) Unwrap() error { return e.error }
+
+// runPreReceive runs the builtin pre-receive only after the custom hook
+// accepts, because its forge forward cannot be undone by a later refusal.
+func runPreReceive(ctx context.Context, hks hooks.Hooks, customHookPath string, input []byte, stdout, stderr io.Writer, repo string, opts []hooks.HookArg, args ...string) error {
+	if err := runCustomHook(ctx, customHookPath, bytes.NewReader(input), stdout, stderr, args...); err != nil {
+		return err
+	}
+	if err := hks.PreReceive(ctx, stdout, stderr, repo, opts); err != nil {
+		// git shows hook stderr to the pusher as "remote: ..."; the
+		// non-zero exit refuses the push.
+		fmt.Fprintln(stderr, err) //nolint:errcheck
+		return &preReceiveError{err}
+	}
+	return nil
 }
 
 func runCommand(ctx context.Context, in io.Reader, out io.Writer, err io.Writer, name string, args ...string) error {

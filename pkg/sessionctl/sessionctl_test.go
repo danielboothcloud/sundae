@@ -194,6 +194,46 @@ func TestGitIdentity(t *testing.T) {
 	}
 }
 
+func TestForgeRemote(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Forges = []config.ForgeConfig{
+		{Name: "github", Kind: "github", URL: "https://github.com"},
+		{Name: "gitlab", Kind: "gitlab", URL: "https://gitlab.example.com/", SSHKeyFile: "/k"},
+	}
+	repo := func(t *testing.T, link string) proto.Repository {
+		t.Helper()
+		dir := filepath.Join(t.TempDir(), "r.git")
+		if _, err := git.Init(dir, true); err != nil {
+			t.Fatal(err)
+		}
+		f, err := os.OpenFile(filepath.Join(dir, "config"), os.O_APPEND|os.O_WRONLY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close() //nolint:errcheck
+		if _, err := f.WriteString(link); err != nil {
+			t.Fatal(err)
+		}
+		return linkedRepo{dir: dir}
+	}
+
+	got, err := ForgeRemote(cfg, repo(t, "[forge]\n\tname = github\n\tpath = me/r\n"))
+	want := openshell.ForgeRemote{Forge: "github", Kind: "github", URL: "https://github.com", CloneURL: "https://github.com/me/r.git"}
+	if err != nil || got == nil || *got != want {
+		t.Fatalf("github = %+v, %v", got, err)
+	}
+	// HTTPS even when the server syncs over SSH: sessions only get the token.
+	got, err = ForgeRemote(cfg, repo(t, "[forge]\n\tname = gitlab\n\tpath = g/sub/p\n[remote \"gitlab\"]\n\turl = ssh://git@gitlab.example.com/g/sub/p.git\n"))
+	if err != nil || got == nil || got.CloneURL != "https://gitlab.example.com/g/sub/p.git" || got.Kind != "gitlab" {
+		t.Fatalf("gitlab = %+v, %v", got, err)
+	}
+	for _, link := range []string{"", "[forge]\n\tname = gone\n\tpath = me/r\n"} {
+		if got, err := ForgeRemote(cfg, repo(t, link)); err != nil || got != nil {
+			t.Fatalf("%q = %+v, %v", link, got, err)
+		}
+	}
+}
+
 // detachClient is an openshell.Client whose attach client runs until it is
 // cancelled; size is the PTY it was asked for.
 type detachClient struct {

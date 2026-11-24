@@ -663,6 +663,25 @@ podRuntime:
           podSelector:
             matchLabels:
               k8s-app: kube-dns
+    # Allow TCP 443 to any address but forgeEgressExcept, so sessions of
+    # forge-linked repositories can fetch origin and run gh and glab.
+    # NetworkPolicy cannot match host names; use extraEgress with ipBlocks
+    # to narrow it.
+    allowForgeEgress: false
+    # Ranges allowForgeEgress leaves out, by family: private, link-local
+    # (cloud metadata), CGNAT and loopback addresses. Set [] to allow them.
+    forgeEgressExcept:
+      ipv4:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+        - 169.254.0.0/16
+        - 100.64.0.0/10
+        - 127.0.0.0/8
+      ipv6:
+        - fc00::/7
+        - fe80::/10
+        - ::1/128
     # NetworkPolicyEgressRule objects appended as they are: everything else
     # the sandboxes need, e.g. package registries, model APIs, or a
     # clone_url that is not this release's Service.

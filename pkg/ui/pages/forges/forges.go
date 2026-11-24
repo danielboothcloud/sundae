@@ -18,7 +18,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/danielboothcloud/sundae/pkg/events"
 	"github.com/danielboothcloud/sundae/pkg/forge"
-	"github.com/danielboothcloud/sundae/pkg/proto"
 	"github.com/danielboothcloud/sundae/pkg/ui/common"
 	"github.com/danielboothcloud/sundae/pkg/ui/components/prompt"
 )
@@ -195,11 +194,6 @@ type Forges struct {
 	confirmKey string
 	kept       notice
 
-	// importForm asks how to import (jj or git) while it is open;
-	// onImport imports with the VCS chosen.
-	importForm *prompt.Form
-	onImport   func(vcs proto.VCS) tea.Cmd
-
 	notice notice
 }
 
@@ -239,7 +233,7 @@ func (m *Forges) Close() {
 
 // Capturing reports whether the tab takes every key: a confirm or the
 // filter is open.
-func (m *Forges) Capturing() bool { return m.confirm != nil || m.importForm != nil || m.typing }
+func (m *Forges) Capturing() bool { return m.confirm != nil || m.typing }
 
 // SetSize implements common.Component.
 func (m *Forges) SetSize(width, height int) { m.common.SetSize(width, height) }
@@ -527,18 +521,6 @@ func (m *Forges) onKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		m.notice = kept
 		return nil
-	case m.importForm != nil:
-		res, cmd := m.importForm.Update(msg)
-		switch res {
-		case prompt.Submitted:
-			vcs, _ := proto.ParseVCS(m.importForm.Field("vcs").Value())
-			do := m.onImport
-			m.importForm, m.onImport = nil, nil
-			return do(vcs)
-		case prompt.Cancelled:
-			m.importForm, m.onImport = nil, nil
-		}
-		return cmd
 	case m.typing:
 		return m.onFilterKey(msg)
 	}
@@ -623,8 +605,12 @@ func (m *Forges) onKey(msg tea.KeyPressMsg) tea.Cmd {
 		if m.busy[rk] != "" {
 			return nil
 		}
-		m.askImport("Import "+r.Path+" from "+name, func(vcs proto.VCS) tea.Cmd {
-			return m.importCmd(name, []forge.RepoStatus{r}, vcs)
+		consequence := "creates a jj repository"
+		if r.Repo != "" {
+			consequence = "creates jj repository " + r.Repo
+		}
+		m.askImport("import?", consequence, func() tea.Cmd {
+			return m.importCmd(name, []forge.RepoStatus{r})
 		})
 		return nil
 	case key.Matches(msg, m.keys.Sync):
@@ -694,37 +680,39 @@ func (m *Forges) importAll() tea.Cmd {
 		m.notice = allImportedNotice()
 		return nil
 	}
-	q := fmt.Sprintf("Import %s", plural(n, "repository", "repositories"))
-	if m.query != "" {
-		q += " matching “" + m.query + "”"
-	}
+	q := fmt.Sprintf("import %s?", plural(n, "repository", "repositories"))
+	var c string
 	if len(order) > 1 {
 		var parts []string
 		for _, f := range order {
 			parts = append(parts, fmt.Sprintf("%s %d", f, len(byForge[f])))
 		}
-		q += " (" + strings.Join(parts, ", ") + ")"
+		c = strings.Join(parts, ", ")
 	} else {
-		q += " from " + order[0]
+		c = "from " + order[0]
 	}
-	m.askImport(q, func(vcs proto.VCS) tea.Cmd {
+	if m.query != "" {
+		c += " matching “" + m.query + "”"
+	}
+	m.askImport(q, c+", as jj repositories", func() tea.Cmd {
 		var cmds []tea.Cmd
 		for _, f := range order {
-			cmds = append(cmds, m.importCmd(f, byForge[f], vcs))
+			cmds = append(cmds, m.importCmd(f, byForge[f]))
 		}
 		return tea.Batch(cmds...)
 	})
 	return nil
 }
 
-// askImport opens the import form: what is imported, and as jj or git.
-func (m *Forges) askImport(what string, do func(vcs proto.VCS) tea.Cmd) {
-	vcs := prompt.ChoiceField("vcs", "VCS", []prompt.Option{
-		{Value: string(proto.VCSJJ), Detail: "jj git clone; bookmarks and change IDs"},
-		{Value: string(proto.VCSGit), Detail: "git clone; branches and commits"},
-	}, string(proto.DefaultVCS), false)
-	m.importForm = prompt.NewForm(m.common, what, "import", vcs)
-	m.onImport = do
+// askImport asks in the selected row, as push does, whether to import.
+func (m *Forges) askImport(question, consequence string, do func() tea.Cmd) {
+	it, ok := m.selected()
+	if !ok {
+		return
+	}
+	m.confirm = prompt.NewConfirm(m.common, "import", question, consequence)
+	m.confirmKey, m.kept = m.key(it), notice{}
+	m.onYes = do
 }
 
 func plural(n int, one, many string) string {
@@ -734,9 +722,8 @@ func plural(n int, one, many string) string {
 	return fmt.Sprintf("%d %s", n, many)
 }
 
-// importCmd imports repositories of a forge in the background, as vcs
-// repositories.
-func (m *Forges) importCmd(forgeName string, repos []forge.RepoStatus, vcs proto.VCS) tea.Cmd {
+// importCmd imports repositories of a forge in the background.
+func (m *Forges) importCmd(forgeName string, repos []forge.RepoStatus) tea.Cmd {
 	var keys, paths []string
 	for _, r := range repos {
 		rk := rowKey(forgeName, r.Path)
@@ -753,7 +740,7 @@ func (m *Forges) importCmd(forgeName string, repos []forge.RepoStatus, vcs proto
 	}
 	ctx, src, logger := m.ctx, m.src, m.common.Logger
 	return func() tea.Msg {
-		results, err := src.Import(ctx, forgeName, paths, vcs)
+		results, err := src.Import(ctx, forgeName, paths)
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -972,8 +959,6 @@ func (m *Forges) ShortHelp() []key.Binding {
 	switch {
 	case m.confirm != nil:
 		return m.confirm.ShortHelp()
-	case m.importForm != nil:
-		return m.importForm.ShortHelp()
 	case m.typing:
 		return []key.Binding{m.keys.Apply, m.keys.Cancel}
 	case m.statusErr != nil:
@@ -986,7 +971,7 @@ func (m *Forges) ShortHelp() []key.Binding {
 
 // FullHelp implements help.KeyMap.
 func (m *Forges) FullHelp() [][]key.Binding {
-	if m.confirm != nil || m.importForm != nil || m.typing || m.statusErr != nil {
+	if m.confirm != nil || m.typing || m.statusErr != nil {
 		return [][]key.Binding{m.ShortHelp()}
 	}
 	km := m.common.KeyMap

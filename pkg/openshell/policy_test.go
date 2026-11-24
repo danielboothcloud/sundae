@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -86,6 +87,43 @@ func TestBuildSandboxPolicyGitRule(t *testing.T) {
 	// A clone URL Sundae cannot allow is an error, not a policy without it.
 	if _, err := BuildSandboxPolicy(policyConfig("ssh://git.example.com")); err == nil || !strings.Contains(err.Error(), "clone URL") {
 		t.Fatalf("ssh clone URL: err = %v", err)
+	}
+}
+
+// Each forge gets a rule for its web host, and the API host where that
+// differs, for the git, jj, gh and glab binaries only.
+func TestBuildSandboxPolicyForgeRules(t *testing.T) {
+	cfg := policyConfig("http://sundae.svc:23232")
+	cfg.Forges = []config.ForgeConfig{
+		{Name: "github", Kind: config.ForgeKindGitHub, URL: "https://github.com"},
+		{Name: "ghec", Kind: config.ForgeKindGitHub, URL: "https://acme.ghe.com"},
+		{Name: "ghes", Kind: config.ForgeKindGitHub, URL: "https://git.corp:8443"},
+		{Name: "gitlab", Kind: config.ForgeKindGitLab, URL: "https://gitlab.example.com/gl"},
+	}
+	p, err := BuildSandboxPolicy(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string][]v1.PolicyNetworkEndpoint{
+		"sundae_forge_github": {{Host: "github.com", Port: 443}, {Host: "api.github.com", Port: 443}},
+		"sundae_forge_ghec":   {{Host: "acme.ghe.com", Port: 443}, {Host: "api.acme.ghe.com", Port: 443}},
+		"sundae_forge_ghes":   {{Host: "git.corp", Port: 8443}},
+		"sundae_forge_gitlab": {{Host: "gitlab.example.com", Port: 443}},
+	} {
+		got := p.NetworkPolicies[name]
+		if got.Name != name || !reflect.DeepEqual(got.Endpoints, want) {
+			t.Errorf("%s = %+v, want endpoints %+v", name, got, want)
+		}
+		var bins []string
+		for _, b := range got.Binaries {
+			bins = append(bins, b.Path)
+		}
+		if !slices.Contains(bins, "/usr/bin/gh") || !slices.Contains(bins, "/usr/libexec/git-core/git-remote-https") || slices.Contains(bins, anyBinary) {
+			t.Errorf("%s binaries = %v", name, bins)
+		}
+	}
+	if len(p.NetworkPolicies) != 5 {
+		t.Fatalf("rules = %d", len(p.NetworkPolicies))
 	}
 }
 

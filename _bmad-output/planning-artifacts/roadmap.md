@@ -229,6 +229,9 @@ Cuts across every workstream: each one adds its section here, none invents its o
 - E2. Discovery: list my repos on each forge, import selected or all, keep the list fresh.
 - E3. Non-destructive sync: upstream refs in their own namespace, local refs untouched. (F4, D3)
 - E4. Explicit push to a forge, per repo and per ref.
+- E5. Session pushes forwarded to the forge by per-forge rules (forward, keep, protect); `gh` and `glab` in sessions. Spec: `spec-forge-sessions.md`.
+- E6. Sundae-only files (`private_paths`) kept in `refs/sundae/private`, never sent to the forge.
+- E7. Forge imports are always jj; no `--vcs` on import.
 
 ### F. Workspace durability
 - F1. S3 snapshot of `/sandbox`, in scope as a config-gated feature, **off by default** (D12). When `snapshots.s3.enabled` is false nothing runs and no S3 settings are validated.
