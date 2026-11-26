@@ -1,4 +1,4 @@
-// Package sessionctl drives a user's OpenShell agent sessions on behalf of
+// Package sessionctl drives a user's agent sessions on behalf of
 // an SSH connection: what the `session` commands and the TUI share. It
 // builds the Manager from the connection's context, lists the user's
 // sessions with the status the Monitor last read, prepares a session for
@@ -61,7 +61,7 @@ func SavePrivateForMonitor(ctx context.Context, logger *log.Logger) func(context
 	}
 }
 
-// Row is one of a user's sessions: what the gateway lists, and what the
+// Row is one of a user's sessions: what its runtime lists, and what the
 // Monitor last read from the sandbox (nil when it has nothing yet).
 type Row struct {
 	Info   openshell.Info
@@ -127,7 +127,7 @@ func (r Row) Label() string {
 	return r.State().Glyph() + " " + r.Words()
 }
 
-// List returns the user's sessions as the gateway lists them, each with the
+// List returns the user's sessions as their runtimes list them, each with the
 // status the Monitor last read, sorted by state (blocked, error, done,
 // working, idle, none) and within a state by repository and name. It never
 // resumes a suspended session.
@@ -292,7 +292,7 @@ var ErrAmbiguous = errors.New("several sessions hold the repository")
 
 // Resolve returns the name of the user's session arg names: the session
 // called arg, else the only session holding the repository arg. Sessions
-// are looked up with the gateway.
+// are looked up in their runtimes.
 func Resolve(ctx context.Context, mgr *openshell.Manager, user proto.User, arg string) (string, error) {
 	if user == nil {
 		return "", proto.ErrUnauthorized
@@ -387,7 +387,7 @@ func Prepare(ctx context.Context, mgr *openshell.Manager, req Request) (_ *Prepa
 		switch {
 		case req.Create && lerr != nil:
 			// Without the list, no clash can be seen: the start reports
-			// why the gateway cannot be reached.
+			// why the runtime cannot be reached.
 			name = openshell.DefaultSessionNameFor(specs[0].Name)
 		case lerr != nil:
 			return nil, lerr //nolint:wrapcheck
@@ -540,6 +540,13 @@ func AttachCommand(publicURL, name string) string {
 	if name == "" {
 		name = openshell.DefaultSessionName
 	}
+	return TerminalCommand(publicURL, "session", "attach", name)
+}
+
+// TerminalCommand is the command that runs the Sundae SSH command args with
+// a terminal, for a server whose public SSH URL is publicURL: "ssh -t [-p
+// port] host args...", each argument quoted for a POSIX shell if it needs it.
+func TerminalCommand(publicURL string, args ...string) string {
 	host, port := publicURL, ""
 	if u, err := url.Parse(publicURL); err == nil && u.Host != "" {
 		host, port = u.Hostname(), u.Port()
@@ -547,9 +554,24 @@ func AttachCommand(publicURL, name string) string {
 			host = u.User.Username() + "@" + host
 		}
 	}
+	if host == "" {
+		host = "<host>"
+	}
 	cmd := "ssh -t "
 	if port != "" && port != "22" {
 		cmd += "-p " + port + " "
 	}
-	return fmt.Sprintf("%s%s session attach %s", cmd, host, name)
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = shellQuote(a)
+	}
+	return cmd + host + " " + strings.Join(quoted, " ")
+}
+
+// shellQuote quotes s for a POSIX shell unless it only has safe characters.
+func shellQuote(s string) string {
+	if s != "" && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./:=@,+%") == "" {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

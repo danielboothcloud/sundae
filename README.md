@@ -1,7 +1,8 @@
 # Sundae
 
-Sundae is a self-hostable Git server for the command line, with OpenShell agent
-sessions, forges and notifications.
+Sundae is a self-hostable Git server for the command line, with sandboxed agent
+sessions (Kubernetes Pods, Docker containers or OpenShell sandboxes), forges and
+notifications.
 
 Sundae is a fork of [Soft Serve](https://github.com/charmbracelet/soft-serve)
 by [Charm](https://charm.sh), released under the same MIT license. The Git
@@ -58,8 +59,8 @@ go build -o sundae ./cmd/sundae
 
 To run it in a container or on Kubernetes, build the image from the
 [`Containerfile`](Containerfile) and deploy it with the Helm chart in
-[`helm/sundae`](helm/sundae/README.md), which can also install the OpenShell
-gateway and Agent Sandbox for agent sessions. [docker.md](docker.md) shows how to run the
+[`helm/sundae`](helm/sundae/README.md), which sets up agent sessions too: the
+pod runtime's RBAC and storage, or the OpenShell gateway and Agent Sandbox. [docker.md](docker.md) shows how to run the
 image with Docker or Podman.
 
 ## Setting up a server
@@ -320,7 +321,7 @@ name all in uppercase. Here are some examples:
 - `SUNDAE_ALLOW_KEYLESS`: Overrides the `allow-keyless` setting (see [Authentication](#authentication))
 - `SUNDAE_DEFAULT_REPO`: Repository name to create on boot if missing
 - `SUNDAE_FORGES_0_NAME`, `SUNDAE_FORGES_0_KIND`, ...: The first entry of `forges` (see [Forges](#forges)); list values are comma-separated; `SUNDAE_FORGES_0_GIT_IDENTITY_NAME` and `..._EMAIL` set its `git_identity`
-- `SUNDAE_SESSIONS_GIT_IDENTITY_NAME`, `SUNDAE_SESSIONS_GIT_IDENTITY_EMAIL`: `sessions.git_identity` (see [OpenShell Agent Sessions](#openshell-agent-sessions), "Git identity")
+- `SUNDAE_SESSIONS_GIT_IDENTITY_NAME`, `SUNDAE_SESSIONS_GIT_IDENTITY_EMAIL`: `sessions.git_identity` (see [Agent Sessions](#agent-sessions), "Git identity")
 - `SUNDAE_NOTIFICATIONS_ON`, `SUNDAE_NOTIFICATIONS_NTFY_ENABLED`, ...: The `notifications` section (see [Notifications](#notifications)); `on` is comma-separated
 - `SUNDAE_JJ_PATH`: The jj binary for the TUI's Changes tab of jj repositories (default: `jj` from `PATH`); `off` shows them with the git log (see [Jujutsu (jj) Repositories](#jujutsu-jj-repositories))
 
@@ -360,10 +361,11 @@ Use the `lfs` config section to customize your Git LFS server.
 
 > **Note**: The pure-SSH transfer is disabled by default.
 
-#### OpenShell Agent Sessions
+#### Agent Sessions
 
-Sundae can start and resume agent sessions in
-[NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) sandboxes. Each
+Sundae can start and resume agent sessions in sandboxes: a Kubernetes Pod, a
+Docker container or an [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell)
+sandbox per session (see "Session runtimes"). Each
 session has its own sandbox holding one or more repositories, each cloned
 into `/sandbox/<repo>`. The session's program (a shell by default, or an
 agent) runs inside an [osewa](https://github.com/rjyo/osewa) session, in the
@@ -429,7 +431,8 @@ repositories first (see "Private paths"). Earlier releases called these
 `park` and `end`; the old names are gone.
 
 **Leave and re-attach.** `session start` and `session attach` need a
-terminal, so pass `-t`. While attached, the bottom row of your terminal is a
+terminal, so pass `-t`; without one they fail and print the `ssh -t` command
+to run instead. While attached, the bottom row of your terminal is a
 status bar: the session on the left, <kbd>Ctrl-]</kbd> `sessions` on the
 right; the program gets the rows above it. <kbd>Ctrl-]</kbd> leaves the
 session at once and opens the Sundae **Sessions** screen on the same
@@ -460,7 +463,9 @@ repository a session holds, and anonymous users can't use sessions. `session
 attach` never creates a sandbox.
 
 The feature is off by default. When it is disabled, `session` is an unknown
-command. To enable it:
+command. To enable it, set `sessions.runtime` to `pod` or `docker` (see
+"Session runtimes"), or, for the default `openshell` runtime, set
+`openshell.enabled`. With OpenShell:
 
 ```yaml
 openshell:
@@ -594,8 +599,8 @@ repository's own profile (`repo profile`, see
 [Project templates and profiles](#project-templates-and-profiles)), else from
 the `sessions.repos` entry matching the repository (`*` does not cross `/`,
 `**` does, case-insensitive; when several match, the one with the most
-non-wildcard characters wins), else from `openshell.image` and
-`openshell.command`. A repository profile that is no longer configured is
+non-wildcard characters wins), else from the runtime's image (`pod.image`,
+`docker.image`, else `openshell.image`) and `openshell.command`. A repository profile that is no longer configured is
 skipped with a warning. `--image` overrides the image. A session keeps the
 profile it was created from: `--profile` and `--image` are ignored, with a
 warning, when it already exists. Profile names are DNS labels; every
@@ -1037,8 +1042,8 @@ has had nobody attached and no output for 24 hours.
 
 **Session status.** Agents report what they are doing with the
 [Program Status Protocol (OSC 7501)](https://www.superlogical.com/rex/docs/build/program-status);
-osewa keeps each session's latest report. While OpenShell is enabled, Sundae
-reads it from every running session: every `sessions.status.poll_interval`
+osewa keeps each session's latest report. While sessions are on, Sundae
+reads it from every running session, in every runtime: every `sessions.status.poll_interval`
 (default 10s) it lists the sandboxes it created and, in each Ready one, runs
 `osewa local ls` (one exec per sandbox, at most 8 at a time, each cut off
 after 15 seconds) and finds the session's program by the id recorded in the
@@ -1138,8 +1143,8 @@ Each suspend is a `suspended` lifecycle event (`op` `auto`, or `suspend` for
 `session suspend`).
 
 `session start`, `session attach` and `session resume` resume a suspended
-session (and say so), then carry on as usual; that is a `resumed` event. A
-resume asks OpenShell to boot the sandbox cleanly if its memory cannot be
+session (and say so), then carry on as usual; that is a `resumed` event. An
+OpenShell resume asks the gateway to boot the sandbox cleanly if its memory cannot be
 restored (`RestartIfRestoreFails`): the session stays usable with what the
 backend kept of `/sandbox`, rather than failing until it is deleted. osewa's
 server and the program are gone after such a restart, and after any pod or
@@ -1456,7 +1461,7 @@ notifications:
 The default is `[blocked, done, error]`. Agent states come from the
 [Program Status Protocol (OSC 7501)](https://www.superlogical.com/rex/docs/build/program-status)
 that agents report, as Sundae polls them (see "Session status" under
-"OpenShell Agent Sessions"): a change is seen up to `sessions.status.poll_interval`
+"Agent Sessions"): a change is seen up to `sessions.status.poll_interval`
 late, and a state that lasts less than that may not be seen at all.
 
 **What a notification says.** The title has the state's glyph, the state and
@@ -1857,7 +1862,7 @@ else the template's `profile`. `repo profile` reads it (anyone who can read
 the repository) and sets or removes it (collaborators with write access); it
 must name a `sessions.profiles` entry. A new session's profile is the first
 of `session start --profile`, the repository's profile, the `sessions.repos`
-match and none. `--start` needs OpenShell enabled, and starts the `main`
+match and none. `--start` needs agent sessions on, and starts the `main`
 session as `session start --detach` does; a failed start leaves the
 repository and says so.
 
@@ -1942,10 +1947,10 @@ forges:
   made as in agent sessions of the forge's repositories; without it they use
   `sessions.git_identity`. It is server-wide like the token: every user's
   sessions of those repositories use it. See "Git identity" under
-  [OpenShell Agent Sessions](#openshell-agent-sessions).
+  [Agent Sessions](#agent-sessions).
 - Agent sessions of imported repositories fetch the forge as `origin` and
   run `gh`/`glab` with this forge's token; see "Forge-linked repositories"
-  under [OpenShell Agent Sessions](#openshell-agent-sessions).
+  under [Agent Sessions](#agent-sessions).
 - `ssh_key_file`, `ssh_known_hosts_file` and `ssh_url` (optional) switch git
   operations to SSH; see "Git over SSH" below.
 - Changing forges means editing the file and restarting (the Helm chart rolls
@@ -2303,7 +2308,7 @@ of each listed forge (`Forges › Sync forge github`). Type to filter (every
 word must appear in the label), <kbd>↑</kbd>/<kbd>↓</kbd> move,
 <kbd>enter</kbd> switches to the action's tab and runs it as its key does
 (confirms included), <kbd>esc</kbd> closes. Row actions are for each tab's
-selected row; forges appear once the Forges tab has listed them. When OpenShell is enabled and you are signed in with a key, a
+selected row; forges appear once the Forges tab has listed them. When agent sessions are on and you are signed in with a key, a
 **Sessions** tab lists your agent sessions, what needs you first, and the
 header counts the ones blocked, errored, done and working. In it:
 <kbd>enter</kbd> attaches (a status bar on the bottom row names the
@@ -2321,8 +2326,9 @@ cursor (on short or narrow terminals, just its latest signal on one line).
 `session signals` feed, live, newest first (<kbd>/</kbd> filters,
 <kbd>a</kbd> shows only what needs you, <kbd>g</kbd> goes back to the top
 and follows new signals); <kbd>h</kbd> or <kbd>esc</kbd> goes back.
-When the sessions cannot be listed (with OpenShell: its gateway is
-unreachable) the tab says so with the cause, and <kbd>r</kbd> retries; the
+When the sessions cannot be listed (a runtime is unreachable; `OpenShell
+gateway unreachable` when every session runs on OpenShell) the tab says so
+with the cause, and <kbd>r</kbd> retries; the
 other tabs keep working.
 
 <kbd>u</kbd> (**Sync with forge**, also in the action menu) brings a

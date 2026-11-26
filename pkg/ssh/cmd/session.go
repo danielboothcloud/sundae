@@ -16,23 +16,24 @@ import (
 	"github.com/danielboothcloud/sundae/pkg/signals"
 	"github.com/danielboothcloud/sundae/pkg/sshutils"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // errNoTerminal is returned when a command that attaches runs without a PTY.
-var errNoTerminal = errors.New("requires a terminal (ssh -t)")
+var errNoTerminal = errors.New("needs a terminal")
 
-// newOpenShellClient creates the OpenShell client for a command invocation.
-// Tests may replace it.
+// newOpenShellClient creates the client of the session runtimes in use for a
+// command invocation. Tests may replace it.
 var newOpenShellClient = func(cfg *config.Config) (openshell.Client, error) {
 	return openshell.NewClient(cfg)
 }
 
-// SessionCommand returns the command that manages OpenShell agent sessions.
-// It is only registered when OpenShell is enabled.
+// SessionCommand returns the command that manages agent sessions. It is only
+// registered when sessions are on (config.SessionsEnabled).
 func SessionCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "session",
-		Short: "Manage OpenShell agent sessions",
+		Short: "Manage agent sessions",
 		// NOTE: without Args and RunE, cobra prints help for an unknown
 		// subcommand (e.g. the removed park/end) and exits 0.
 		Args:              cobra.NoArgs,
@@ -73,7 +74,7 @@ gets the repository added if it lacks it.
 ` + sessionCreateHelp,
 		Args: cobra.ExactArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			if err := checkStartFlags(cmd, detach); err != nil {
+			if err := checkStartFlags(cmd, args, detach); err != nil {
 				return err
 			}
 			return checkIfReadable(cmd, args)
@@ -110,7 +111,7 @@ added. "session repos" adds and removes repositories later.
 			if !openshell.ValidSessionName(args[0]) {
 				return openshell.ErrInvalidSessionName
 			}
-			if err := checkStartFlags(cmd, detach); err != nil {
+			if err := checkStartFlags(cmd, args, detach); err != nil {
 				return err
 			}
 			for _, r := range repos {
@@ -131,9 +132,11 @@ added. "session repos" adds and removes repositories later.
 }
 
 // sessionCreateHelp is what start and new say about creating a session.
-const sessionCreateHelp = `A new session gets its own OpenShell sandbox and runs its program
-(openshell.command, or the profile's) in an osewa session, in the checkout
-of its only repository, else in /sandbox. Its profile is --profile, else the
+const sessionCreateHelp = `A new session gets its own sandbox: a Kubernetes Pod, a Docker container
+or an OpenShell sandbox, by its profile's runtime, else sessions.runtime.
+It runs its program (the profile's command, else openshell.command, which
+every runtime uses) in an osewa session, in the checkout of its only
+repository, else in /sandbox. Its profile is --profile, else the
 first repository's own profile ("repo profile"), else the first
 sessions.repos match among its repositories, else none; --image overrides
 the image. Both only apply when the session is created.
@@ -157,12 +160,12 @@ func addCreateFlags(cmd *cobra.Command, name, profile, image *string, detach *bo
 }
 
 // checkStartFlags requires a terminal unless detach is set.
-func checkStartFlags(cmd *cobra.Command, detach bool) error {
+func checkStartFlags(cmd *cobra.Command, args []string, detach bool) error {
 	if detach {
 		return nil
 	}
-	if err := checkTerminal(cmd); err != nil {
-		return fmt.Errorf("%w, or --detach", err)
+	if err := checkTerminal(cmd, args); err != nil {
+		return fmt.Errorf("%w (or pass --detach)", err)
 	}
 	return nil
 }
@@ -195,7 +198,7 @@ Sessions screen to choose one.
 				// Without a terminal, several sessions need a name.
 				return nil
 			}
-			return checkTerminal(cmd)
+			return checkTerminal(cmd, args)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var n string
@@ -213,7 +216,7 @@ Sessions screen to choose one.
 			if err != nil {
 				return err
 			}
-			if err := checkTerminal(cmd); err != nil {
+			if err := checkTerminal(cmd, args); err != nil {
 				return err
 			}
 			return runSession(cmd, sessionctl.Request{Name: n}, false)
@@ -389,7 +392,7 @@ func defaultSession(cmd *cobra.Command) (name string, chosen bool, err error) {
 		return "", false, errors.New("you have no sessions; start one with: session start REPO")
 	case len(infos) == 1:
 		return infos[0].Name, false, nil
-	case checkTerminal(cmd) == nil && showSessions(ctx, "", ""):
+	case checkTerminal(cmd, nil) == nil && showSessions(ctx, "", ""):
 		return "", true, nil
 	}
 	names := make([]string, len(infos))
@@ -559,9 +562,10 @@ func sessionListCommand() *cobra.Command {
 		Use:     "ls",
 		Aliases: []string{"list"},
 		Short:   "List your agent sessions and what their agents are doing",
-		Long: `List your agent sessions: name, repositories, profile, sandbox, phase,
-and the agent's status (OSC 7501) as Sundae last read it: state, message,
-how many clients are attached, and when the state last changed.
+		Long: `List your agent sessions: name, repositories, profile, runtime,
+sandbox, phase, and the agent's status (OSC 7501) as Sundae last read it:
+state, message, how many clients are attached, and when the state last
+changed.
 
 Sessions that need you come first: blocked, error, done, working, idle,
 then those with no status. A suspended session keeps the state it had when
@@ -804,13 +808,40 @@ func checkIfUser(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-// checkTerminal requires the SSH session to have a PTY.
-func checkTerminal(cmd *cobra.Command) error {
+// checkTerminal requires the SSH session to have a PTY; the error names the
+// ssh -t command that runs cmd with args and the flags set.
+func checkTerminal(cmd *cobra.Command, args []string) error {
 	sess := sshutils.SessionFromContext(cmd.Context())
 	if sess != nil {
 		if _, _, ok := sess.Pty(); ok {
 			return nil
 		}
 	}
-	return fmt.Errorf("session %s %w", cmd.Name(), errNoTerminal)
+	var publicURL string
+	if cfg := config.FromContext(cmd.Context()); cfg != nil {
+		publicURL = cfg.SSH.PublicURL
+	}
+	return fmt.Errorf("session %s %w; run: %s", cmd.Name(), errNoTerminal,
+		sessionctl.TerminalCommand(publicURL, commandLine(cmd, args)...))
+}
+
+// commandLine returns the arguments that run cmd again: its path below the
+// root, then args, then the flags set.
+func commandLine(cmd *cobra.Command, args []string) []string {
+	line := append(strings.Fields(cmd.CommandPath()), args...)
+	cmd.Flags().Visit(func(f *pflag.Flag) {
+		switch v := f.Value.(type) {
+		case pflag.SliceValue:
+			for _, s := range v.GetSlice() {
+				line = append(line, "--"+f.Name, s)
+			}
+		default:
+			if f.Value.Type() == "bool" {
+				line = append(line, "--"+f.Name+"="+f.Value.String())
+			} else {
+				line = append(line, "--"+f.Name, f.Value.String())
+			}
+		}
+	})
+	return line
 }

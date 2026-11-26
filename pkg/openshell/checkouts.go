@@ -113,7 +113,7 @@ func updateCheckouts(ctx context.Context, client Client, sandbox string, repos [
 	for _, r := range repos {
 		u, ok := got[r]
 		if !ok {
-			return nil, fmt.Errorf("openshell: %s: no result for %s", updateCheckoutsName, r)
+			return nil, fmt.Errorf("session: %s: no result for %s", updateCheckoutsName, r)
 		}
 		res = append(res, u)
 	}

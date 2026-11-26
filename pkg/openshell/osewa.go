@@ -94,7 +94,7 @@ func osewaArch(machine string) (string, error) {
 	case "aarch64", "arm64":
 		return "arm64", nil
 	default:
-		return "", fmt.Errorf("openshell: no osewa build for sandbox architecture %q", machine)
+		return "", fmt.Errorf("session: no osewa build for sandbox architecture %q", machine)
 	}
 }
 
@@ -254,7 +254,7 @@ func (m *Manager) osewaBinary(ctx context.Context, sandbox string, progress io.W
 	sum := m.osewaSHA256[arch]
 	local := filepath.Join(m.osewaBinaryDir, "osewa-linux-"+arch+".gz")
 	if err := verifySHA256(local, sum); err != nil {
-		return "", false, fmt.Errorf("openshell: the sandbox image has no osewa %s and there is none to upload: %w (install it in the image, or put the release's osewa-linux-%s.gz in sessions.osewa.binary_dir)", OsewaVersion, err, arch)
+		return "", false, fmt.Errorf("session: the sandbox image has no osewa %s and there is none to upload: %w (install it in the image, or put the release's osewa-linux-%s.gz in sessions.osewa.binary_dir)", OsewaVersion, err, arch)
 	}
 
 	fmt.Fprintf(progress, "Installing osewa %s in the sandbox...\n", OsewaVersion) //nolint:errcheck
@@ -330,7 +330,7 @@ func (m *Manager) enrollBridge(ctx context.Context, sandbox, bin string) error {
 	var resp enrollResponse
 	line, _, _ := strings.Cut(strings.TrimSpace(out), "\n")
 	if err := json.Unmarshal([]byte(line), &resp); err != nil || resp.ServerKey == "" {
-		return fmt.Errorf("openshell: osewa enroll: unexpected response %q", trimOutput([]byte(out)))
+		return fmt.Errorf("session: osewa enroll: unexpected response %q", trimOutput([]byte(out)))
 	}
 
 	hosts, err := json.MarshalIndent([]osewaHostEntry{{
@@ -339,7 +339,7 @@ func (m *Manager) enrollBridge(ctx context.Context, sandbox, bin string) error {
 		ServerKey: resp.ServerKey,
 	}}, "", "  ")
 	if err != nil {
-		return fmt.Errorf("openshell: osewa hosts.json: %w", err)
+		return fmt.Errorf("session: osewa hosts.json: %w", err)
 	}
 	_, err = m.script(ctx, sandbox, osewaHostsName, osewaHostsScript,
 		map[string]string{"SUNDAE_OSEWA_HOSTS": execEnvValue(string(hosts) + "\n")},
@@ -353,11 +353,11 @@ func (m *Manager) enrollBridge(ctx context.Context, sandbox, bin string) error {
 func newOsewaKey() (pub, keyPEM string, err error) {
 	pk, sk, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		return "", "", fmt.Errorf("openshell: generate osewa key: %w", err)
+		return "", "", fmt.Errorf("session: generate osewa key: %w", err)
 	}
 	der, err := x509.MarshalPKCS8PrivateKey(sk)
 	if err != nil {
-		return "", "", fmt.Errorf("openshell: encode osewa key: %w", err)
+		return "", "", fmt.Errorf("session: encode osewa key: %w", err)
 	}
 	return base64.StdEncoding.EncodeToString(pk), string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})), nil
 }
@@ -400,7 +400,7 @@ type osewaList struct {
 func parseOsewaList(out string) (osewaList, error) {
 	var ls osewaList
 	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &ls); err != nil {
-		return osewaList{}, fmt.Errorf("openshell: osewa local ls: unexpected output %q", trimOutput([]byte(out)))
+		return osewaList{}, fmt.Errorf("session: osewa local ls: unexpected output %q", trimOutput([]byte(out)))
 	}
 	return ls, nil
 }
@@ -459,7 +459,7 @@ func (m *Manager) newOsewaSession(ctx context.Context, sandbox, bin, workDir str
 	}
 	verb, id, _ := strings.Cut(strings.TrimSpace(lastLine(out)), " ")
 	if id == "" || (verb != "created" && verb != "existing") {
-		return "", false, fmt.Errorf("openshell: osewa new: unexpected output %q", trimOutput([]byte(out)))
+		return "", false, fmt.Errorf("session: osewa new: unexpected output %q", trimOutput([]byte(out)))
 	}
 	return id, verb == "created", nil
 }
@@ -507,14 +507,14 @@ func runScriptInput(ctx context.Context, client Client, sandbox, name, script st
 		Stdin:        stdin,
 	})
 	if err != nil {
-		return "", fmt.Errorf("openshell: %s: %w", name, err)
+		return "", fmt.Errorf("session: %s: %w", name, err)
 	}
 	if res.ExitCode != 0 {
 		msg := trimOutput(res.Stderr)
 		if msg == "" {
 			msg = trimOutput(res.Stdout)
 		}
-		return "", fmt.Errorf("openshell: %s: exit status %d: %s", name, res.ExitCode, msg)
+		return "", fmt.Errorf("session: %s: exit status %d: %s", name, res.ExitCode, msg)
 	}
 	return string(res.Stdout), nil
 }

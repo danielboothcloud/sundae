@@ -35,7 +35,7 @@ import (
 const NarrowWidth = 56
 
 // refreshEvery is how often the tab redraws, so the "4m" ages stay right,
-// and retries listing while the gateway is unreachable. Status changes do
+// and retries listing while a runtime is unreachable. Status changes do
 // not wait for it: they arrive through the signals feed.
 const refreshEvery = 30 * time.Second
 
@@ -1449,8 +1449,8 @@ type RepoBadge struct {
 }
 
 // RepoBadges returns the session badge of each repository the user has
-// sessions of, from what the Monitor last read. It never calls the
-// gateway.
+// sessions of, from what the Monitor last read. It never calls a
+// runtime.
 func (m *Sessions) RepoBadges() map[string]RepoBadge {
 	if m.src == nil {
 		return nil

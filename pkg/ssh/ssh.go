@@ -89,11 +89,11 @@ func NewSSHServer(ctx context.Context) (*SSHServer, error) {
 			// lifecycle events and subscribers.
 			EventsContextMiddleware(events.FromContext(ctx)),
 			// Monitor middleware: attaches the session monitor, when
-			// OpenShell is enabled, for session status, bridge
-			// tracking and suspending.
+			// sessions are on, for session status, bridge tracking
+			// and suspending.
 			MonitorContextMiddleware(openshell.MonitorFromContext(ctx)),
 			// Signals middleware: attaches the signals feed, when
-			// OpenShell is enabled, for `session signals`.
+			// sessions are on, for `session signals`.
 			SignalsContextMiddleware(signals.FromContext(ctx)),
 			// Context middleware.
 			// This must come first to set up the context.

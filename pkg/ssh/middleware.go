@@ -122,7 +122,7 @@ func EventsContextMiddleware(bus *events.Bus) func(ssh.Handler) ssh.Handler {
 
 // MonitorContextMiddleware attaches the session Monitor to the session
 // context, so session commands read status, count bridges and suspend through
-// it. mon is nil when OpenShell is disabled; nothing is attached then.
+// it. mon is nil when sessions are off; nothing is attached then.
 func MonitorContextMiddleware(mon *openshell.Monitor) func(ssh.Handler) ssh.Handler {
 	return func(sh ssh.Handler) ssh.Handler {
 		return func(s ssh.Session) {
@@ -135,7 +135,7 @@ func MonitorContextMiddleware(mon *openshell.Monitor) func(ssh.Handler) ssh.Hand
 }
 
 // SignalsContextMiddleware attaches the signals feed to the session
-// context, for `session signals`. h is nil when OpenShell is disabled;
+// context, for `session signals`. h is nil when sessions are off;
 // nothing is attached then.
 func SignalsContextMiddleware(h *signals.History) func(ssh.Handler) ssh.Handler {
 	return func(sh ssh.Handler) ssh.Handler {
@@ -162,7 +162,7 @@ func CommandMiddleware(sh ssh.Handler) ssh.Handler {
 		args := s.Command()
 
 		// PTY sessions go to the TUI, except `session`, which needs the
-		// terminal to bridge an interactive shell in an OpenShell sandbox.
+		// terminal to bridge an interactive shell in a session's sandbox.
 		_, _, ptyReq := s.Pty()
 		if ptyReq && cmd.CommandName(args) != "session" {
 			sh(s)

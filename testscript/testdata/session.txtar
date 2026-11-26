@@ -39,9 +39,9 @@ stdout 'save-private'
 
 # start and attach need a terminal (ssh -t); start --detach does not
 ! sundae session start repo1
-stderr 'requires a terminal \(ssh -t\)'
+stderr 'session start needs a terminal; run: ssh -t (-p \d+ )?\S+ session start repo1 \(or pass --detach\)'
 ! sundae session attach repo1
-stderr 'requires a terminal \(ssh -t\)'
+stderr 'session attach needs a terminal; run: ssh -t (-p \d+ )?\S+ session attach repo1'
 ! sundae session attach a b
 stderr 'accepts at most 1 arg'
 sundae session attach --help

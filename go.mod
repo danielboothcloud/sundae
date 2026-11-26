@@ -44,6 +44,7 @@ require (
 	github.com/rogpeppe/go-internal v1.16.0
 	github.com/sergi/go-diff v1.4.0
 	github.com/spf13/cobra v1.10.2
+	github.com/spf13/pflag v1.0.10
 	go.uber.org/automaxprocs v1.6.0
 	golang.org/x/crypto v0.56.0
 	golang.org/x/sync v0.22.0
@@ -127,7 +128,6 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sahilm/fuzzy v0.1.3 // indirect
-	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yuin/goldmark v1.8.5 // indirect

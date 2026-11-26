@@ -6,13 +6,14 @@ from `config` into a ConfigMap mounted read-only at `/etc/sundae/config.yaml`.
 Secrets are never in the ConfigMap: the chart mounts them from existing
 Secrets as files and points the config at them.
 
-Agent sessions are optional (`config.openshell.enabled`) and need an
-[NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) gateway and
-[Agent Sandbox](https://github.com/kubernetes-sigs/agent-sandbox). The chart
-can install both with the release (`openshell.install`,
+Agent sessions are optional. They run as plain Kubernetes Pods, with no
+gateway (`config.sessions.runtime: pod`; see "Pod runtime"), or in an
+[NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) gateway with
+[Agent Sandbox](https://github.com/kubernetes-sigs/agent-sandbox)
+(`config.openshell.enabled`, the default `openshell` runtime). For OpenShell
+the chart can install both with the release (`openshell.install`,
 `agentSandbox.install`; both off by default), or use a gateway installed
-separately. Sessions can instead run as plain Kubernetes Pods, with no
-gateway (`config.sessions.runtime: pod`; see "Pod runtime").
+separately.
 
 ## 1. Build and push the images
 
@@ -49,7 +50,7 @@ whose image has no osewa (`sessions.osewa.binary_dir`).
 
 ### Sandbox
 
-The image the OpenShell sandboxes run, built from
+The image session sandboxes run in every runtime, built from
 [`deploy/sandbox/Containerfile`](../../deploy/sandbox/Containerfile): Fedora 45
 with `git` (git-core), `jj` 0.47.1,
 [osewa](https://github.com/rjyo/osewa) 0.1.4 (which keeps each session's
@@ -81,12 +82,13 @@ are set), not as the image's `USER`. If you set those, rebuild with
 `--build-arg SANDBOX_UID=<uid> --build-arg SANDBOX_GID=<gid>` so the passwd
 entry matches.
 
-Set `config.openshell.image` to `$SANDBOX_IMAGE:$TAG` in step 3.
+Set `config.openshell.image` (the default image of every runtime) to
+`$SANDBOX_IMAGE:$TAG` in step 3.
 
 
-## 2. OpenShell and Agent Sandbox (only for agent sessions)
+## 2. OpenShell and Agent Sandbox (only for the openshell runtime)
 
-Skip this when agent sessions stay off.
+Skip this when agent sessions stay off or use the pod runtime.
 
 OpenShell's Kubernetes driver runs every sandbox as a `Sandbox` resource of
 [Agent Sandbox](https://github.com/kubernetes-sigs/agent-sandbox)
@@ -335,8 +337,8 @@ service:
 config:
   ssh:
     public_url: "ssh://<ssh-host>:23231"
-  # Only for agent sessions with a separately installed gateway (step 2;
-  # with openshell.install only `image` is needed):
+  # Only for the openshell runtime with a separately installed gateway
+  # (step 2; with openshell.install only `image` is needed):
   openshell:
     enabled: true
     gateway_address: "https://openshell.<namespace>.svc.cluster.local:8080"
@@ -350,7 +352,7 @@ config:
 | `service.ssh.type`, `service.ssh.annotations` | in practice | How SSH is reached from outside the cluster. |
 | `config.ssh.public_url` | in practice | The external SSH address, shown in clone URLs. |
 | `openshell.install`, `agentSandbox.install` | no | Install the OpenShell gateway and Agent Sandbox with the release (step 2). |
-| `config.openshell.gateway_address`, `config.openshell.image` | with sessions | The gateway and the sandbox image from steps 1 and 2. With `openshell.install`, only the image. |
+| `config.openshell.gateway_address`, `config.openshell.image` | with OpenShell sessions | The gateway and the sandbox image from steps 1 and 2. With `openshell.install`, only the image. The image is also the pod runtime's default. |
 | `openshell.server.workspaceStorageClass`, `.workspaceDefaultStorageSize` | with `openshell.install` | Each sandbox's `/sandbox` volume; empty uses the cluster default class and 2Gi. |
 | `openshell.credentialKey.generate`, `openshell.server.credentialStorage.existingSecret` | no | The gateway's credential encryption key, generated once in the cluster as `openshell-credential-key` (step 2). |
 | `config.sessions.runtime`, `config.pod.*`, `podRuntime.*` | no | The pod session runtime ("Pod runtime"). |

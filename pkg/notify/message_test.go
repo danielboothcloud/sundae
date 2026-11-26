@@ -124,10 +124,10 @@ func TestFailureMessages(t *testing.T) {
 	nc := config.NtfyConfig{ClickURL: "https://git.example.com/{repo}"}
 	m := lifecycleFailedMessage(events.SessionLifecycle{
 		Session: events.Session{User: "alice", Repo: "infra", Sandbox: "sundae-alice-infra"},
-		Step:    events.LifecycleFailed, Op: "start", Reason: "openshell: git: exit status 128:\nfatal: boom",
+		Step:    events.LifecycleFailed, Op: "start", Reason: "session: git: exit status 128:\nfatal: boom",
 	}, nc)
 	if m.Title != "✗ session failed · infra / sundae-alice-infra" ||
-		m.Body != "Could not start the session: openshell: git: exit status 128: fatal: boom" ||
+		m.Body != "Could not start the session: session: git: exit status 128: fatal: boom" ||
 		m.Priority != priorityDefault || m.Click != "https://git.example.com/infra" {
 		t.Fatalf("lifecycle = %+v", m)
 	}

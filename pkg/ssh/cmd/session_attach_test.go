@@ -97,7 +97,7 @@ func TestSessionAttachWithoutName(t *testing.T) {
 	_, _, err = runSessionCmd(t, noPty, "start", "r", "--detach")
 	is.NoErr(err)
 	_, _, err = runSessionCmd(t, noPty, "attach")
-	is.True(err != nil && strings.Contains(err.Error(), "session attach requires a terminal (ssh -t)"))
+	is.True(err != nil && strings.Contains(err.Error(), "session attach needs a terminal; run: ssh -t -p 23231 localhost session attach"))
 	screenCtx, calls := withScreen(withPty, true)
 	_, _, err = runSessionCmd(t, screenCtx, "attach")
 	is.NoErr(err)

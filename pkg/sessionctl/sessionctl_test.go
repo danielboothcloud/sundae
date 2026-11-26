@@ -36,6 +36,22 @@ func TestAttachCommand(t *testing.T) {
 	}
 }
 
+func TestTerminalCommand(t *testing.T) {
+	for _, tc := range []struct {
+		url  string
+		args []string
+		want string
+	}{
+		{"ssh://localhost:23231", []string{"session", "start", "r", "--profile", "claude"}, "ssh -t -p 23231 localhost session start r --profile claude"},
+		{"ssh://git.example.com", []string{"session", "new", "a b", "--repo", "it's"}, `ssh -t git.example.com session new 'a b' --repo 'it'\''s'`},
+		{"", []string{"session", "attach"}, "ssh -t <host> session attach"},
+	} {
+		if got := TerminalCommand(tc.url, tc.args...); got != tc.want {
+			t.Errorf("TerminalCommand(%q, %q) = %q, want %q", tc.url, tc.args, got, tc.want)
+		}
+	}
+}
+
 func TestResolveAndDefaultName(t *testing.T) {
 	infos := []openshell.Info{
 		{Name: "tool", Repos: []string{"github/me/tool"}},

@@ -157,18 +157,21 @@ lfs:
 jobs:
   mirror_pull: "{{ .Jobs.MirrorPull }}"
 
-# OpenShell agent sessions (ssh -t <server> session start <repo>).
-# Each (user, repository) gets its own OpenShell sandbox with the repository
-# cloned into /sandbox/<repo>.
+# The openshell session runtime (sessions.runtime: openshell): each session
+# (ssh -t <server> session start <repo>) is a sandbox on an OpenShell
+# gateway. image, clone_url, token_ttl and command apply to every runtime.
 openshell:
-  # Enable the "session" SSH command.
+  # Use the OpenShell gateway: it turns sessions on when sessions.runtime is
+  # openshell, lets profiles use the openshell runtime, and adds the
+  # "openshell" SSH command.
   enabled: {{ .OpenShell.Enabled }}
   # The OpenShell gateway gRPC address. Use http:// for plaintext; https://
   # or no scheme uses TLS.
   gateway_address: "{{ .OpenShell.GatewayAddress }}"
   # The OpenShell workspace sandboxes are created in.
   workspace: "{{ .OpenShell.Workspace }}"
-  # The default sandbox base image. It must provide git and jj.
+  # The default sandbox base image, in every runtime unless pod.image or
+  # docker.image sets one. It must provide git and jj.
   image: "{{ .OpenShell.Image }}"
   # The Kubernetes RuntimeClass of new sandboxes when the session's profile
   # sets none, e.g. "kata-containers" for Kata Containers. Empty (or
@@ -191,8 +194,8 @@ openshell:
   tls_key: "{{ .OpenShell.TLSKey }}"
   # Skip verification of the gateway's TLS certificate.
   insecure: {{ .OpenShell.Insecure }}
-  # The internal HTTP base URL sandboxes use to clone and push.
-  # Defaults to http.public_url when empty.
+  # The internal HTTP base URL sandboxes of every runtime use to clone and
+  # push. Defaults to http.public_url when empty.
   clone_url: "{{ .OpenShell.CloneURL }}"
   # Lifetime of the git access token written into a sandbox. It is renewed
   # on every "session start" and "session attach"; an agent left running
@@ -203,7 +206,7 @@ openshell:
   # the new workspace volume, which takes minutes for a large image. At
   # least 30s.
   ready_timeout: "{{ .OpenShell.ReadyTimeout }}"
-  # The program a session runs when no profile sets one, in
+  # The program a session of any runtime runs when no profile sets one, in
   # /sandbox/<repo>. It runs inside an osewa session, so it keeps running
   # after the SSH client disconnects.
   command: {{ printf "%q" .OpenShell.Command }}
@@ -447,9 +450,10 @@ sessions:
     # bottom row while attached; the program gets one row less. Terminals
     # under 5 rows get no bar.
     status_bar: {{ .Sessions.Attach.StatusBar }}
-  # Named presets for "session start --profile NAME". Empty image and
-  # command fall back to openshell.image and openshell.command. runtime
-  # overrides sessions.runtime for the profile's sessions. openshell holds
+  # Named presets for "session start --profile NAME". An empty image falls
+  # back to the runtime's (pod.image, docker.image), else openshell.image;
+  # an empty command to openshell.command. runtime overrides
+  # sessions.runtime for the profile's sessions. openshell holds
   # settings for profiles whose runtime is openshell: providers names
   # OpenShell providers (declared in openshell.providers, or created on the
   # gateway with "openshell provider create") to attach to the sandboxes of

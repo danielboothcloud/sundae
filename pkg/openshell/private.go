@@ -266,7 +266,7 @@ func (m *Manager) savePrivateRepo(ctx context.Context, sandbox string, sp RepoSp
 	case PrivateSaved, PrivateUnchanged, PrivateEmpty:
 		return res, nil
 	}
-	return res, fmt.Errorf("openshell: %s: unexpected output %q", privateSaveName, result)
+	return res, fmt.Errorf("session: %s: unexpected output %q", privateSaveName, result)
 }
 
 // privateSpecs resolves the session's repositories and returns them all
@@ -368,7 +368,7 @@ func (m *Manager) SavePrivate(ctx context.Context, user proto.User, name string,
 	case IsNotFound(err):
 		return nil, fmt.Errorf("%w: %q", ErrNoSession, name)
 	case err != nil:
-		return nil, fmt.Errorf("openshell: get sandbox %q: %w", sandbox, err)
+		return nil, fmt.Errorf("session: get sandbox %q: %w", sandbox, err)
 	case !owns(sb.Labels, ownerLabels(user)):
 		return nil, ErrNotOwned
 	case sb.Phase != sbx.Ready:
@@ -383,7 +383,7 @@ func (m *Manager) SavePrivateSandbox(ctx context.Context, user proto.User, sandb
 	sb, err := m.client.GetSandbox(ctx, sandbox)
 	switch {
 	case err != nil:
-		return nil, fmt.Errorf("openshell: get sandbox %q: %w", sandbox, err)
+		return nil, fmt.Errorf("session: get sandbox %q: %w", sandbox, err)
 	case !owns(sb.Labels, ownerLabels(user)):
 		return nil, ErrNotOwned
 	case sb.Phase != sbx.Ready:

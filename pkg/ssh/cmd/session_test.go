@@ -419,7 +419,10 @@ func TestSessionStartDetachAndAttach(t *testing.T) {
 	// Without a terminal, only --detach works.
 	noPty := context.WithValue(ctx, sshutils.ContextKeySession, &fakeSSHSession{noPty: true})
 	_, _, err = runSessionCmd(t, noPty, "start", "r")
-	is.True(err != nil && strings.Contains(err.Error(), "session start requires a terminal (ssh -t), or --detach"))
+	is.True(err != nil && strings.Contains(err.Error(), "session start needs a terminal; run: ssh -t -p 23231 localhost session start r (or pass --detach)"))
+	// The command to run again keeps the flags given.
+	_, _, err = runSessionCmd(t, noPty, "new", "bundle", "--repo", "r", "-p", "claude")
+	is.True(err != nil && strings.Contains(err.Error(), "run: ssh -t -p 23231 localhost session new bundle --profile claude --repo r (or pass --detach)"))
 
 	_, stderr, err := runSessionCmd(t, noPty, "start", "r", "--name", "review", "--profile", "claude", "--detach")
 	is.NoErr(err)
@@ -433,7 +436,7 @@ func TestSessionStartDetachAndAttach(t *testing.T) {
 
 	// attach needs a terminal, and an existing session.
 	_, _, err = runSessionCmd(t, noPty, "attach", "review")
-	is.True(err != nil && strings.Contains(err.Error(), "session attach requires a terminal (ssh -t)"))
+	is.True(err != nil && strings.Contains(err.Error(), "session attach needs a terminal; run: ssh -t -p 23231 localhost session attach review"))
 	withPty := context.WithValue(ctx, sshutils.ContextKeySession, &fakeSSHSession{})
 	_, _, err = runSessionCmd(t, withPty, "attach", "nope")
 	is.True(err != nil && strings.Contains(err.Error(), "no such session"))

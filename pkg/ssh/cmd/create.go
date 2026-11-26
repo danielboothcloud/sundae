@@ -13,7 +13,7 @@ import (
 
 // errStartNeedsSessions is returned for `repo create --start` on a server
 // without sessions.
-var errStartNeedsSessions = errors.New("--start needs agent sessions, which are off on this server (openshell.enabled)")
+var errStartNeedsSessions = errors.New("--start needs agent sessions, which are off on this server (set sessions.runtime to pod or docker, or openshell.enabled for the openshell runtime)")
 
 // createCommand is the command for creating a new repository.
 func createCommand() *cobra.Command {

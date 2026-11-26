@@ -325,7 +325,7 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 	specOf := map[string]RepoSpec{}
 	for _, sp := range specs {
 		if sp.Name == "" {
-			return nil, errors.New("openshell: a repository with no name")
+			return nil, errors.New("session: a repository with no name")
 		}
 		if _, ok := specOf[sp.Name]; !ok {
 			wanted = append(wanted, sp.Name)
@@ -376,7 +376,7 @@ func (m *Manager) prepare(ctx context.Context, opts StartOptions, create bool) (
 	}
 	if len(repos) == 0 {
 		if create {
-			return nil, errors.New("openshell: a session needs at least one repository")
+			return nil, errors.New("session: a session needs at least one repository")
 		}
 	}
 
@@ -792,12 +792,12 @@ func (m *Manager) Suspend(ctx context.Context, user proto.User, name string, pro
 	case IsNotFound(err):
 		return false, fmt.Errorf("%w: %q", ErrNoSession, name)
 	case err != nil:
-		return false, fmt.Errorf("openshell: get sandbox %q: %w", sandbox, err)
+		return false, fmt.Errorf("session: get sandbox %q: %w", sandbox, err)
 	case !owns(sb.Labels, ownerLabels(user)):
 		return false, ErrNotOwned
 	}
 	if _, ok := managedSandbox(sb); !ok {
-		return false, fmt.Errorf("openshell: sandbox %q was not created by Sundae; not suspending it", sandbox)
+		return false, fmt.Errorf("session: sandbox %q was not created by Sundae; not suspending it", sandbox)
 	}
 	switch sb.Phase {
 	case sbx.Ready:
@@ -871,7 +871,7 @@ func (m *Manager) profileCommand(profile string, progress io.Writer) ([]string, 
 	}
 	command, err := shlex.Split(line, true)
 	if err != nil || len(command) == 0 {
-		return nil, fmt.Errorf("openshell: invalid command %q", line)
+		return nil, fmt.Errorf("session: invalid command %q", line)
 	}
 	return command, nil
 }
@@ -887,7 +887,7 @@ func (m *Manager) Attach(ctx context.Context, s *Session, cols, rows uint32) (In
 		NoLoginShell: true,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("openshell: attach to sandbox %q: %w", s.Sandbox, err)
+		return nil, fmt.Errorf("session: attach to sandbox %q: %w", s.Sandbox, err)
 	}
 	return is, nil
 }
@@ -936,7 +936,7 @@ func (m *Manager) Delete(ctx context.Context, user proto.User, name string, opts
 	case IsNotFound(err):
 		existed = false
 	case err != nil:
-		return failed(fmt.Errorf("openshell: get sandbox %q: %w", sandbox, err))
+		return failed(fmt.Errorf("session: get sandbox %q: %w", sandbox, err))
 	case !owns(sb.Labels, ownerLabels(user)):
 		return failed(ErrNotOwned)
 	default:
@@ -1060,7 +1060,7 @@ func (m *Manager) issueToken(ctx context.Context, user proto.User, sandbox strin
 
 	token, err := m.tokens.CreateAccessToken(ctx, user, name, m.now().Add(m.tokenTTL))
 	if err != nil {
-		return "", fmt.Errorf("openshell: issue access token: %w", err)
+		return "", fmt.Errorf("session: issue access token: %w", err)
 	}
 	return token, nil
 }
@@ -1070,7 +1070,7 @@ func (m *Manager) issueToken(ctx context.Context, user proto.User, sandbox strin
 func (m *Manager) revokeTokens(ctx context.Context, user proto.User, name string, all bool) error {
 	tokens, err := m.tokens.ListAccessTokens(ctx, user)
 	if err != nil {
-		return fmt.Errorf("openshell: list access tokens: %w", err)
+		return fmt.Errorf("session: list access tokens: %w", err)
 	}
 
 	now := m.now()
@@ -1087,7 +1087,7 @@ func (m *Manager) revokeTokens(ctx context.Context, user proto.User, name string
 		}
 	}
 	if err := errors.Join(errs...); err != nil {
-		return fmt.Errorf("openshell: revoke access tokens: %w", err)
+		return fmt.Errorf("session: revoke access tokens: %w", err)
 	}
 	return nil
 }
@@ -1096,7 +1096,7 @@ func (m *Manager) revokeTokens(ctx context.Context, user proto.User, name string
 func (m *Manager) dirExists(ctx context.Context, sandbox, dir string) (bool, error) {
 	res, err := m.client.Run(ctx, sandbox, []string{"test", "-d", dir}, ExecOptions{NoLoginShell: true})
 	if err != nil {
-		return false, fmt.Errorf("openshell: check %s: %w", dir, err)
+		return false, fmt.Errorf("session: check %s: %w", dir, err)
 	}
 	switch res.ExitCode {
 	case 0:
@@ -1104,7 +1104,7 @@ func (m *Manager) dirExists(ctx context.Context, sandbox, dir string) (bool, err
 	case 1:
 		return false, nil
 	default:
-		return false, fmt.Errorf("openshell: check %s: exit status %d: %s", dir, res.ExitCode, trimOutput(res.Stderr))
+		return false, fmt.Errorf("session: check %s: exit status %d: %s", dir, res.ExitCode, trimOutput(res.Stderr))
 	}
 }
 
@@ -1134,10 +1134,10 @@ func (m *Manager) run(ctx context.Context, sandbox string, command []string) err
 		NoLoginShell: true,
 	})
 	if err != nil {
-		return fmt.Errorf("openshell: %s: %w", command[0], err)
+		return fmt.Errorf("session: %s: %w", command[0], err)
 	}
 	if res.ExitCode != 0 {
-		return fmt.Errorf("openshell: %s: exit status %d: %s", strings.Join(command[:min(len(command), 3)], " "), res.ExitCode, trimOutput(res.Stderr))
+		return fmt.Errorf("session: %s: exit status %d: %s", strings.Join(command[:min(len(command), 3)], " "), res.ExitCode, trimOutput(res.Stderr))
 	}
 	return nil
 }

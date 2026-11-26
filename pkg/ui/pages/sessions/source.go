@@ -19,19 +19,19 @@ import (
 )
 
 // listTimeout bounds one listing of the user's sessions, so an unreachable
-// gateway shows as such instead of a list that never loads.
+// runtime shows as such instead of a list that never loads.
 const listTimeout = 15 * time.Second
 
 // Source is where the Sessions tab gets its data and does its work. The
-// one NewSource returns drives OpenShell through sessionctl, as the
+// one NewSource returns drives the session runtimes through sessionctl, as the
 // `session` commands do; tests use fakes.
 type Source interface {
-	// List returns the user's sessions as the gateway lists them, with
-	// the status the Monitor last read. It fails when the gateway cannot
-	// be reached.
+	// List returns the user's sessions as their runtimes list them, with
+	// the status the Monitor last read. It fails when a runtime cannot be
+	// reached.
 	List(ctx context.Context) ([]sessionctl.Row, error)
 	// Statuses returns the Monitor's last read of the user's sessions, by
-	// sandbox name. It never calls the gateway.
+	// sandbox name. It never calls a runtime.
 	Statuses() map[string]openshell.SessionStatus
 	// Follow returns the user's kept signals, newest first, and a feed of
 	// those recorded after.
@@ -107,7 +107,7 @@ type Profile struct {
 	Runtime string
 }
 
-// NewClient creates the OpenShell client of an operation. Tests may
+// NewClient creates the session runtime client of an operation. Tests may
 // replace it.
 var NewClient = func(cfg *config.Config) (openshell.Client, error) {
 	return openshell.NewClient(cfg)
@@ -129,7 +129,7 @@ func SourceFor(ctx context.Context) Source {
 }
 
 // NewSource returns the Source of the SSH connection whose context is ctx,
-// or nil when it has no sessions: OpenShell is disabled, or the user is
+// or nil when it has no sessions: sessions are off, or the user is
 // anonymous.
 func NewSource(ctx context.Context) Source {
 	cfg := config.FromContext(ctx)
@@ -140,7 +140,7 @@ func NewSource(ctx context.Context) Source {
 	return &source{ctx: ctx, cfg: cfg, user: user}
 }
 
-// source is the Source backed by OpenShell, the Monitor and the signals
+// source is the Source backed by the session runtimes, the Monitor and the signals
 // History of the SSH connection's context.
 type source struct {
 	// ctx is the SSH connection's context: it carries the backend,
@@ -151,7 +151,7 @@ type source struct {
 	user proto.User
 }
 
-// withClient runs fn with a new OpenShell client and its Manager, closing
+// withClient runs fn with a new session runtime client and its Manager, closing
 // the client after.
 func (s *source) withClient(fn func(*openshell.Manager) error) error {
 	client, err := NewClient(s.cfg)

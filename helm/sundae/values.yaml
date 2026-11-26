@@ -163,7 +163,9 @@ config:
   jobs:
     mirror_pull: "@every 10m"
 
-  # OpenShell agent sessions (ssh -t <server> session start <repo>).
+  # The openshell session runtime (sessions.runtime: openshell): sessions
+  # (ssh -t <server> session start <repo>) as sandboxes on an OpenShell
+  # gateway. image, clone_url, token_ttl and command apply to every runtime.
   openshell:
     # Implied by openshell.install (the embedded gateway).
     enabled: false
@@ -175,8 +177,9 @@ config:
     # https://openshell.<namespace>.svc.cluster.local:8080
     gateway_address: ""
     workspace: "default"
-    # The default sandbox image. It must provide git and jj. Required when
-    # enabled. Build one from deploy/sandbox/Containerfile, e.g.
+    # The default sandbox image, in every runtime unless config.pod.image
+    # or config.docker.image sets one. It must provide git and jj. Required
+    # when enabled. Build one from deploy/sandbox/Containerfile, e.g.
     # <registry>/sundae-sandbox:<tag>.
     image: ""
     # The Kubernetes RuntimeClass of new sandboxes when the session's profile
@@ -197,8 +200,8 @@ config:
     tls_cert: ""
     tls_key: ""
     insecure: false
-    # The HTTP base URL sandboxes use to clone and push. When empty, the chart
-    # sets this release's in-cluster HTTP Service,
+    # The HTTP base URL sandboxes of every runtime use to clone and push.
+    # When empty, the chart sets this release's in-cluster HTTP Service,
     # http://<fullname>-http.<namespace>.svc.cluster.local:<service.http.port>.
     clone_url: ""
     # Lifetime of the git token in a sandbox. Renewed on every session start
@@ -209,8 +212,9 @@ config:
     # /sandbox into the new workspace volume, which takes minutes for a large
     # image. At least 30s.
     ready_timeout: "15m"
-    # The program a session runs when no profile sets one. It runs in an osewa
-    # session in the sandbox, so it outlives the SSH connection.
+    # The program a session of any runtime runs when no profile sets one.
+    # It runs in an osewa session in the sandbox, so it outlives the SSH
+    # connection.
     command: "bash -l"
     # OpenShell providers Sundae creates on the gateway and keeps up to date,
     # for profiles to attach (sessions.profiles.<name>.openshell.providers). Each one's
@@ -393,8 +397,9 @@ config:
       # Status line (session, key) on the terminal's bottom row while
       # attached; the program gets one row less.
       status_bar: true
-    # Named presets for `session start --profile <name>`. Empty image and
-    # command fall back to openshell.image and openshell.command; `runtime`
+    # Named presets for `session start --profile <name>`. Empty image falls
+    # back to the runtime's (config.pod.image, config.docker.image), then
+    # openshell.image; empty command to openshell.command. `runtime`
     # overrides sessions.runtime. `openshell` holds settings for profiles
     # whose runtime is openshell: `providers` names OpenShell providers
     # (declared in config.openshell.providers, or created on the gateway

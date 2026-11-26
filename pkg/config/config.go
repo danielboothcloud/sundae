@@ -146,10 +146,8 @@ type JobsConfig struct {
 	MirrorPull string `env:"MIRROR_PULL" yaml:"mirror_pull"`
 }
 
-// OpenShellConfig is the configuration for OpenShell agent sessions.
-//
-// When enabled, the SSH `session` command starts and resumes one OpenShell
-// sandbox per (user, repository, session name) through an OpenShell gateway.
+// OpenShellConfig configures the openshell session runtime, plus the image,
+// clone URL, token TTL and command that every runtime uses.
 type OpenShellConfig struct {
 	// Enabled toggles OpenShell sessions on/off.
 	Enabled bool `env:"ENABLED" yaml:"enabled"`
@@ -273,7 +271,8 @@ type Config struct {
 	// Jobs is the configuration for cron jobs
 	Jobs JobsConfig `envPrefix:"JOBS_" yaml:"jobs"`
 
-	// OpenShell is the configuration for OpenShell agent sessions.
+	// OpenShell configures the openshell session runtime and the settings
+	// every runtime shares.
 	OpenShell OpenShellConfig `envPrefix:"OPENSHELL_" yaml:"openshell"`
 
 	// Sessions configures agent sessions: osewa in the sandboxes, named

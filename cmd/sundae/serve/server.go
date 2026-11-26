@@ -50,10 +50,10 @@ type Server struct {
 	// Notifier publishes notifications; nil when notifications are off.
 	Notifier *notify.Notifier
 	// Monitor collects session status and suspends idle sessions; nil when
-	// OpenShell is disabled.
+	// sessions are off.
 	Monitor *openshell.Monitor
 	// Signals keeps the signals feed, recording from the bus from setup
-	// until Shutdown; nil when OpenShell is disabled.
+	// until Shutdown; nil when sessions are off.
 	Signals *signals.History
 	// Providers syncs the OpenShell providers declared in
 	// openshell.providers to the gateway from Start until Shutdown; nil

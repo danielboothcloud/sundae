@@ -1,9 +1,9 @@
-// Package openshell launches and resumes OpenShell agent sessions for Sundae
-// repositories.
+// Package openshell launches and resumes agent sessions for Sundae
+// repositories, in every session runtime (OpenShell, pod, docker).
 //
 // Sundae stores no session state: sandbox names are derived from the
-// user, repository and session name (see SessionSandboxName), the OpenShell
-// gateway is the source of truth for which sessions exist, and each sandbox
+// user, repository and session name (see SessionSandboxName), the runtimes
+// are the source of truth for which sessions exist, and each sandbox
 // carries its user, repository, session name and profile as annotations.
 // Inside the sandbox, an osewa session holds the session's program, so it
 // outlives the SSH connection that started it. The server's Monitor keeps
